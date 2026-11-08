@@ -52,6 +52,19 @@ test('imports hostile valid IDs and full provenance atomically, preserving only 
   expect(fs.readFileSync(host.file)).toEqual(bytes);
   expect(await restarted.service.execute({ ...request, expectedRevision: 1 }, restarted.actor)).toMatchObject({ kind: 'rejected', code: 'request_conflict' });
 });
+test('old source generation previews remain parseable but cannot be rebound to a new native row', async () => {
+  const host = await fixture(); await seed(host, ['historical-work']);
+  const capture = host.store.getSourceSnapshot({ id: 'source' });
+  const prepared = prepareLegacyWorkLedgerMigration({ hostId: 'host', projectId: 'project', expectedLedgerRevision: 0,
+    pendingLocalChanges: false, sources: [{ source: capture.source, generation: 'a'.repeat(64) }], occupiedWorkIds: [] });
+  expect(prepared.kind).toBe('prepared');
+  if (prepared.kind !== 'prepared') throw new Error('Old opaque source binding was rejected before comparison');
+  const request = { type: 'import_legacy' as const, requestId: 'old-preview', expectedRevision: 0, manifest: prepared.manifest };
+  const bytes = fs.readFileSync(host.file);
+  expect(await host.service.execute(request, host.actor)).toMatchObject({ kind: 'rejected', code: 'stale_source' });
+  expect(fs.readFileSync(host.file)).toEqual(bytes);
+  expect((await host.service.readSnapshot(host.actor)).works).toEqual([]);
+});
 test('stale source, target, host, identity collision and forged actor cannot partially commit', async () => {
   const host = await fixture(); const request = await seed(host, ['work:synthetic']);
   const forged = {} as typeof host.actor;

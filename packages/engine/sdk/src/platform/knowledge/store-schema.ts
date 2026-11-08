@@ -1,3 +1,5 @@
+import { createKnowledgeRowRevisions, knowledgeRowRevisionTriggers } from './store-row-revisions.js';
+import type { SqlDatabase } from '../state/sqlite-store.js';
 import { knowledgeRecordTableSql } from './store-schema-validation-data.js';
 import { knowledgeClockNumber, knowledgeNodeMetadataView, knowledgeSourceMetadataView, retainKnowledgeRepresentation } from './store-record-representation.js';
 import { createNativeCiContinuationTable } from './store-native-ci-continuation.js';
@@ -38,7 +40,7 @@ import type {
 } from './types.js';
 
 export const DEFAULT_KNOWLEDGE_DB_FILE = 'knowledge-wiki.sqlite';
-export const KNOWLEDGE_SCHEMA_VERSION = 10;
+export const KNOWLEDGE_SCHEMA_VERSION = 11;
 
 export function resolveKnowledgeDbPathFromControlPlaneDir(
   controlPlaneDir: string,
@@ -79,7 +81,7 @@ export function parseJsonValue<T>(value: unknown, fallback: T): T {
   }
 }
 
-export function createSchema(db: { run(sql: string): void }): void {
+export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlDatabase, 'exec'>>): void {
   createNativeConversationCaptureTable(db);
   createWorkLedgerTable(db);
   createNativeWorkExecutionTable(db);
@@ -103,7 +105,8 @@ export function createSchema(db: { run(sql: string): void }): void {
       weight REAL NOT NULL,
       metadata TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      gv_revision TEXT NOT NULL DEFAULT ''
     )
   `);
   db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_edges_unique ON knowledge_edges(from_kind, from_id, to_kind, to_id, relation)`);
@@ -268,6 +271,14 @@ export function createSchema(db: { run(sql: string): void }): void {
       updated_at INTEGER NOT NULL
     )
   `);
+  const exec = db.exec;
+  if (exec) createKnowledgeRowRevisions({ run: sql => db.run(sql), exec: (sql, params, config) => exec.call(db, sql, params, config) });
+  else {
+    // Schema documentation collects DDL without constructing a database.
+    db.run('PRAGMA recursive_triggers = OFF');
+    for (const [, sql] of knowledgeRowRevisionTriggers) db.run(sql);
+  }
+
 }
 
 export function getKnowledgeSchemaStatements(): readonly string[] {

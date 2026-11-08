@@ -6,6 +6,14 @@ output is a projection generated from structured records.
 
 Accessible via `@goodvibes-jev/engine/sdk/platform/knowledge` (daemon embedders). Consumer apps interact through operator methods documented below.
 
+Snapshot generations are opaque SQLite-issued row revisions. Preserve them exactly
+when submitting a conditional write or a selected planning action; do not derive
+them from content or assume a hexadecimal digest. Upgrading to schema 11 assigns
+existing rows their first native revision. Prepare stale, unsubmitted previews
+again after upgrading. Resume an import whose outcome is unknown with its original
+request ID and command so the durable receipt can resolve it without duplication.
+The store snapshots older schemas before migration and refuses schema downgrades.
+
 ## Data model
 
 | Record | Purpose |

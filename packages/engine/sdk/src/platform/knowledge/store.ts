@@ -1,3 +1,4 @@
+import { createKnowledgeRowRevisions, knowledgeRawRowForAdmission } from './store-row-revisions.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
@@ -15,7 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, readKnowledgeSourceSnapshot, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from './store-source-generation.js';
 import { applyKnowledgeImport, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
 import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } from './store-edge-writes.js';
-import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, knowledgeEdgeGeneration, knowledgeEdgeChangesFromRows, type KnowledgeEdgeChangeSnapshot, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
+import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, knowledgeEdgeChangesFromRows, type KnowledgeEdgeChangeSnapshot, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
 import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError, type KnowledgeNodeActivationOptions } from './activation/types.js';
 import { resolveKnowledgeNodeObservation, retainKnowledgeNodeObservation } from './store-node-observation.js';
@@ -75,7 +76,7 @@ import {
   recordKnowledgeNodeRevisions,
   resolveNodeActivation,
   upsertKnowledgeSemanticEnrichmentState,
-  writeKnowledgeNodeRow, knowledgeNodeRow,
+  writeKnowledgeNodeRow,
 } from './store-node-history.js';
 import {
   mergeKnowledgeNodeMetadata, prepareKnowledgeNodeReplacement,
@@ -509,10 +510,7 @@ export class KnowledgeStore {
   getEdgeSnapshot(id: string): KnowledgeRecordSnapshot<KnowledgeEdgeRecord> {
     let result: KnowledgeRecordSnapshot<KnowledgeEdgeRecord> = { record: null, raw: null, generation: null };
     this.assertRecordSnapshotFrame(() => {
-      const snapshot = knowledgeEdgeSnapshotFromRows(this.sqlite.readPersistedRow('knowledge_edges', 'id', id));
-      const incarnation = this.sqlite.readPersistedEdgeIncarnation(id)[0]?.values[0]?.[0];
-      if (typeof incarnation !== 'string') throw new KnowledgeRecordAdmissionHeldError('malformed');
-      result = { ...snapshot, generation: knowledgeEdgeGeneration(snapshot.generation, incarnation) };
+      result = knowledgeEdgeSnapshotFromRows(this.sqlite.readPersistedRow('knowledge_edges', 'id', id));
     });
     return result;
   }
@@ -521,14 +519,8 @@ export class KnowledgeStore {
     let snapshots: readonly KnowledgeRecordSnapshot<KnowledgeEdgeRecord>[] = [];
     this.assertRecordSnapshotFrame(() => {
       const result = this.sqlite.readPersistedEdgeRows()[0];
-      const incarnations = new Map<string, string>();
-      for (const [id, generation] of this.sqlite.readPersistedEdgeIncarnations()[0]?.values ?? []) {
-        if (typeof id !== 'string' || typeof generation !== 'string') throw new KnowledgeRecordAdmissionHeldError('malformed');
-        incarnations.set(id, generation);
-      }
       snapshots = result ? result.values.map(values => {
-        const snapshot = knowledgeEdgeSnapshotFromRows([{ columns: result.columns, values: [values] }]);
-        return { ...snapshot, generation: knowledgeEdgeGeneration(snapshot.generation, snapshot.record ? incarnations.get(snapshot.record.id) ?? '0' : '0') };
+        return knowledgeEdgeSnapshotFromRows([{ columns: result.columns, values: [values] }]);
       }) : [];
     });
     return snapshots;
@@ -543,18 +535,13 @@ export class KnowledgeStore {
     let snapshots: readonly KnowledgeEdgeGenerationSnapshot[] = [];
     this.assertRecordSnapshotFrame(() => {
       const result = this.sqlite.readPersistedEdgeRows()[0];
-      const incarnations = new Map<string, string>();
-      for (const [id, generation] of this.sqlite.readPersistedEdgeIncarnations()[0]?.values ?? []) {
-        if (typeof id !== 'string' || typeof generation !== 'string') throw new KnowledgeRecordAdmissionHeldError('malformed');
-        incarnations.set(id, generation);
-      }
       if (!result) return;
       const positions = ['id', 'from_kind', 'from_id', 'to_kind', 'to_id'].map(column => result.columns.indexOf(column));
       snapshots = result.values.map(values => {
         const [id, fromKind, fromId, toKind, toId] = positions.map(position => values[position]);
         if (typeof id !== 'string' || typeof fromKind !== 'string' || typeof fromId !== 'string'
           || typeof toKind !== 'string' || typeof toId !== 'string') throw new KnowledgeRecordAdmissionHeldError('malformed');
-        const generation = knowledgeEdgeGeneration(knowledgeRecordGenerationFromRows([{ columns: result.columns, values: [values] }]), incarnations.get(id) ?? '0');
+        const generation = knowledgeRecordGenerationFromRows([{ columns: result.columns, values: [values] }]);
         if (generation === null) throw new KnowledgeRecordAdmissionHeldError('malformed');
         return { id, fromKind, fromId, toKind, toId, generation };
       });
@@ -595,7 +582,7 @@ export class KnowledgeStore {
 
   /** Compare and write synchronously after init; a hold has no durable effects. */
   async upsertSourceIfCurrent(input: KnowledgeSourceUpsertInput, expectedGeneration: string | null): Promise<KnowledgeSourceWriteResult> {
-    if (expectedGeneration !== null && (typeof expectedGeneration !== 'string' || !/^[a-f0-9]{64}$/.test(expectedGeneration))) {
+    if (expectedGeneration !== null && (typeof expectedGeneration !== 'string' || !expectedGeneration || expectedGeneration.length > 256)) {
       throw new TypeError('Invalid source generation precondition');
     }
     let capturedInput: KnowledgeSourceUpsertInput;
@@ -652,7 +639,7 @@ export class KnowledgeStore {
         // Admission owns the original persisted values, never the numeric
         // compatibility view. Generic metadata and caller lastCrawledAt are not
         // rewritten. A legacy clock can migrate only after this full admission.
-        snapshotJudgmentInput(current.raw);
+        snapshotJudgmentInput(knowledgeRawRowForAdmission(current.raw));
         snapshotJudgmentInput(current.source?.metadata);
         snapshotJudgmentInput(current.source?.tags);
         if (current.raw) for (const key of ['created_at', 'updated_at'] as const) {
@@ -843,7 +830,7 @@ export class KnowledgeStore {
     const { existing, record, now, observationEvidence } = preparedNodeWrite(this, prepared, index, this.nodeActivationScope);
     if (record === existing) {
       retainKnowledgeNodeObservation(existing, record, observationEvidence); markPreparedNodeWritten(prepared, index);
-      const snapshot = knowledgeRecordSnapshotFromRows('node', knowledgeNodeRow(record));
+      const snapshot = knowledgeRecordSnapshotFromRows('node', this.sqlite.exec('SELECT * FROM knowledge_nodes WHERE id = ? LIMIT 1', [record.id]));
       nativePublicationApply(nativePublicationSet, nativeNodePublications, [record, Object.freeze({ store: this, previous: existing ? new WeakRef(existing) : undefined, snapshot })]);
       return record;
     }
@@ -1358,7 +1345,8 @@ export class KnowledgeStore {
           validateNativeWorkExecutionIntentTable(db); validateNativeConversationCaptureTable(db);
           validateNativeWorkSettlementTable(db); validateNativeCiContinuationTable(db);
         } },
-        { toVersion: 10, migrate: db => { createKnowledgeEdgeChanges(db); validateKnowledgeEdgeChanges(db); } },
+        { toVersion: 10, migrate: db => { createKnowledgeEdgeChanges(db); } },
+        { toVersion: 11, migrate: db => { createKnowledgeRowRevisions(db); validateKnowledgeEdgeChanges(db); } },
       ],
     });
     try {

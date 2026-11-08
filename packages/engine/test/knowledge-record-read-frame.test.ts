@@ -1396,6 +1396,10 @@ test.each(['view', 'generated-column', 'custom-validator', 'native-method'] as c
       expect(() => store.captureExpectedRecordReadset(selectors)).toThrow('unsupported local observation shape');
       return;
     }
+    if (mode === 'view') {
+      expect(() => store.captureExpectedRecordReadset(selectors)).toThrow('Knowledge native row revision is unavailable or invalid');
+      return;
+    }
     const captured = store.captureExpectedRecordReadset(selectors), rows = observeExpectedRawRows(sqlite);
     const SQL = await loadSqlJsEngine(), execute = SQL.Database.prototype.exec;
     const changed = mode === 'native-method' ? spyOn(SQL.Database.prototype, 'exec').mockImplementation(function (this: InstanceType<typeof SQL.Database>, sql, params, config) {
@@ -1556,23 +1560,13 @@ test('compiled expected readsets retire a canonical private image restored to ob
 });
 
 
-test('compiled expected readsets never borrow a substituted schema-layout row memo', async () => {
-  const { store, source, sqlite } = await fixture();
-  const sql = "SELECT type,name,sql FROM main.sqlite_schema WHERE name IN ('knowledge_sources','knowledge_nodes','knowledge_extractions')";
-  const canonical = sqlite.readPersisted(db => db.exec(sql));
+test('a substituted schema-layout memo cannot admit a dynamic view as a native revised table', async () => {
+  const { store, sqlite } = await fixture();
   sqlite.run('ALTER TABLE knowledge_sources RENAME TO source_rows');
   sqlite.run('CREATE VIEW knowledge_sources AS SELECT *,hex(randomblob(16)) AS dynamic FROM source_rows');
   await sqlite.save();
-  const selectors = [{ kind: 'source' as const, id: source.id }];
-  let compiled: ReturnType<KnowledgeStore['captureExpectedRecordReadset']> | undefined;
-  store.assertRecordSnapshotFrame(() => {
-    store.getRecordGenerations(selectors);
-    expectedFrameCache(sqlite, 'rows').set(JSON.stringify([sql, []]), canonical);
-    compiled = store.captureExpectedRecordReadset(selectors);
-  });
-  if (!compiled) throw new Error('No compiled dynamic view');
-  // The same bytes cannot prove equality for a runtime-computed view column.
-  expect(store.matchesExpectedRecordReadsets([{ expected: compiled.expected, selectors }])).toEqual([false]);
+  expect(() => store.captureExpectedRecordReadset([{ kind: 'source', id: 'source' }]))
+    .toThrow('Knowledge native row revision is unavailable or invalid');
 });
 
 

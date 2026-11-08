@@ -1,3 +1,4 @@
+import { validateKnowledgeRowRevisions } from './store-row-revisions.js';
 import type { SqlDatabase } from '../state/sqlite-store.js';
 import { validateWorkLedgerTable } from './store-work-ledger.js';
 import { validateNativeWorkExecutionTable, validateNativeWorkExecutionIntentTable, validateNativeWorkSettlementTable } from './store-native-work-execution.js';
@@ -14,4 +15,5 @@ export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): v
   validateNativeWorkSettlementTable(db);
   validateNativeCiContinuationTable(db);
   validateKnowledgeEdgeChanges(db);
+  validateKnowledgeRowRevisions(db);
 }

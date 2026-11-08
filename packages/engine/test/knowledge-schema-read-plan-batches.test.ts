@@ -27,16 +27,16 @@ function observe(db: SqlDatabase) {
   return { reader, queries };
 }
 
-test('native packets preserve the full validator and all original statements with six exec entries', async () => {
+test('native packets preserve the full validator and all original statements with bounded native row revision checks', async () => {
   const db = await database();
   const before = Buffer.from(db.export());
   expect(() => validateCurrentKnowledgeSchema(db)).not.toThrow();
   const { reader, queries } = observe(db);
   expect(validateNativeKnowledgeReadSchema(reader)).toBe(true);
-  expect(queries).toHaveLength(6);
+  expect(queries).toHaveLength(7);
   const statements = queries.flatMap(query => query.split(';'));
-  expect(statements).toHaveLength(18);
-  expect(statements.filter(query => query.startsWith('PRAGMA table_info('))).toHaveLength(7);
+  expect(statements).toHaveLength(25);
+  expect(statements.filter(query => query.startsWith('PRAGMA table_info('))).toHaveLength(11);
   expect(statements.filter(query => query.startsWith('PRAGMA index_list('))).toHaveLength(2);
   expect(statements.filter(query => query.startsWith('PRAGMA index_info('))).toHaveLength(2);
   expect(statements.filter(query => query.startsWith('SELECT 1 FROM '))).toEqual([

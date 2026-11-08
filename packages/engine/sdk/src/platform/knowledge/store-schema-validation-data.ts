@@ -63,7 +63,11 @@ const edgeChangeTriggers = [
   ['knowledge_edge_change_delete', `CREATE TRIGGER IF NOT EXISTS knowledge_edge_change_delete AFTER DELETE ON knowledge_edges BEGIN
     INSERT INTO knowledge_edge_changes(edge_id,from_kind,from_id,to_kind,to_id) VALUES(OLD.id,OLD.from_kind,OLD.from_id,OLD.to_kind,OLD.to_id);
   END`],
-  ['knowledge_edge_change_update', `CREATE TRIGGER IF NOT EXISTS knowledge_edge_change_update AFTER UPDATE ON knowledge_edges BEGIN
+  ['knowledge_edge_change_update', `CREATE TRIGGER IF NOT EXISTS knowledge_edge_change_update AFTER UPDATE ON knowledge_edges
+    WHEN OLD.id IS NOT NEW.id OR OLD.from_kind IS NOT NEW.from_kind OR OLD.from_id IS NOT NEW.from_id
+      OR OLD.to_kind IS NOT NEW.to_kind OR OLD.to_id IS NOT NEW.to_id OR OLD.relation IS NOT NEW.relation
+      OR OLD.weight IS NOT NEW.weight OR OLD.metadata IS NOT NEW.metadata
+      OR OLD.created_at IS NOT NEW.created_at OR OLD.updated_at IS NOT NEW.updated_at BEGIN
     INSERT INTO knowledge_edge_changes(edge_id,from_kind,from_id,to_kind,to_id) VALUES(OLD.id,OLD.from_kind,OLD.from_id,OLD.to_kind,OLD.to_id);
     INSERT INTO knowledge_edge_changes(edge_id,from_kind,from_id,to_kind,to_id) VALUES(NEW.id,NEW.from_kind,NEW.from_id,NEW.to_kind,NEW.to_id);
   END`],
@@ -93,7 +97,8 @@ export const knowledgeRecordTableSql = Object.freeze({
       session_id TEXT,
       metadata TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      gv_revision TEXT NOT NULL DEFAULT ''
     )
   `,
   knowledge_nodes: `
@@ -109,7 +114,8 @@ export const knowledgeRecordTableSql = Object.freeze({
       source_id TEXT,
       metadata TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      gv_revision TEXT NOT NULL DEFAULT ''
     )
   `,
   knowledge_extractions: `
@@ -128,7 +134,8 @@ export const knowledgeRecordTableSql = Object.freeze({
       structure TEXT NOT NULL DEFAULT '{}',
       metadata TEXT NOT NULL DEFAULT '{}',
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      gv_revision TEXT NOT NULL DEFAULT ''
     )
   `,
 });

@@ -142,7 +142,7 @@ export function prepareLegacyWorkLedgerMigration(input: LegacyMigrationInput, si
     for (const item of captured) {
       const entry = object(item, 'source capture'); const source = object(entry.source, 'source');
       const sourceId = id(source.id, 'source.id');
-      if (typeof entry.generation !== 'string' || !/^[a-f0-9]{64}$/.test(entry.generation)) fail('invalid-source', 'Missing complete-source generation.');
+      if (typeof entry.generation !== 'string' || !entry.generation || entry.generation.length > 256) fail('invalid-source', 'Missing complete-source generation.');
       const digest = hash(source); const previous = sources.get(sourceId);
       if (previous && (previous.digest !== digest || previous.generation !== entry.generation)) fail('identity-conflict', `Conflicting images of source ${sourceId}.`);
       sources.set(sourceId, { source, generation: entry.generation, digest });

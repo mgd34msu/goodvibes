@@ -15,7 +15,7 @@ export function parsePlanningActionTarget(args: readonly string[]): PlanningActi
     return { valid: true, expected: Object.freeze({ kind: 'current' }), selected: false, args: [...args] };
   }
   const [, planningId, sourceId, generation] = args;
-  if (!planningId || !sourceId || !generation || !/^[a-f0-9]{64}$/.test(generation)) return { valid: false };
+  if (!planningId || !sourceId || !generation || !/^(?:[a-f0-9]{64}|kr-[a-f0-9]{32})$/.test(generation)) return { valid: false };
   const revision = Object.freeze({ sourceId, generation });
   return { valid: true, expected: Object.freeze({ kind: 'revision', revision }), planningId, selected: true, args: args.slice(4) };
 }

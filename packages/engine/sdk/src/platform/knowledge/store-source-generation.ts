@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { knowledgeRowGenerationFromRows } from './store-row-revisions.js';
 import type { SQLiteStore } from '../state/sqlite-store.js';
 import { mapSourceRow } from './store-schema.js';
 import type { KnowledgeSourceRecord } from './types.js';
@@ -31,21 +31,16 @@ export function knowledgeSourceSnapshotFromRows(result: ReturnType<SQLiteStore['
   const row = result[0];
   const values = row?.values[0];
   if (!row || !values) return { source: null, generation: null, raw: null };
-  // Column names and every raw stored value participate, including raw JSON.
-  // This is an entity fingerprint, not a wall-clock timestamp or an authority.
+  // Complete raw values remain private admission evidence; SQLite owns the revision.
   const entries = row.columns.map((column, index) => [column, values[index]] as const)
     .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
   const generation = knowledgeSourceGenerationFromRows(result);
   return { source: mapSourceRow(row.columns, values), generation, raw: Object.fromEntries(entries) };
 }
 
-/** The same complete row fingerprint without constructing a decoded view. */
+/** SQLite issues the generation at the actual row write. */
 export function knowledgeSourceGenerationFromRows(result: ReturnType<SQLiteStore['exec']>): string | null {
-  const row = result[0], values = row?.values[0];
-  if (!row || !values) return null;
-  const entries = row.columns.map((column, index) => [column, values[index]] as const)
-    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0);
-  return createHash('sha256').update(JSON.stringify(entries)).digest('hex');
+  return knowledgeRowGenerationFromRows(result);
 }
 
 /** A conditional semantic publication held before any durable mutation. */

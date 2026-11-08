@@ -1,7 +1,7 @@
 import { createSqlJsDatabase } from './sqljs-database.js';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { createHash } from 'node:crypto';
+import { knowledgeRowGenerationFromRows } from '../knowledge/store-row-revisions.js';
 import { types as nativeNodeTypes } from 'node:util';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -864,7 +864,7 @@ function readActualRecordValues(db: SqlDatabase, selectors: readonly PersistedKn
  */
 function readActualRecordReadset(db: SqlDatabase, selectors: readonly PersistedKnowledgeRecordSelector[]) {
   const records = readActualRecordValues(db, selectors);
-  const generations = Object.freeze(records.map(entries => entries === null ? null : createHash('sha256').update(JSON.stringify(entries)).digest('hex')));
+  const generations = Object.freeze(records.map(entries => entries === null ? null : knowledgeRowGenerationFromRows([{ columns: entries.map(([column]) => column), values: [entries.map(([, value]) => value)] }])));
   return Object.freeze({ records, generations });
 }
 
@@ -1296,10 +1296,7 @@ export class SQLiteStore {
         frame.assertCurrent();
         return frame.generations.get(key)!;
       }
-      const row = this.readPersistedRow(table, column, value)[0], values = row?.values[0];
-      const entries = row && values ? row.columns.map((column, index) => [column, values[index]] as const)
-        .sort(([left], [right]) => table === 'knowledge_sources' ? left < right ? -1 : left > right ? 1 : 0 : left.localeCompare(right)) : null;
-      const generation = entries ? createHash('sha256').update(JSON.stringify(entries)).digest('hex') : null;
+      const generation = knowledgeRowGenerationFromRows(this.readPersistedRow(table, column, value));
       frame?.assertCurrent();
       if (frame?.localState) frame.generations.set(key, generation);
       return generation;
@@ -1322,15 +1319,13 @@ export class SQLiteStore {
             values.push(frame.generations.get(key)!);
             continue;
           }
-          const row = this.readPrivatePersistedRows(`SELECT * FROM ${table} WHERE id = ? LIMIT 1`, [selector.id], frame?.localState !== undefined)[0];
-          const cells = row?.values[0];
+          const rows = this.readPrivatePersistedRows(`SELECT * FROM ${table} WHERE id = ? LIMIT 1`, [selector.id], frame?.localState !== undefined);
+          const row = rows[0];
           if (row && (!row.columns.every(column => typeof column === 'string')
             || row.values.some(cells => cells.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')))) {
             throw new SQLiteObservationRetiredError();
           }
-          const entries = row && cells ? row.columns.map((column, index) => [column, cells[index]] as const)
-            .sort(([left], [right]) => selector.kind === 'source' ? left < right ? -1 : left > right ? 1 : 0 : left.localeCompare(right)) : null;
-          const generation = entries ? createHash('sha256').update(JSON.stringify(entries)).digest('hex') : null;
+          const generation = knowledgeRowGenerationFromRows(rows);
           if (frame?.localState) frame.generations.set(key, generation);
           values.push(generation);
         }
@@ -1493,14 +1488,6 @@ export class SQLiteStore {
 
   readPersistedEdgeChanges(): ReturnType<SqlDatabase['exec']> {
     return this.readPrivatePersistedRows('SELECT CAST(sequence AS TEXT),from_kind,from_id,to_kind,to_id FROM knowledge_edge_changes', []);
-  }
-
-  readPersistedEdgeIncarnations(): ReturnType<SqlDatabase['exec']> {
-    return this.readPrivatePersistedRows('SELECT edge_id,CAST(MAX(sequence) AS TEXT) FROM knowledge_edge_changes GROUP BY edge_id', []);
-  }
-
-  readPersistedEdgeIncarnation(id: string): ReturnType<SqlDatabase['exec']> {
-    return this.readPrivatePersistedRows('SELECT CAST(COALESCE(MAX(sequence),0) AS TEXT) FROM knowledge_edge_changes WHERE edge_id = ?', [id]);
   }
 
   readPersistedEdgeWindowGeneration(keys: readonly string[], incidentKeys?: readonly string[], includeUnselectedEndpoints = false): ReturnType<SqlDatabase['exec']> {

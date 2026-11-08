@@ -17,7 +17,7 @@ import type {
   KnowledgeSemanticEnrichmentStateRecord,
 } from './types.js';
 
-/** Exact codec shared by the native write and its private publication receipt. */
+/** Producer values for a native write; SQLite adds its own row revision. */
 export function knowledgeNodeRow(record: KnowledgeNodeRecord): [{ columns: string[]; values: [(string | number | null)[]] }] {
   const raw = knowledgeRawRepresentation(record);
   return [{ columns: ['id', 'kind', 'slug', 'title', 'summary', 'aliases', 'status', 'confidence', 'source_id', 'metadata', 'created_at', 'updated_at'],
@@ -25,14 +25,14 @@ export function knowledgeNodeRow(record: KnowledgeNodeRecord): [{ columns: strin
       record.status, record.confidence, record.sourceId ?? null, JSON.stringify(raw.metadata), raw.createdAt, raw.updatedAt]] }];
 }
 
-export function writeKnowledgeNodeRow(sqlite: Pick<SQLiteStore, 'run'>, record: KnowledgeNodeRecord): ReturnType<typeof knowledgeNodeRow> {
+export function writeKnowledgeNodeRow(sqlite: Pick<SQLiteStore, 'run' | 'exec'>, record: KnowledgeNodeRecord): ReturnType<SQLiteStore['exec']> {
   const rows = knowledgeNodeRow(record);
   sqlite.run(`
     INSERT OR REPLACE INTO knowledge_nodes (
       id, kind, slug, title, summary, aliases, status, confidence, source_id, metadata, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, rows[0].values[0]);
-  return rows;
+  return sqlite.exec('SELECT * FROM knowledge_nodes WHERE id = ? LIMIT 1', [record.id]);
 }
 
 /** Descriptive 0-100 producer score. Missing/nonfinite values never become evidence. */

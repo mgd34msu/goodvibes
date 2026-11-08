@@ -1,7 +1,7 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { projectGeneratedFactRecordAdmission } from './generated-fact-record-references.js';
 import { captureKnowledgeSourceReferences, projectKnowledgeSourceReferences, projectKnowledgeNodeActivationMetadata, projectGeneratedKnowledgeNodeIdentity } from './source-structural-references.js';
-import { createHash } from 'node:crypto';
+import { knowledgeRowGenerationFromRows, knowledgeRawRowForAdmission } from './store-row-revisions.js';
 import { assertJudgmentInput, captureOwnedJson } from '../gate/judgment-input.js';
 import type { PersistedKnowledgeRecordSelector, SQLiteStore } from '../state/sqlite-store.js';
 import { mapEdgeRow, mapExtractionRow, mapNodeRow } from './store-schema.js';
@@ -28,12 +28,9 @@ export function knowledgeRecordSnapshotFromRows(kind: 'node' | 'extraction', row
 export function knowledgeEdgeSnapshotFromRows(rows: ReturnType<SQLiteStore['exec']>): KnowledgeRecordSnapshot<KnowledgeEdgeRecord> {
   return recordSnapshotFromRows(rows, mapEdgeRow);
 }
-/** Complete persisted fields, without rehydrating a view during guard checks. */
+/** Native write revision, without serializing record contents. */
 export function knowledgeRecordGenerationFromRows(rows: ReturnType<SQLiteStore['exec']>): string | null {
-  const result = rows[0], values = result?.values[0];
-  if (!result || !values) return null;
-  const entries = result.columns.map((column, index) => [column, values[index]] as const).sort(([a], [b]) => a.localeCompare(b));
-  return createHash('sha256').update(JSON.stringify(entries)).digest('hex');
+  return knowledgeRowGenerationFromRows(rows);
 }
 function recordSnapshotFromRows<T>(rows: ReturnType<SQLiteStore['exec']>, mapRow: (columns: string[], values: unknown[]) => T): KnowledgeRecordSnapshot<T> {
   const result = rows[0];
@@ -75,7 +72,7 @@ export function prepareKnowledgeRecordAdmission(store: KnowledgeStore, kind: Rec
   }
   const originalRaw = captureOwnedJson(snapshot.raw) as Record<string, unknown>;
   const generated = kind === 'node' ? projectGeneratedFactRecordAdmission(store, record as KnowledgeNodeRecord, originalRaw) : undefined;
-  const raw = generated?.raw ?? { ...originalRaw };
+  const raw = knowledgeRawRowForAdmission(generated?.raw ?? originalRaw)!;
   const nodeIdentity = kind === 'node' ? projectGeneratedKnowledgeNodeIdentity(store, record as KnowledgeNodeRecord) : undefined;
   if (nodeIdentity) raw.id = nodeIdentity.id;
   // A node's foreign key may contain card-shaped digits in a generated digest.

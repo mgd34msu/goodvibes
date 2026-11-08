@@ -7,7 +7,7 @@ import { supportHash } from './semantic/verification/projection.js';
 import { findKnowledgeEdge, prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow } from './store-edge-writes.js';
 import { prepareKnowledgeExtractionRecord, prepareKnowledgeSourceRecord, writeKnowledgeExtractionRow, writeKnowledgeSourceRow } from './store-evidence-writes.js';
 import { assertPreparedNodeWrites, markPreparedNodeWritten, preparedNodeWrites, prepareNodeActivationPass, type NodeMutationDraft } from './store-node-activation.js';
-import { recordKnowledgeNodeRevisions, writeKnowledgeNodeRow, knowledgeNodeRow } from './store-node-history.js';
+import { recordKnowledgeNodeRevisions, writeKnowledgeNodeRow } from './store-node-history.js';
 import { prepareKnowledgeIssueRecord, writeKnowledgeIssueRow } from './store-node-issue-writes.js';
 import { retainKnowledgeNodeObservation } from './store-node-observation.js';
 import type { KnowledgeStore } from './store.js';
@@ -133,7 +133,7 @@ export async function applyKnowledgeImport(store: KnowledgeStore, view: Knowledg
     for (const record of sourceWrites) writeKnowledgeSourceRow(sqlite, record);
     for (const record of extractionWrites) writeKnowledgeExtractionRow(sqlite, record);
     for (const { record, existing, now } of nodes) {
-      if (record === existing) { nativePublicationApply(nativePublicationMapSet, nodePublicationSnapshots, [record, knowledgeRecordSnapshotFromRows('node', knowledgeNodeRow(record))]); continue; }
+      if (record === existing) { nativePublicationApply(nativePublicationMapSet, nodePublicationSnapshots, [record, knowledgeRecordSnapshotFromRows('node', sqlite.exec('SELECT * FROM knowledge_nodes WHERE id = ? LIMIT 1', [record.id]))]); continue; }
       nativePublicationApply(nativePublicationMapSet, nodePublicationSnapshots, [record, knowledgeRecordSnapshotFromRows('node', writeKnowledgeNodeRow(sqlite, record))]);
       recordKnowledgeNodeRevisions(sqlite, revisions, record, existing, now);
     }

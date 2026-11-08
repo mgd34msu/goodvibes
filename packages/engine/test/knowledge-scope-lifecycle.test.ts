@@ -385,7 +385,7 @@ describe('canonical knowledge scope lifecycle', () => {
     const original = store.getEdgeSnapshot(edge.id);
     const writer = new SQLiteStore(dbPath, { coordinated: true });
     try {
-      await writer.init(createSchema, { schemaVersion: 10, validateCurrentSchema: validateKnowledgeEdgeChanges });
+      await writer.init(createSchema, { schemaVersion: 11, validateCurrentSchema: validateKnowledgeEdgeChanges });
       if (mode === 'replace and restore') {
         writer.run("UPDATE knowledge_edges SET relation='contradicts' WHERE id=?", [edge.id]); await writer.save();
         writer.run('UPDATE knowledge_edges SET relation=? WHERE id=?', [edge.relation, edge.id]); await writer.save();
@@ -440,7 +440,7 @@ describe('canonical knowledge scope lifecycle', () => {
     await store.close();
     const legacy = new SQLiteStore(dbPath, { coordinated: true });
     try {
-      await legacy.init(createSchema, { schemaVersion: 10, validateCurrentSchema: validateKnowledgeEdgeChanges });
+      await legacy.init(createSchema, { schemaVersion: 11, validateCurrentSchema: validateKnowledgeEdgeChanges });
       legacy.run('DROP TRIGGER knowledge_edge_change_insert'); legacy.run('DROP TRIGGER knowledge_edge_change_delete');
       legacy.run('DROP TRIGGER knowledge_edge_change_update'); legacy.run('DROP TABLE knowledge_edge_changes');
       legacy.run('PRAGMA user_version=9'); await legacy.save();

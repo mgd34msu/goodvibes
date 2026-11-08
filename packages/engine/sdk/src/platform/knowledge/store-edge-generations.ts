@@ -1,6 +1,5 @@
 import { knowledgeSchemaColumns, knowledgeEdgeChangeTriggers as triggers } from './store-schema-validation-data.js';
 import type { SqlDatabase } from '../state/sqlite-store.js';
-import { createHash } from 'node:crypto';
 
 /** Content fingerprints cannot distinguish a persisted replacement and restore.
  * Keep actual endpoint changes so fixed read windows also retain absence. */
@@ -50,11 +49,6 @@ export interface KnowledgeEdgeGenerationSnapshot {
   readonly toKind: string;
   readonly toId: string;
   readonly generation: string;
-}
-
-export function knowledgeEdgeGeneration(rowGeneration: string | null, incarnation: string): string | null {
-  if (!/^(0|[1-9][0-9]*)$/.test(incarnation)) throw new Error('Invalid knowledge edge incarnation');
-  return rowGeneration === null ? null : createHash('sha256').update(JSON.stringify([rowGeneration, incarnation])).digest('hex');
 }
 
 export function knowledgeEdgeChangesFromRows(rows: ReturnType<SqlDatabase['exec']>): readonly KnowledgeEdgeChangeSnapshot[] {

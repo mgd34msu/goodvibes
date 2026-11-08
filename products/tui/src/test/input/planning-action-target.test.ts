@@ -22,3 +22,10 @@ test('explicit manual arguments choose current mode and retain the index/text to
   expect(parsePlanningActionTarget(['1', 'A manual answer'])).toEqual({ valid: true, selected: false, expected: { kind: 'current' }, args: ['1', 'A manual answer'] });
   expect(parsePlanningActionTarget([])).toEqual({ valid: true, selected: false, expected: { kind: 'current' }, args: [] });
 });
+
+// Both existing persisted selections and SQLite-owned revisions keep their exact binding.
+test.each(['a'.repeat(64), 'kr-' + 'b'.repeat(32)])('selected planning transport preserves revision %s', generation => {
+  const revision = { sourceId: 'source', generation };
+  expect(parsePlanningActionTarget(selectedPlanningTarget('plan', revision))).toMatchObject({ valid: true,
+    selected: true, expected: { kind: 'revision', revision } });
+});

@@ -1,3 +1,4 @@
+import { knowledgeRawRowForAdmission } from '../store-row-revisions.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 export class WorkPlanTaskExistsError extends Error {
   constructor(taskId: string) { super(`Work plan task already exists: ${taskId}`); this.name = 'WorkPlanTaskExistsError'; }
@@ -303,7 +304,7 @@ export class ProjectPlanningService {
     if (captured.expected?.kind !== 'current' && captured.expected?.kind !== 'revision') throw new TypeError('Invalid planning state expectation');
     if (captured.expected.kind === 'revision') {
       const revision = captured.expected.revision;
-      if (!revision || typeof revision.sourceId !== 'string' || !revision.sourceId || typeof revision.generation !== 'string' || !/^[a-f0-9]{64}$/.test(revision.generation)) {
+      if (!revision || typeof revision.sourceId !== 'string' || !revision.sourceId || typeof revision.generation !== 'string' || !revision.generation || revision.generation.length > 256) {
         throw new TypeError('Invalid planning revision');
       }
       Object.freeze(revision);
@@ -1314,7 +1315,7 @@ function titleForArtifact(
 function admitPlanningSource(snapshot: KnowledgeSourceSnapshot): void {
   if (!snapshot.source) return;
   if (!snapshot.raw) throw new JudgmentInputError('unsupported-input');
-  snapshotJudgmentInput(snapshot.raw);
+  snapshotJudgmentInput(knowledgeRawRowForAdmission(snapshot.raw));
   snapshotJudgmentInput(snapshot.source.metadata);
   snapshotJudgmentInput(snapshot.source.tags);
   for (const key of ['created_at', 'updated_at'] as const) {

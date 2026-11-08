@@ -1,27 +1,16 @@
-/**
- * browser-checkout-seam-holder.ts, holding a seam that arrives after its
- * first reader is constructed.
+/** The checkout seam selected by the native browser composition.
  *
- * ── Why a holder, and not a constructor argument ──────────────────────────
+ * service-graph.ts creates this holder before attachWsOnlyGatewayVerbHandlers,
+ * which installs the seam synchronously. Native handler options then borrow
+ * get() after that graph is assembled; browser engine/driver initialization
+ * remains lazy. Native boot does not need to wait for a later seam callback.
  *
- * The SDK hands out a `BrowserCheckoutSeam` through `onBrowserCheckout`, a
- * callback `composeDaemonBrowser` invokes once, synchronously, at the moment
- * IT composes the browser. In this daemon that composition runs inside
- * `attachWsOnlyGatewayVerbHandlers` (services.ts), which is called AFTER
- * `createDaemonHandlerComposition` builds the payments handlers, because the
- * ws-only verb groups need managers (disposal scope, workspace checkpoint
- * manager, ...) that do not exist yet at the point payments is composed.
- * Reordering the two would ripple across every other verb group that call
- * builds, for one capability's benefit.
- *
- * So the payments composition cannot receive the seam as a constructor
- * argument; it receives a GETTER, closed over this holder, and reads it at
- * CALL time rather than at registration time. By the time any real invocation
- * reaches `payments.checkout.begin`, the daemon has finished booting and
- * `onBrowserCheckout` has already fired (or the composition is one where the
- * browser was never buildable at all, `composeDaemonBrowser` returned null,
- * homeDirectory absent, and the getter honestly keeps returning undefined
- * forever, which the checkout handler already refuses on cleanly).
+ * Keep the getter rather than a copied value so clearing/replacing the serving
+ * browser retires previously retained checkout sources. Narrow embedders may
+ * omit browser composition and leave it undefined; no receipt or request can
+ * create a replacement seam. The browser disposal path clears the holder
+ * before retiring its sessions. Payment execution must drain through its own
+ * registration owner before a replacement graph can reuse those stores.
  */
 import type { BrowserCheckoutSeam } from '@goodvibes-jev/engine/sdk/platform/control-plane';
 

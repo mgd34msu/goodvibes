@@ -65,14 +65,10 @@ export interface CheckoutComposition {
   /**
    * The browser-checkout seam, once `onBrowserCheckout` has fired.
    *
-   * A GETTER, not a value: this composition is built and register.ts's
-   * handlers are registered before the browser composition runs (see
-   * runtime/browser-checkout-seam-holder.ts), so the seam is not there yet at
-   * REGISTRATION time and must be read fresh at CALL time. `undefined` means
-   * either "this daemon never builds a browser" (no home directory) or "not
-   * wired yet"; by the time any real invocation reaches this handler the
-   * daemon has finished booting and it is the former or nothing, and the
-   * handler refuses honestly either way.
+   * A GETTER, not a cached value: the native graph installs its browser seam
+   * before payment handlers are acquired, while narrow embedders may omit it.
+   * Calls retain the exact serving seam and refuse if the getter changes.
+   * Undefined never authorizes creating a replacement browser from saved data.
    */
   readonly seam: () => BrowserCheckoutSeam | undefined;
   readonly addresses: AddressStore;

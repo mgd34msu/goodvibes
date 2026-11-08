@@ -2,7 +2,9 @@
  * The daemon-owned payments capability, adapted from pinned daemon 443e5ee.
  *
  * Stores retain the existing surface-scoped paths and daemon-tier secret port.
- * The browser seam is read lazily because browser composition runs later.
+ * The serving browser seam is read through its current host-owned getter;
+ * native graph composition installs it before handler acquisition, while the
+ * browser engine and driver remain lazy.
  * Merchant semantics use the registered Jev reading, never the retired prompt
  * adapter. The returned inbox is the exact source used by the notifier: the
  * root must pass it to DaemonConfig.paymentReplies for channel ingress.

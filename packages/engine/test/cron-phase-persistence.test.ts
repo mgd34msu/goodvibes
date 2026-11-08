@@ -59,8 +59,12 @@ test('knowledge cron phases survive the real SQLite store and older rows migrate
   try {
     const store = create(); stores.push(store); await store.init();
     const schedule = oldJob().schedule; const due = Date.parse('2030-01-01T10:01:23Z');
-    const saved = await store.upsertSchedule({ id: 'chosen-hourly', jobId: 'knowledge-lint', label: 'Hourly lint', enabled: true, schedule, nextRunAt: due });
+    service = new KnowledgeScheduleService({ store, emitIfReady() {}, runJobByKind: async () => ({}) });
+    // Exercise the public edit while bootstrap is still pending.
+    const saved = await service.saveSchedule({ id: 'chosen-hourly', jobId: 'knowledge-lint', label: 'Hourly lint', enabled: false, schedule });
     expect(saved.schedule).toHaveProperty('staggerPhase');
+    await store.upsertSchedule({ ...saved, enabled: true, nextRunAt: due });
+    service.dispose();
     await store.close();
     const reopened = create(); stores.push(reopened); await reopened.init();
     expect(reopened.getSchedule(saved.id)?.schedule).toEqual(saved.schedule);

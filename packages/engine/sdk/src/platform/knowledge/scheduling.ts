@@ -63,6 +63,11 @@ export class KnowledgeScheduleService {
   /** Completes after bootstrap writes and initial timer reconciliation. */
   whenReady(): Promise<void> { return this.initialization; }
 
+  private async readyForMutation(): Promise<void> {
+    await this.initialization;
+    if (this.disposed) throw new Error('Knowledge scheduler is closed');
+  }
+
   listJobs(): readonly KnowledgeJobRecord[] {
     return this.jobs;
   }
@@ -79,6 +84,7 @@ export class KnowledgeScheduleService {
     readonly schedule: AutomationScheduleDefinition;
     readonly metadata?: Record<string, unknown> | undefined;
   }): Promise<KnowledgeScheduleRecord> {
+    await this.readyForMutation();
     const job = this.getJob(input.jobId);
     if (!job) throw new Error(`Unknown knowledge job: ${input.jobId}`);
     if (input.enabled ?? true) assertJobPolicy(job);
@@ -103,12 +109,14 @@ export class KnowledgeScheduleService {
   }
 
   async deleteSchedule(id: string): Promise<boolean> {
+    await this.readyForMutation();
     const deleted = await this.context.store.deleteSchedule(id);
     this.clearScheduleTimer(id);
     return deleted;
   }
 
   async setScheduleEnabled(id: string, enabled: boolean): Promise<KnowledgeScheduleRecord | null> {
+    await this.readyForMutation();
     const schedule = this.context.store.getSchedule(id);
     if (!schedule) return null;
     const job = this.getJob(schedule.jobId);

@@ -16,6 +16,10 @@ export interface TelegramSourceAccountHandle {
 export interface TelegramSourceAccountReader {
   subscribeIdentityChange(listener: (account: TelegramSourceAccountSnapshot) => void): () => void;
   acquire(): Promise<TelegramSourceAccountHandle | null>;
+  /** Startup-only wait for the first live ingress session. Acquires that exact
+   * session, never a later replacement. Cancellation removes the attachment
+   * listener; provider work already started must still be drained by its owner. */
+  acquireWhenAvailable?(signal: AbortSignal): Promise<TelegramSourceAccountHandle | null>;
   read(handle: TelegramSourceAccountHandle): Promise<TelegramSourceAccountSnapshot | null>;
   /** Fence the await-to-capture gap after read; never substitutes for read. */
   assertCurrent(handle: TelegramSourceAccountHandle): TelegramSourceAccountSnapshot;
@@ -76,6 +80,7 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
   let webhook: { readonly secret: string; readonly session: Session; readonly lease: TelegramWebhookAccountLease } | null = null;
   let lastAccount: Pick<TelegramSourceAccountSnapshot, 'id' | 'revision'> | null = null;
   const identityListeners = new Set<(account: TelegramSourceAccountSnapshot) => void>();
+  const attachmentListeners = new Set<(session: Session) => void>();
   const handles = new WeakMap<TelegramSourceAccountHandle, {
     readonly session: Session;
     readonly snapshot: TelegramSourceAccountSnapshot;
@@ -150,6 +155,7 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
     active = session;
     options.lifetime.addEventListener('abort', session.onAbort, { once: true });
     if (options.lifetime.aborted) invalidate();
+    if (live(session)) for (const listener of [...attachmentListeners]) listener(session);
     return session;
   };
 
@@ -157,6 +163,21 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
     reader: Object.freeze({
       subscribeIdentityChange(listener: (account: TelegramSourceAccountSnapshot) => void): () => void { identityListeners.add(listener); return () => { identityListeners.delete(listener); }; },
       acquire: async () => active ? acquire(active) : null,
+      async acquireWhenAvailable(signal: AbortSignal): Promise<TelegramSourceAccountHandle | null> {
+        signal.throwIfAborted();
+        const selected = active && live(active) ? active : await new Promise<Session>((resolve, reject) => {
+          const cleanup = () => { attachmentListeners.delete(attached); signal.removeEventListener('abort', aborted); };
+          const attached = (session: Session) => { cleanup(); resolve(session); };
+          const aborted = () => { cleanup(); reject(new Error('Telegram source account wait was cancelled')); };
+          attachmentListeners.add(attached);
+          signal.addEventListener('abort', aborted, { once: true });
+          if (signal.aborted) aborted();
+        });
+        signal.throwIfAborted();
+        const handle = await acquire(selected);
+        signal.throwIfAborted();
+        return handle;
+      },
       async read(handle: TelegramSourceAccountHandle): Promise<TelegramSourceAccountSnapshot | null> {
         const record = handles.get(handle);
         return record && await check(record.session) && live(record.session) ? record.snapshot : null;

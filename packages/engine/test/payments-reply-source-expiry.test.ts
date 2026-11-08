@@ -3,6 +3,7 @@ import { createTelegramSourceAccountOwner, type TelegramSourceAccountReader } fr
 import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
 import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
 import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.js';
+import { PaymentReplySourceOwner } from '../sdk/src/platform/payments/reply-source-owner.js';
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -104,4 +105,42 @@ test('mutating a borrowed reader wrapper cannot replace the source retained befo
   account.reader.assertCurrent = () => ({ id: '123', revision: 'fabricated', username: 'fixture_bot' });
   account.owner.invalidate(); f.expire();
   await expect(f.waiting).rejects.toMatchObject({ kind: 'source-unavailable' });
+});
+
+test('native payment reception established before ingress starts retains and verifies the first attached account', async () => {
+  const owner = createTelegramSourceAccountOwner(), lifetime = new AbortController(), verified = deferred();
+  const read = deferred(); let identityReads = 0;
+  const reader: TelegramSourceAccountReader = { ...owner.reader, async read(handle) {
+    const account = await owner.reader.read(handle); read.resolve(); return account;
+  } };
+  let clock = 1;
+  const inbox = new PaymentReplyInbox({ now: () => clock }); cleanup.push(() => inbox.close()); cleanup.push(() => lifetime.abort());
+  const helper = new DaemonSurfaceActionHelper({ paymentReplies: inbox, telegramSourceAccounts: reader } as unknown as
+    ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]); cleanup.push(() => helper.closeDelegatedTelegram());
+  const notifier = channelBackedPaymentNotifier({ get: () => 'telegram' }, {
+    async deliver() { throw new Error('Native delivery must return a receipt'); },
+    async deliverWithReceipt() { return { receipt: { surfaceKind: 'telegram', conversationId: '-100123', messageId: '51', accountId: '123' } }; },
+  }, inbox);
+  if (!notifier.prepareWindow) throw new Error('Missing native reception');
+  const reception = notifier.prepareWindow({ purchaseId: 'startup-window', kind: 'veto', notice: 'Original notice' });
+  await reception.deliveries; const waiting = reception.awaitAnswer(1000);
+  expect(identityReads).toBe(0);
+  owner.attach({ lifetime: lifetime.signal, isCurrent: async () => true, isCurrentSync: () => true,
+    readIdentity: async () => { identityReads++; verified.resolve(); return { id: '123', username: 'fixture_bot' }; } });
+  await verified.promise; await read.promise; await Promise.resolve(); await Promise.resolve();
+  clock = 1000; inbox.inspect(); expect(await waiting).toBeNull(); expect(identityReads).toBe(1);
+});
+
+test.each(['close', 'rebind', 'window', 'facade'] as const)('pending startup source acquisition drains on %s without waiting for ingress', async reason => {
+  const native = createTelegramSourceAccountOwner(), source = new PaymentReplySourceOwner();
+  const facade = new AbortController(), window = new AbortController();
+  source.bindTelegram(native.reader, facade.signal);
+  const guard = source.reserveTelegram(window.signal);
+  await Promise.resolve();
+  if (reason === 'close') void source.close();
+  if (reason === 'rebind') source.bindTelegram(native.reader, new AbortController().signal);
+  if (reason === 'window') window.abort();
+  if (reason === 'facade') facade.abort();
+  await expect(guard.ready).rejects.toThrow(); await source.close();
+  expect(() => guard.assertReceiptCurrent({ surfaceKind: 'telegram', conversationId: '1', messageId: '2', accountId: '123' })).toThrow();
 });

@@ -1978,6 +1978,13 @@ is open. Select an operation to refresh its status or stop active processing.
 Uncertain submissions stay visible and require checking merchant history.
 Neither interface retries approval, stop or submission automatically.
 
+If a native Telegram payment reception starts before ingress attaches during
+daemon startup, it waits for the first live ingress session and verifies that
+exact session. Cancellation or facade retirement removes the wait. A replacement
+session cannot take over an acquisition already assigned to its predecessor.
+An unresolved verification at expiry still fails the window; readiness does
+not establish that replies received during downtime have been recovered.
+
 ### 10.3.1 Checkout ownership while a request is running
 
 The flow captures the original request, checkout reading, controls, limits and

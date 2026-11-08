@@ -77,6 +77,39 @@ describe('strict Telegram getMe provenance', () => {
 });
 
 describe('opaque session-bound source accounts', () => {
+  test('startup acquisition waits for ingress without provider I/O and verifies the first attached session', async () => {
+    const owner = createTelegramSourceAccountOwner(), abort = new AbortController();
+    if (!owner.reader.acquireWhenAvailable) throw new Error('Missing native startup acquisition');
+    let reads = 0, settled = false;
+    const pending = owner.reader.acquireWhenAvailable(abort.signal).then(handle => { settled = true; return handle; });
+    await Promise.resolve(); expect(settled).toBe(false); expect(reads).toBe(0);
+    owner.attach({ lifetime: abort.signal, isCurrent: async () => true, isCurrentSync: () => true,
+      readIdentity: async () => { reads++; return { id: '123', username: 'verified_bot' }; } });
+    const handle = await pending; if (!handle) throw new Error('Missing original handle');
+    expect(await owner.reader.read(handle)).toMatchObject({ id: '123' }); expect(reads).toBe(1);
+    abort.abort(); expect(() => owner.reader.assertCurrent(handle)).toThrow();
+  });
+
+  test('startup acquisition cannot switch to a same-bot replacement in the attachment await gap', async () => {
+    const owner = createTelegramSourceAccountOwner(), abort = new AbortController();
+    if (!owner.reader.acquireWhenAvailable) throw new Error('Missing native startup acquisition');
+    const pending = owner.reader.acquireWhenAvailable(abort.signal);
+    attach(owner); attach(owner);
+    expect(await pending).toBeNull();
+    // The replacement is usable for a new admission, never for the old wait.
+    expect(await owner.reader.acquire()).not.toBeNull(); abort.abort();
+  });
+
+  test('cancelled startup acquisition retires its listener and never reads a later attachment', async () => {
+    const owner = createTelegramSourceAccountOwner(), abort = new AbortController();
+    if (!owner.reader.acquireWhenAvailable) throw new Error('Missing native startup acquisition');
+    const pending = owner.reader.acquireWhenAvailable(abort.signal); abort.abort();
+    await expect(pending).rejects.toThrow(); let reads = 0;
+    owner.attach({ lifetime: new AbortController().signal, isCurrent: async () => true, isCurrentSync: () => true,
+      readIdentity: async () => { reads++; return { id: '123', username: 'verified_bot' }; } });
+    await Promise.resolve(); expect(reads).toBe(0); owner.invalidate();
+  });
+
   test('installation is lazy, success is cached only inside the current session, and handles do not serialize', async () => {
     const owner = createTelegramSourceAccountOwner(); let reads = 0;
     owner.attach({ lifetime: new AbortController().signal, isCurrent: async () => true, isCurrentSync: () => true,

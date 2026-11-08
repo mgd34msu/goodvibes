@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Let native payment reception wait for its first Telegram ingress attachment
+  during startup, then verify that exact session. Cancellation, facade retirement
+  and rebinding remove the pending wait; a replacement session cannot take it
+  over. This does not establish missed-reply or downtime coverage.
+
 - Add the engine checkout-window resume path using the original journal and
   held funds. Preserve exact selected terms in v2 checkpoints, reject replaced
   holds and void earlier answers when the selected terms or window type change.

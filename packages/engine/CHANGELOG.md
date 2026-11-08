@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Retain the original discovered browser WebSocket, native tab/context and
+  document-loader observations inside encrypted checkout facts. Use the actual
+  browser or Node-host page mapping and drain protocol reads through admission
+  cancellation and shutdown. These observations do not restore control refs or
+  authorize restart continuation; that integration remains unfinished.
+
 - Attribute optional calibration reports to the Git revision and local file
   versions instead of hashing every source file and the complete digest list.
   Version 2 source observations detect edits, replacements, additions and

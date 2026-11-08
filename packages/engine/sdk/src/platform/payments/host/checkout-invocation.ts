@@ -8,6 +8,9 @@ import { retainTaintEvidence } from '../../security/untrusted-content.js';
 import type { PaymentsServiceConfig } from '../payments-gateway-service.js';
 import type { NativePairedSnapshot } from '../../security/http-auth.js';
 import { paymentContinuationBinding } from './continuation-binding.js';
+import { BrowserPageConnectionError } from '../../browser/browser-page-connection-data.js';
+import type { BeginCheckoutInput } from '../payments-gateway-service.js';
+import type { DetachedCheckoutOwner } from './checkout-operations.js';
 
 function frame(context: HandlerContextEnvelope) {
   return { principalId: context.principalId, principalKind: context.principalKind, admin: context.admin,
@@ -66,6 +69,7 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
   paired: NonNullable<ReturnType<NonNullable<HandlerContextEnvelope['nativeExecutionAuthority']>['current']>>) {
   const expected = captureOwnedJson(paired), config = captureOwnedJson(readPaymentsServiceConfig(deps.config));
   const issue = native.issueContinuation?.bind(native), revoke = native.revokeContinuation?.bind(native);
+  const capturePage = seam.capturePageConnection?.bind(seam);
   if (!issue || !revoke) throw new HandlerError('The paired host cannot retain checkout continuation authority.', 'FAILED_PRECONDITION', 409);
   // The dispatcher starts the owner turn before this handler. Include the
   // immediately displaced window, then keep these exact facts across later
@@ -89,5 +93,12 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
       catch (error) { revoke(grant); throw error; }
     },
     revokeContinuation: revoke,
+    ...(capturePage ? { capturePageConnection: async (input: BeginCheckoutInput, owner: DetachedCheckoutOwner) => {
+      assertCurrent(); owner.assertCurrent();
+      try {
+        const original = await capturePage(input.sessionId, input.pageId, owner);
+        assertCurrent(); owner.assertCurrent(); return original;
+      } catch { throw new BrowserPageConnectionError(); }
+    } } : {}),
     recoveryFacts: Object.freeze({ authority: expected as NativePairedSnapshot, configuration: config as PaymentsServiceConfig }) });
 }

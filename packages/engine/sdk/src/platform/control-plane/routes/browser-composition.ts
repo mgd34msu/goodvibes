@@ -66,6 +66,8 @@ import type {
 } from '../../payments/browser-checkout-driver.js';
 import type { CheckoutPageDriver } from '../../payments/checkout-page.js';
 import type { OwnerApproval } from '../../browser/index.js';
+import type { BrowserPageConnection } from '../../browser/index.js';
+import type { BrowserProvisionLifetime } from '../../browser/browser-failure-reading.js';
 import type { BrowserGatewayService } from './browser.js';
 
 /**
@@ -148,6 +150,8 @@ export interface BrowserCheckoutSeam {
   readonly cardFieldGuard: CardMaterialRedactor;
   /** Hand this to `PaymentsServiceDeps.driverFor`, unchanged. */
   driverFor(sessionId: string, pageId: string): CheckoutPageDriver;
+  /** Private host facts for encrypted continuation storage, never public status. */
+  capturePageConnection?(sessionId: string, pageId: string, owner: BrowserProvisionLifetime): Promise<BrowserPageConnection | null>;
   /**
    * Arms the owner's approval for ONE outward submit, directly on the engine
    * this seam's driver runs against.
@@ -256,6 +260,11 @@ export function composeDaemonBrowser(
       }),
       armSubmitApproval: async (approval) => {
         (await built.engineFor()).setOwnerApproval(approval);
+      },
+      capturePageConnection: async (sessionId, pageId, owner) => {
+        const engine = await built.engineFor();
+        owner.signal?.throwIfAborted(); owner.assertCurrent?.();
+        return engine.capturePageConnection({ sessionId, pageId }, owner);
       },
     });
   }

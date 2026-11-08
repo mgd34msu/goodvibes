@@ -435,6 +435,13 @@ function remoteFrameLocator(client: BrowserHostClient, pageId: string, chain: re
  * otherwise have to ask each frame for its own element, a round trip the host
  * already made when it listed them.
  */
+const remotePageConnections = new WeakMap<Page, () => Promise<unknown>>();
+
+/** Only the actual remote Page factory supplies its host/page association. */
+export function readRemotePageConnection(page: Page): Promise<unknown> | null {
+  return remotePageConnections.get(page)?.() ?? null;
+}
+
 export function remotePage(client: BrowserHostClient, pageId: string, initialUrl: string): Page {
   let url = initialUrl;
   const pageCall = async (method: string, args: Record<string, unknown> = {}): Promise<unknown> => {
@@ -544,7 +551,9 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
     frames: () => frames.map(frameFor),
     refreshFrames,
   };
-  return page as unknown as Page;
+  const remote = page as unknown as Page;
+  remotePageConnections.set(remote, () => client.call('pageConnection', { pageId }));
+  return remote;
 }
 
 export interface RemoteContextHandle {

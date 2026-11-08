@@ -143,6 +143,30 @@ test('a refused reply source reaches real durable status and the shared browser/
   expect(paymentOperationDescription(view)).toContain('Payments controls');
 });
 
+test('browser observation during preparation retains the real execution lease and shutdown ownership', async () => {
+  const path = directory(), store = new DurablePaymentOperations(join(path, 'operations'));
+  const original = protectedPaymentRequest('browser-preparation'), requests = new ProtectedPaymentRequests(join(path, 'requests'));
+  const entered = barrier(), release = barrier(); let executed = false;
+  const operations = new CheckoutOperations(store, new MemoryCheckoutJournal(), new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }),
+    async (_input, id) => { executed = true; return refusal(id); }, undefined, requests);
+  cleanup.push(() => operations.close(), release.release); await operations.recover();
+  const preparing = operations.admit(original.purchaseId, original.input, { principalId: original.principalId,
+    assertCurrent() {}, taintEvidence: original.evidence, recoveryFacts: original.host,
+    async capturePageConnection(captured, owner) {
+      expect(captured.sessionId).toBe(original.input.sessionId); expect(captured.pageId).toBe(original.input.pageId);
+      entered.release(); await release.wait; owner.assertCurrent(); return null;
+    },
+  }, () => {}, () => {}).catch(error => error as unknown);
+  await entered.wait;
+  expect(new DurablePaymentOperations(join(path, 'operations')).recover(original.purchaseId)).toBeNull();
+  expect(existsSync(join(path, 'requests'))).toBe(false); expect(executed).toBe(false);
+  let drained = false; const closing = operations.close().then(() => { drained = true; });
+  await Promise.resolve(); expect(drained).toBe(false);
+  release.release(); expect(await preparing).toBeInstanceOf(Error); await closing;
+  expect(drained).toBe(true); expect(executed).toBe(false);
+  expect(store.get(original.purchaseId)?.state).toBe('cancelled');
+});
+
 test('admission waits for durable original facts and binds original storage methods and request values', async () => {
   const path = directory(), store = new DurablePaymentOperations(join(path, 'operations'));
   const requests = new ProtectedPaymentRequests(join(path, 'requests')), fixture = protectedPaymentRequest('durable-admission');

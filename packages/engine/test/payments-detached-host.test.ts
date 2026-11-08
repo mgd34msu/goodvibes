@@ -42,6 +42,10 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
     'payments.budget.dailyOverage': 100, 'payments.budget.perPurchaseCeiling': 100, 'payments.notifyChannels': 'telegram', 'payments.cvvHandling': 'stored' };
   for (const [key, value] of Object.entries({ name: 'Fixture owner', line1: '1 Fixture Street', city: 'Fixture City', region: 'TS', postalCode: '00000', country: 'US' })) values[`payments.shippingAddress.${key}`] = value;
   const config = { get: (key: string) => values[key] }, secrets = new Map<string, string>(), effects: string[] = [];
+  const originalBrowser = { version: 1 as const, endpoint: 'ws://127.0.0.1:9222/devtools/browser/original-private-browser',
+    targetId: 'original-native-tab', browserContextId: 'original-native-context',
+    frames: [{ id: 'original-native-frame', loaderId: 'original-native-document', parentId: null }] };
+  let capturedPages = 0;
   const cards = new DaemonCardStore({ filePath: join(root, 'cards.json'), cvvHandling: () => 'stored', secrets: {
     async get(key) { return secrets.get(key) ?? null; }, async set(key, value) { secrets.set(key, value); }, async delete(key) { secrets.delete(key); },
   } });
@@ -60,7 +64,11 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
         addresses: configBackedAddressStore(config), untrusted: getProcessUntrustedContentLedger(), merchantJudge: createJevMerchantJudge(),
         notifier: channelBackedPaymentNotifier(config, { async deliver(request) { request.assertCurrent?.(); return 'synthetic-delivery'; } }, replies),
         seam: (() => {
-          const seam = { cardFieldGuard: new CardMaterialRedactor(), armSubmitApproval: async () => {}, driverFor: () => ({
+          const seam = { cardFieldGuard: new CardMaterialRedactor(), armSubmitApproval: async () => {},
+            async capturePageConnection(sessionId: string, pageId: string, owner: { readonly assertCurrent?: (() => void) | undefined }) {
+              owner.assertCurrent?.(); expect(sessionId).toBe('session'); expect(pageId).toBe('page'); capturedPages++;
+              return originalBrowser;
+            }, driverFor: () => ({
             identity: () => ({ sessionId: 'session', pageId: 'page' }), async url() { return 'https://www.bestbuy.com/checkout'; },
             async verifyTerms() { throw new Error('This detached fixture is cancelled at its window'); },
             async fill() { effects.push('fill'); }, async choose() { effects.push('choose'); },
@@ -96,6 +104,8 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   expect(saved.input.item).toBe('Fixture item'); expect(saved.input.requestedMax).toBe('9.00');
   expect(saved.principalId).toBe(helper.describeAuthenticatedPrincipal(paired.token).principalId);
   expect(saved.host.authority.tokenId).toBe(paired.id);
+  expect(capturedPages).toBe(1); expect(saved.host.browser).toEqual(originalBrowser);
+  expect(JSON.stringify(acknowledged.body)).not.toContain(originalBrowser.endpoint);
   if (!saved.host.continuation) throw new Error('Native admission did not retain its issued grant');
   expect(pairing.readNativeContinuation(saved.host.continuation)).toEqual(saved.host.authority);
   expect(pairing.readNativeContinuation({ ...saved.host.continuation, binding: '11'.repeat(32) })).toBeNull();
@@ -104,6 +114,7 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   const encrypted = readFileSync(privatePath, 'utf8');
   expect(encrypted).not.toContain('Fixture item'); expect(encrypted).not.toContain(paired.token);
   expect(encrypted).not.toContain('bestbuy.com');
+  expect(encrypted).not.toContain(originalBrowser.endpoint); expect(encrypted).not.toContain(originalBrowser.targetId);
   request.abort(); body.item = 'altered after acknowledgement';
   // Real owner dispatches move the process-wide turn window while the earlier
   // checkout is still in card/address preflight. Its source must not move too.

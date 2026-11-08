@@ -31,6 +31,19 @@ test('original request and taint survive real encrypted-store reopening without 
   expect(existsSync(filename(root, original.purchaseId))).toBe(false); expect(existsSync(join(root, '.key'))).toBe(true);
 });
 
+test('retains native browser observations only inside the original encrypted request', async () => {
+  const root = join(makeProjectTempDir('payment-protected-browser'), 'requests'), original = protectedPaymentRequest();
+  const browser = { version: 1 as const, endpoint: 'ws://127.0.0.1:9222/devtools/browser/retained-browser?private=fixture-only',
+    targetId: 'original-tab', browserContextId: null,
+    frames: [{ id: 'original-frame', loaderId: 'original-document', parentId: null }] };
+  const store = new ProtectedPaymentRequests(root);
+  await store.retain({ ...original, host: { ...original.host, browser } }, noop);
+  const saved = await new ProtectedPaymentRequests(root).read(original.purchaseId, original.operationId, noop);
+  expect(saved.host.browser).toEqual(browser); expect(Object.isFrozen(saved.host.browser?.frames)).toBe(true);
+  const ciphertext = readFileSync(filename(root, original.purchaseId), 'utf8');
+  expect(ciphertext).not.toContain(browser.endpoint); expect(ciphertext).not.toContain(browser.targetId);
+});
+
 test('exclusive publication preserves the first request and refuses another operation under that purchase identity', async () => {
   const root = join(makeProjectTempDir('payment-protected-exclusive'), 'requests'), original = protectedPaymentRequest();
   await new ProtectedPaymentRequests(root).retain(original, noop);

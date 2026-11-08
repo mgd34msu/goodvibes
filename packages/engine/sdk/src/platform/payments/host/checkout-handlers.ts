@@ -9,6 +9,7 @@ import { CheckoutOperations, type DetachedCheckoutOwner, type DetachedCheckoutSo
 import { PaymentOperationStoreError, checkoutRequestId, type DurablePaymentOperations } from './operation-store.js';
 import type { BeginCheckoutInput } from '../payments-gateway-service.js';
 import { ProtectedPaymentRequestError, type PaymentRequestStore } from './protected-requests.js';
+import { BrowserPageConnectionError } from '../../browser/browser-page-connection-data.js';
 /**
  * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
  *
@@ -621,7 +622,7 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
     } catch (error) {
       if (error instanceof HandlerError) throw error;
       if (error instanceof PaymentOperationStoreError && error.kind === 'invalid') throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
-      if (error instanceof PaymentOperationStoreError || error instanceof PaymentPurchaseLedgerError || error instanceof PaymentCheckoutJournalUnavailableError || error instanceof ProtectedPaymentRequestError) {
+      if (error instanceof PaymentOperationStoreError || error instanceof PaymentPurchaseLedgerError || error instanceof PaymentCheckoutJournalUnavailableError || error instanceof ProtectedPaymentRequestError || error instanceof BrowserPageConnectionError) {
         throw new HandlerError(error.message, error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);
       }
       throw new HandlerError('This checkout could not be admitted. Read the original purchase status before trying again.', 'INTERNAL_ERROR', 500);

@@ -7,6 +7,7 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { OwnedWork } from '../utils/owned-work.js';
+import { observeBrowserPageConnection, type BrowserPageConnection } from './browser-page-connection.js';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { BrowserHostClient, remoteContext, type BrowserHostOptions } from './browser-host-client.js';
@@ -68,6 +69,8 @@ interface TrackedSession {
   readonly browser: Browser | null;
   readonly profileDirectory: string | null;
   readonly cdpEndpoint: string | null;
+  /** Original discovered browser WebSocket; never exposed in session status. */
+  readonly connectionEndpoint: string | null;
   readonly executablePath: string | null;
   readonly source: BrowserProvisionReport['source'];
   readonly headless: boolean;
@@ -523,6 +526,7 @@ export class BrowserSessionManager {
         browser,
         profileDirectory: null,
         cdpEndpoint: requestedEndpoint,
+        connectionEndpoint: webSocket,
         executablePath: null,
         source: null,
         headless: false,
@@ -567,6 +571,7 @@ export class BrowserSessionManager {
           browser: null,
           profileDirectory: null,
           cdpEndpoint: requestedEndpoint,
+          connectionEndpoint: endpoint,
           executablePath: null,
           source: null,
           headless: false,
@@ -601,6 +606,7 @@ export class BrowserSessionManager {
     readonly browser: Browser | null;
     readonly profileDirectory: string | null;
     readonly cdpEndpoint: string | null;
+    readonly connectionEndpoint?: string;
     readonly executablePath: string | null;
     readonly source: BrowserProvisionReport['source'];
     readonly headless: boolean;
@@ -617,6 +623,7 @@ export class BrowserSessionManager {
       browser: input.browser,
       profileDirectory: input.profileDirectory,
       cdpEndpoint: input.cdpEndpoint,
+      connectionEndpoint: input.connectionEndpoint ?? null,
       executablePath: input.executablePath,
       source: input.source,
       headless: input.headless,
@@ -733,6 +740,21 @@ export class BrowserSessionManager {
       'The browser session was released or closed while this operation was pending.',
       'Select a live browser session before starting another operation.',
     );
+  }
+
+  /** Private host recovery input, not a public session view or attach grant.
+   * A launched browser with no reconnectable connection reports no evidence.
+   * The actual page lifetime and all pending protocol I/O remain owned here. */
+  pageConnection(sessionId: string, pageId: string, input: BrowserProvisionLifetime = {}): Promise<BrowserPageConnection | null> {
+    const owner = this.ownLifetime(input), session = this.require(sessionId);
+    return this.withPage(sessionId, pageId, async (page, current) => {
+      const active = () => { current(); assertProvisionCurrent(owner); this.assertSessionCurrent(session); };
+      active();
+      const endpoint = session.connectionEndpoint;
+      if (!endpoint) return null;
+      const result = await observeBrowserPageConnection(session.context, page, endpoint, active);
+      active(); return result;
+    });
   }
 
   async page(sessionId: string, pageId?: string): Promise<{ readonly pageId: string; readonly page: Page }> {

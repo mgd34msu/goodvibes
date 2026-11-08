@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path';
 import type { Locator, Page } from 'playwright-core';
 import { BrowserSessionError, BrowserSessionManager, hasDisplay } from './browser-sessions.js';
 import type { BrowserAttachOptions, BrowserLaunchOptions } from './browser-sessions.js';
+import type { BrowserPageConnection } from './browser-page-connection-data.js';
 import { describeProvisionWork } from './browser-provisioning.js';
 import { captureCredentialPage, retainBrowserMethods, resolveRef, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
 import { assertCaptureAllowed, fillSecretsIntoPage } from './browser-secret-fill.js';
@@ -481,6 +482,14 @@ export class BrowserEngine {
 
   private currentSnapshot(sessionId: string, pageId: string): BrowserSnapshot | null {
     return this.snapshots.get(sessionId, pageId);
+  }
+
+  /** Composition-only recovery observation; never choose a default page or
+   * launch/attach another browser to satisfy an original checkout reference. */
+  capturePageConnection(target: BrowserTarget, owner: BrowserProvisionLifetime): Promise<BrowserPageConnection | null> {
+    const { sessionId, pageId } = target;
+    if (!sessionId || !pageId) throw new BrowserSessionError('The original checkout page must be selected explicitly.');
+    return this.sessions.pageConnection(sessionId, pageId, owner);
   }
 
   /** Keep the shared tool decision bound to this serving browser and original input. */

@@ -21,6 +21,7 @@ import type { PaymentRequestHostFacts, PaymentRequestStore } from './protected-r
 import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import { capturePaymentContinuation } from './continuation-binding.js';
 import { PaymentReplyWindowError } from '../reply-inbox.js';
+import { captureBrowserPageConnection, type BrowserPageConnection } from '../../browser/browser-page-connection-data.js';
 
 export interface DetachedCheckoutSource {
   readonly principalId: string;
@@ -29,6 +30,7 @@ export interface DetachedCheckoutSource {
   readonly recoveryFacts?: PaymentRequestHostFacts | undefined;
   readonly issueContinuation?: ((operationId: string, assertCurrent: () => void) => NativeContinuationGrant) | undefined;
   readonly revokeContinuation?: ((grant: NativeContinuationGrant) => void | Promise<void>) | undefined;
+  readonly capturePageConnection?: ((input: BeginCheckoutInput, owner: DetachedCheckoutOwner) => Promise<BrowserPageConnection | null>) | undefined;
 }
 export interface DetachedCheckoutOwner {
   readonly signal: AbortSignal;
@@ -87,7 +89,8 @@ export class CheckoutOperations {
     source = Object.freeze({ principalId: source.principalId, assertCurrent: source.assertCurrent.bind(source),
       taintEvidence: source.taintEvidence === undefined ? undefined : captureOwnedJson(source.taintEvidence) as RetainedTaintEvidence,
       recoveryFacts: source.recoveryFacts === undefined ? undefined : captureOwnedJson(source.recoveryFacts) as PaymentRequestHostFacts,
-      issueContinuation: source.issueContinuation?.bind(source), revokeContinuation: source.revokeContinuation?.bind(source) });
+      issueContinuation: source.issueContinuation?.bind(source), revokeContinuation: source.revokeContinuation?.bind(source),
+      capturePageConnection: source.capturePageConnection?.bind(source) });
     if (source.issueContinuation && !source.revokeContinuation) throw new PaymentOperationStoreError('unavailable');
     const current = () => {
       if (this.closed) throw new CheckoutOwnershipError();
@@ -108,9 +111,14 @@ export class CheckoutOperations {
       preparing();
       if (this.requests) {
         if (!source.taintEvidence || !source.recoveryFacts) throw new PaymentOperationStoreError('unavailable');
+        const observed = source.capturePageConnection
+          ? await source.capturePageConnection(captured, { signal: active.abort.signal, assertCurrent: preparing }) : null;
+        preparing();
+        const browser = observed === null ? null : captureBrowserPageConnection(observed);
         await this.requests.retain({ version: 1, purchaseId: id, operationId: operation.operationId, principalId: source.principalId,
           input: captured, evidence: source.taintEvidence,
-          host: active.continuation ? { ...source.recoveryFacts, continuation: active.continuation } : source.recoveryFacts }, preparing);
+          host: { ...source.recoveryFacts,
+            ...(active.continuation ? { continuation: active.continuation } : {}), ...(browser ? { browser } : {}) } }, preparing);
         active.protectedRequest = true;
       }
       preparing();

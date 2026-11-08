@@ -100,6 +100,18 @@ const handlers = {
     return { closed: pageId };
   },
 
+  /** Native protocol IDs only; never a marker injected into an untrusted page. */
+  async pageConnection({ pageId }) {
+    if (!state.context) throw new Error('not attached');
+    const session = await state.context.newCDPSession(requirePage(pageId));
+    try {
+      return {
+        target: await session.send('Target.getTargetInfo'),
+        documents: await session.send('Page.getFrameTree'),
+      };
+    } finally { await session.detach(); }
+  },
+
   async pageCall({ pageId, method, args }) {
     const page = requirePage(pageId);
     switch (method) {

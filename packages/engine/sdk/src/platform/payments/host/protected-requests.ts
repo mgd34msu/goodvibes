@@ -17,12 +17,15 @@ import type { BeginCheckoutInput, PaymentsServiceConfig } from '../payments-gate
 import { checkoutRequestId } from './operation-store.js';
 import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import { capturePaymentContinuation } from './continuation-binding.js';
+import { captureBrowserPageConnection, type BrowserPageConnection } from '../../browser/browser-page-connection-data.js';
 
 export interface PaymentRequestHostFacts {
   readonly authority: NativePairedSnapshot;
   readonly configuration: PaymentsServiceConfig;
   /** A reference only; recovery must consult the original issuing owner. */
   readonly continuation?: NativeContinuationGrant;
+  /** Actual original endpoint/tab/document facts; parsing cannot authorize attach. */
+  readonly browser?: BrowserPageConnection;
 }
 export interface ProtectedPaymentRequest {
   readonly version: 1;
@@ -68,7 +71,7 @@ function own(value: unknown): ProtectedPaymentRequest {
     || !Array.isArray(input['requestedLines']) || input['requestedLines'].length === 0
     || input['requestedLines'].some(line => !object(line) || !text(line['label']) || !Number.isSafeInteger(line['quantity']) || Number(line['quantity']) < 1)
     || !object(input['reading']) || !object(input['controls']) || !object(host)
-    || Object.keys(host).some(key => !['authority', 'configuration', 'continuation'].includes(key))
+    || Object.keys(host).some(key => !['authority', 'configuration', 'continuation', 'browser'].includes(key))
     || !object(host['authority']) || !object(host['configuration'])) throw new ProtectedPaymentRequestError();
   const reading = readCheckoutReadingInput(input['reading']);
   if (!reading.ok || !isDeepStrictEqual(captureOwnedJson(reading.reading), input['reading'])) throw new ProtectedPaymentRequestError();
@@ -106,6 +109,7 @@ function own(value: unknown): ProtectedPaymentRequest {
   return Object.freeze({ ...row, evidence: captureRetainedTaintEvidence(row['evidence']),
     input: optionalFields({ ...input, controls: optionalFields(controls, ['addressFields', 'shippingTargets', 'expirySeparator', 'twoDigitYear']) }, ['preferredTier', 'requestedMax', 'merchantDiscovered']),
     host: Object.freeze({ authority, configuration: savedConfig,
+      ...(host['browser'] === undefined ? {} : { browser: captureBrowserPageConnection(host['browser']) }),
       ...(host['continuation'] === undefined ? {} : { continuation: capturePaymentContinuation(host['continuation'], row['operationId']) }) }) }) as unknown as ProtectedPaymentRequest;
 }
 

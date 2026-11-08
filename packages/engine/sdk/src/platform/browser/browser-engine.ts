@@ -328,10 +328,10 @@ export class BrowserEngine {
       timeout: args.timeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS,
     });
     this.snapshots.clear(sessionId, pageId);
-    // A navigation replaces the whole document, so whatever card material was
-    // typed into the previous DOM is gone with it. Material lifetime is bound
-    // to the page it is on, not to whichever flow last had an opinion about it.
-    this.cardGuard?.disarm(sessionId, pageId);
+    // goto can be a same-document fragment change. A new document can also
+    // restore filled history or merchant state. A URL/load result does not
+    // establish that this page has forgotten its material; keep protection
+    // until the actual page or owned browser is closed.
     return {
       sessionId,
       pageId,
@@ -504,9 +504,8 @@ export class BrowserEngine {
       await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_ACTION_TIMEOUT_MS }).catch(() => undefined));
       this.snapshots.clear(sessionId, pageId);
       const navigated = page.url() !== urlBefore;
-      // A navigating click replaces the DOM exactly as an explicit navigate does,
-      // so whatever card material was on the page it left is gone with it.
-      if (navigated) this.cardGuard?.disarm(sessionId, pageId);
+      // URL changes also include pushState and fragments with the same filled
+      // DOM. Navigation is not proof that live payment material disappeared.
       return {
         sessionId,
         pageId,

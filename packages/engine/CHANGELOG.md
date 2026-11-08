@@ -7,6 +7,8 @@
 - Preserve damaged or unsupported checkout journals instead of discarding pending
   purchases. Validate stored recovery identities, phases and amounts, refuse stale
   file owners, and report failed removals while retaining the purchase page.
+- Keep payment-page redaction through successful submissions and URL changes,
+  including same-document navigation. Retire it only after page/browser closure.
 
 - Retain original checkout inputs and current transport/payment/page ownership
   through asynchronous readings and execution. Stop new parallel readings on

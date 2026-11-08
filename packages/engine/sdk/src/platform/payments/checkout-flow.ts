@@ -812,7 +812,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   }
 
   // Submission alone cannot prove the page no longer contains card material.
-  // Only the actual page owner disarms on navigation/close. Keep redaction
+  // Only the actual page owner disarms on closure. Keep redaction
   // armed when a non-navigating submit leaves those fields in the DOM.
 
   // ── 10. Record it ───────────────────────────────────────────────────────

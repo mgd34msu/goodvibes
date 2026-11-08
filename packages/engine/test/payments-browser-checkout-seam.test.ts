@@ -1147,8 +1147,8 @@ describe('a submit failure releases or holds the reservation depending on which 
 // and `browser.screenshot` would all return the card verbatim to whoever asked
 // next. The fix stops disarming on exits where the page's actual state is
 // unknown or where the owner is about to be sent back to it, and instead binds
-// disarming to the page itself (browser-engine.ts: navigate, a navigating
-// click, closeTab, close).
+// disarming to actual page/browser closure, rather than a successful response
+// or URL change that can preserve filled fields.
 describe('the redactor stays armed on every exit where card digits may still be on the page', () => {
   test('a pre-click refusal (no click ever dispatched) leaves the redactor armed and still scrubbing', async () => {
     const staleError = new Error('the button ref no longer resolves');
@@ -1211,10 +1211,7 @@ describe('the redactor stays armed on every exit where card digits may still be 
     expect(scrubbed).not.toContain(SENTINEL.number);
   });
 
-  test('a clean submission with no pending challenge still disarms once it is truly done', async () => {
-    // The control case: the redesign is "don't disarm while it might still be
-    // on the page", not "never disarm". A submission that actually completed,
-    // with nothing left pending, disarms exactly as before.
+  test('a completed non-navigating submission keeps protecting the card still held by its page', async () => {
     const harness = await sevenVerbComposition();
 
     const response = await harness.catalog.invoke(
@@ -1222,7 +1219,9 @@ describe('the redactor stays armed on every exit where card digits may still be 
       { body: beginParams() } as never,
     ) as Record<string, unknown>;
     expect(response['outcome']).toBe('submitted-unverified');
-    expect(harness.guard.hasLiveMaterial('session-1', 'page-1')).toBe(false);
+    expect(harness.guard.hasLiveMaterial('session-1', 'page-1')).toBe(true);
+    expect(harness.engine.typed.get('ccnum')).toBe(SENTINEL.number);
+    expect(harness.guard.redact('session-1', 'page-1', `Card ${SENTINEL.number}`)).not.toContain(SENTINEL.number);
   });
 });
 

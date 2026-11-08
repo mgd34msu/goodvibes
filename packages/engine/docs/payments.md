@@ -1720,9 +1720,11 @@ submission still finishes if its original caller is cancelled. New notifications
 require current authority.
 
 A submit does not establish that card fields disappeared from the page. Card
-redaction remains bound to the exact session/page until its page owner clears
-the material on navigation or close. Abandoning an operation keeps protection
-for any values still present, including a partial fill.
+redaction remains bound to the exact session/page until that page or its owned
+browser closes successfully. URL changes, including same-document navigation,
+do not clear it. Abandoning an operation keeps protection for any values still
+present, including a partial fill. Screenshots stay unavailable for that guarded
+page; close it and use a new tab for later browser work.
 
 Merchant additions, exclusions and seller thresholds from the payment settings
 are passed into the service's actual checkout policy. Exclusions make an

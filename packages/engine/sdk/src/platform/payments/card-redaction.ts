@@ -150,10 +150,9 @@ function digitRuns(text: string): { readonly run: string; readonly digits: strin
  * while the model may legitimately be reading another tab, and blanking that
  * other tab would be redaction the owner cannot explain.
  *
- * The values live in this process's memory for as long as they are on the page
- * in front of them, which is exactly as long as the browser itself holds them.
- * Only the page owner disarms when navigation or close removes the material.
- * A submit or abandonment can leave filled fields in the DOM.
+ * Values remain private to this page until its owner confirms closure. Submit,
+ * abandonment and URL changes cannot prove the browser forgot the material:
+ * same-document navigation preserves fields and history can restore them.
  */
 export class CardMaterialRedactor {
   private readonly live = new Map<string, Map<string, LiveSecret[]>>();

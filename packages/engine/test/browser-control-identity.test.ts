@@ -62,10 +62,10 @@ function fixture(recordedName = 'Send message') {
     waitForLoadState: async () => {}, frameLocator: () => page } as unknown as Page;
   const snapshot: BrowserSnapshot = { sessionId: 'b1', pageId: 'p1', url, title: 'Test', snapshotId: 's1', truncated: false,
     elements: [{ ...raw()[0]!, value: undefined, checked: undefined, ref: 'e1', frameChain: [] }] };
-  const sessions = { defaultSessionId: () => 'b1', page: async () => ({ pageId: 'p1', page }) } as unknown as BrowserSessionManager;
+  const sessions = { defaultSessionId: () => 'b1', page: async () => ({ pageId: 'p1', page }), pageList: async () => [] } as unknown as BrowserSessionManager;
   let approve = async () => {};
   let liveMaterial = false;
-  const guard = { disarm: () => { liveMaterial = false; }, hasLiveMaterial: () => liveMaterial, redact: (_s: string, _p: string, text: string) => liveMaterial ? text.replaceAll('private-cvv-fixture', '[withheld]') : text } satisfies CardFieldGuard;
+  const guard: CardFieldGuard = { disarm: () => { liveMaterial = false; }, hasLiveMaterial: () => liveMaterial, redact: (_s: string, _p: string, text: string) => liveMaterial ? text.replaceAll('private-cvv-fixture', '[withheld]') : text };
   const engine = new BrowserEngine(sessions, { screenshotDirectory: '/tmp', cardFieldGuard: guard, untrusted: {
     rule: 'test', originOf: () => 'example.test', recordIngest: () => {}, label: input => ({ trust: 'untrusted', surface: 'web-page', origin: input.origin, retrievedAt: 'synthetic', text: input.text, truncated: input.truncated === true, rule: 'test' }),
     evaluateOutwardEffect: async () => { await approve(); return { allowed: true, reason: null, fix: null, untrustedOrigins: [] }; },
@@ -163,6 +163,29 @@ const actions = {
   secret: (engine: BrowserEngine) => engine.fillSecretBatch({}, { fills: [{ ref: 'e1', value: 'private-secret-fixture' }] }),
 };
 describe('BrowserEngine identity effect boundaries', () => {
+  test('a successful click URL change retains protection for filled same-document controls', async () => {
+    const f = fixture(); await f.engine.snapshot({}); reading(); f.arm();
+    f.locator.click = async () => { f.effects.push('click'); f.navigate(); };
+    expect(await f.engine.click({}, { ref: 'e1' })).toMatchObject({ navigated: true });
+    expect(f.guard.hasLiveMaterial('b1', 'p1')).toBe(true);
+    expect(f.guard.redact('b1', 'p1', 'private-cvv-fixture')).toBe('[withheld]');
+  });
+  test.each(['same-document', 'document-response'] as const)('explicit %s navigation is not evidence that the page forgot payment material', async kind => {
+    const f = fixture(); f.arm();
+    Object.assign(f.page, { goto: async () => { f.navigate(); return kind === 'same-document' ? null : { status: () => 200 }; } });
+    await f.engine.navigate({}, { url: 'https://example.test/#receipt' });
+    expect(f.guard.hasLiveMaterial('b1', 'p1')).toBe(true);
+    expect(f.guard.redact('b1', 'p1', 'private-cvv-fixture')).toBe('[withheld]');
+  });
+  test('only successful page closure retires the page material', async () => {
+    const f = fixture(); f.arm();
+    Object.assign(f.page, { close: async () => { throw new Error('Close did not reach the browser'); } });
+    await expect(f.engine.closeTab({}, { pageId: 'p1' })).rejects.toThrow();
+    expect(f.guard.hasLiveMaterial('b1', 'p1')).toBe(true);
+    Object.assign(f.page, { close: async () => { f.effects.push('close'); } });
+    await f.engine.closeTab({}, { pageId: 'p1' });
+    expect(f.effects).toEqual(['close']); expect(f.guard.hasLiveMaterial('b1', 'p1')).toBe(false);
+  });
   test.each(Object.keys(actions).filter(action => action !== 'secret') as (keyof typeof actions)[])('snapshot replacement blocks %s before its effect', async action => {
     const f = fixture(); await f.engine.snapshot({}); f.setName('Submit message'); const model = deferred();
     const result = actions[action](f.engine); await model.started; await f.engine.snapshot({}); model.release();

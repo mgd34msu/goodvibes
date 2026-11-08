@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { Agent } from 'undici';
 import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
@@ -286,13 +286,17 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
     const identities = new Map();
     const questionGroups = new Map();
     for (const request of judgmentRequests) {
-      const identity = createHash('sha256').update(JSON.stringify(request.body)).digest('hex');
-      identities.set(identity, (identities.get(identity) ?? 0) + 1);
+      const body = JSON.stringify(request.body);
+      const previous = identities.get(body);
+      if (previous) previous.count++;
+      else identities.set(body, { identity: `request-body-${identities.size + 1}`, count: 1, request });
       const group = [request.body.state?.provider && request.body.state?.model_id ? 'provider-catalog' : 'turn', ...Object.keys(request.body.questions).sort()].join(':');
       questionGroups.set(group, (questionGroups.get(group) ?? 0) + 1);
     }
-    const repeatedQuestionGroups = [...identities.entries()].filter(([, count]) => count > 2).map(([identity, count]) => {
-      const request = judgmentRequests.find(request => createHash('sha256').update(JSON.stringify(request.body)).digest('hex') === identity);
+    // Exact bodies are private Map keys; the report exposes only local ordinal
+    // references. Retain the originating request instead of searching and
+    // serializing the entire collection again for each duplicate group.
+    const repeatedQuestionGroups = [...identities.values()].filter(({ count }) => count > 2).map(({ identity, count, request }) => {
       return { identity, count, questions: Object.keys(request.body.questions).sort(), stateKeys: Object.keys(request.body.state ?? {}).sort(), scopedPrivacy: scopedPrivacyContract(request)?.name };
     });
     // Identical activity text on separate native turns is a separate use.
@@ -301,7 +305,7 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
     assert.equal(judgmentRequests.filter(request => Object.hasOwn(request.body.questions, 'unfinished')).length, 2,
       'Each successful original turn must receive one completion review');
     const identityCounts = {};
-    for (const count of identities.values()) identityCounts[count] = (identityCounts[count] ?? 0) + 1;
+    for (const { count } of identities.values()) identityCounts[count] = (identityCounts[count] ?? 0) + 1;
     return { elapsedMs: Date.now() - startedAt, judgmentQuestionGroups: Object.fromEntries(questionGroups), judgmentUniqueIdentities: identities.size, judgmentRequestsPerIdentity: identityCounts,
       repeatedWireIdentities: repeatedQuestionGroups, totalJudgmentRequestBound: 5_000,
       evidence: 'synthetic-http-protocol-only; not live Jev calibration', modelRequests: modelRequests.length, judgmentRequests: judgmentRequests.length, streamedDeltas: deltas.length, persistedDetachPolicyPrecedence: true, originalSteerHistoryPreserved: true, lastWatcherDetachKills: true, explicitKillAndTerminatedList: true, relativeWorkspaceRefused: true, restartHistoryPreserved: true, cancellationSettled: true, failureObserved: true, shutdownDuringStream: true };

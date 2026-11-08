@@ -297,6 +297,21 @@ export class BrowserEngine {
     return { sessionId, pageId, page };
   }
 
+  /** Retain the exact selected page through native reads and result publication.
+   * The session manager drains the callback after closing/disconnecting the
+   * browser, so a late native result cannot outlive successful shutdown. */
+  private async withTarget<T>(target: BrowserTarget, perform: (selected: {
+    readonly sessionId: string; readonly pageId: string; readonly page: Page; readonly current: () => void;
+  }) => Promise<T>): Promise<T> {
+    const selected = await this.target({ ...target });
+    return this.sessions.withPage(selected.sessionId, selected.pageId, async (page, current) => {
+      if (page !== selected.page) throw new BrowserSessionError('The original browser page was replaced.', 'Select a live page before retrying.');
+      current();
+      const result = await perform({ ...selected, current });
+      current(); return result;
+    });
+  }
+
   /**
    * Opens a browser only if nothing is open yet, so the first call a model
    * makes is a useful one instead of an error telling it to call launch first.
@@ -321,70 +336,77 @@ export class BrowserEngine {
       readonly launch?: BrowserLaunchOptions | undefined;
     },
   ): Promise<Record<string, unknown>> {
+    target = { ...target }; args = { ...args };
     const url = normalizeUrl(args.url);
     const sessionId = await this.ensureSession(target, args.launch ?? {});
-    const { pageId, page } = await this.sessions.page(sessionId, target.pageId);
-    const response = await page.goto(url, {
-      waitUntil: args.waitUntil ?? 'domcontentloaded',
-      timeout: args.timeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS,
+    return this.withTarget({ sessionId, pageId: target.pageId }, async ({ pageId, page, current }) => {
+      const response = await page.goto(url, {
+        waitUntil: args.waitUntil ?? 'domcontentloaded',
+        timeout: args.timeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS,
+      });
+      current();
+      this.snapshots.clear(sessionId, pageId);
+      // goto can be a same-document fragment change. A new document can also
+      // restore filled history or merchant state. A URL/load result does not
+      // establish that this page has forgotten its material; keep protection
+      // until the actual page or owned browser is closed.
+      const title = await page.title().catch(() => ''); current();
+      return {
+        sessionId,
+        pageId,
+        url: page.url(),
+        title,
+        httpStatus: response?.status() ?? null,
+        ...this.setupReceipt(),
+        next: 'Call action:"snapshot" to get element refs for this page.',
+      };
     });
-    this.snapshots.clear(sessionId, pageId);
-    // goto can be a same-document fragment change. A new document can also
-    // restore filled history or merchant state. A URL/load result does not
-    // establish that this page has forgotten its material; keep protection
-    // until the actual page or owned browser is closed.
-    return {
-      sessionId,
-      pageId,
-      url: page.url(),
-      title: await page.title().catch(() => ''),
-      httpStatus: response?.status() ?? null,
-      ...this.setupReceipt(),
-      next: 'Call action:"snapshot" to get element refs for this page.',
-    };
   }
 
   async snapshot(target: BrowserTarget, args: { readonly limit?: number | undefined } = {}, controls?: BrowserControlAdmission): Promise<Record<string, unknown>> {
-    const { sessionId, pageId, page } = await this.target(target);
-    const prior = this.currentSnapshot(sessionId, pageId);
-    if (controls?.verifySnapshotId !== undefined && prior?.snapshotId !== controls.verifySnapshotId) throw new StaleElementError('The offered browser snapshot was replaced.', 'Read the page again.');
-    // The guard goes IN rather than being applied to the result: the snapshot
-    // is also stored for ref resolution, and a stored copy holding the card
-    // would be the same leak one indirection further away.
-    const snapshot = await takeSnapshot(page, sessionId, pageId, {
-      ...args,
-      ...(controls ? { controls } : {}),
-      ...(this.cardGuard === null ? {} : { guard: this.cardGuard }),
+    target = { ...target }; args = { ...args };
+    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
+      const prior = this.currentSnapshot(sessionId, pageId);
+      if (controls?.verifySnapshotId !== undefined && prior?.snapshotId !== controls.verifySnapshotId) throw new StaleElementError('The offered browser snapshot was replaced.', 'Read the page again.');
+      // The guard goes IN rather than being applied to the result: the snapshot
+      // is also stored for ref resolution, and a stored copy holding the card
+      // would be the same leak one indirection further away.
+      const snapshot = await takeSnapshot(page, sessionId, pageId, {
+        ...args,
+        ...(controls ? { controls } : {}),
+        ...(this.cardGuard === null ? {} : { guard: this.cardGuard }),
+      });
+      current();
+      if (controls?.verifySnapshotId !== undefined) {
+        if (prior !== this.currentSnapshot(sessionId, pageId)) throw new StaleElementError('The offered browser snapshot was replaced.', 'Read the page again.');
+      } else this.snapshots.set(snapshot);
+      // Element names and values are written by the page, so a snapshot is
+      // untrusted content just as much as the body text is.
+      const origin = this.recordPageIngest(
+        snapshot.url,
+        snapshot.elements.map((element) => `${element.name} ${element.value ?? ''}`).join('\n'),
+      );
+      return {
+        sessionId,
+        pageId,
+        url: snapshot.url,
+        title: snapshot.title,
+        contentTrust: 'untrusted',
+        origin,
+        rule: this.untrusted.rule,
+        snapshotId: controls?.verifySnapshotId ?? snapshot.snapshotId,
+        elementCount: snapshot.elements.length,
+        truncated: snapshot.truncated,
+        elements: snapshot.elements.map((element) => ({
+          ref: element.ref,
+          role: element.role,
+          name: element.name,
+          ...(element.value === undefined ? {} : { value: element.value }),
+          ...(element.disabled === undefined ? {} : { disabled: element.disabled }),
+          ...(element.checked === undefined ? {} : { checked: element.checked }),
+        })),
+      };
     });
-    if (controls?.verifySnapshotId !== undefined) {
-      if (prior !== this.currentSnapshot(sessionId, pageId)) throw new StaleElementError('The offered browser snapshot was replaced.', 'Read the page again.');
-    } else this.snapshots.set(snapshot);
-    // Element names and values are written by the page, so a snapshot is
-    // untrusted content just as much as the body text is.
-    const origin = this.recordPageIngest(
-      snapshot.url,
-      snapshot.elements.map((element) => `${element.name} ${element.value ?? ''}`).join('\n'),
-    );
-    return {
-      sessionId,
-      pageId,
-      url: snapshot.url,
-      title: snapshot.title,
-      contentTrust: 'untrusted',
-      origin,
-      rule: this.untrusted.rule,
-      snapshotId: controls?.verifySnapshotId ?? snapshot.snapshotId,
-      elementCount: snapshot.elements.length,
-      truncated: snapshot.truncated,
-      elements: snapshot.elements.map((element) => ({
-        ref: element.ref,
-        role: element.role,
-        name: element.name,
-        ...(element.value === undefined ? {} : { value: element.value }),
-        ...(element.disabled === undefined ? {} : { disabled: element.disabled }),
-        ...(element.checked === undefined ? {} : { checked: element.checked }),
-      })),
-    };
   }
 
   /** Synchronous page/ref ownership for retained structured setup readers. */
@@ -766,81 +788,90 @@ export class BrowserEngine {
     target: BrowserTarget,
     args: { readonly text?: string | undefined; readonly url?: string | undefined; readonly timeoutMs?: number | undefined },
   ): Promise<Record<string, unknown>> {
-    const { sessionId, pageId, page } = await this.target(target);
-    const timeout = args.timeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS;
-    if (args.text) {
-      await page.getByText(args.text, { exact: false }).first().waitFor({ state: 'visible', timeout });
-      this.snapshots.clear(sessionId, pageId);
-      return { sessionId, pageId, waitedFor: { text: args.text }, url: page.url(), found: true };
-    }
-    if (args.url) {
-      await page.waitForURL(args.url, { timeout });
-      this.snapshots.clear(sessionId, pageId);
-      return { sessionId, pageId, waitedFor: { url: args.url }, url: page.url(), found: true };
-    }
-    await page.waitForLoadState('networkidle', { timeout });
-    return { sessionId, pageId, waitedFor: { state: 'networkidle' }, url: page.url(), found: true };
+    target = { ...target }; args = { ...args };
+    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
+      const timeout = args.timeoutMs ?? DEFAULT_NAVIGATION_TIMEOUT_MS;
+      if (args.text) {
+        await page.getByText(args.text, { exact: false }).first().waitFor({ state: 'visible', timeout });
+        current();
+        this.snapshots.clear(sessionId, pageId);
+        return { sessionId, pageId, waitedFor: { text: args.text }, url: page.url(), found: true };
+      }
+      if (args.url) {
+        await page.waitForURL(args.url, { timeout });
+        current();
+        this.snapshots.clear(sessionId, pageId);
+        return { sessionId, pageId, waitedFor: { url: args.url }, url: page.url(), found: true };
+      }
+      await page.waitForLoadState('networkidle', { timeout }); current();
+      return { sessionId, pageId, waitedFor: { state: 'networkidle' }, url: page.url(), found: true };
+    });
   }
 
   async readText(target: BrowserTarget, args: { readonly maxChars?: number | undefined } = {}): Promise<Record<string, unknown>> {
-    const { sessionId, pageId, page } = await this.target(target);
-    const limit = Math.max(200, Math.min(200_000, args.maxChars ?? DEFAULT_TEXT_LIMIT));
-    // innerText ignores shadow DOM, so a page that renders its content inside a
-    // component would read as empty. Open shadow roots are walked and appended.
-    const text = await page.evaluate(() => {
-      const collectShadowText = (root: Document | ShadowRoot): string[] => {
-        const parts: string[] = [];
-        for (const element of Array.from(root.querySelectorAll('*'))) {
-          const shadow = element.shadowRoot;
-          if (!shadow) continue;
-          const inner = (shadow as unknown as { readonly textContent?: string }).textContent ?? '';
-          if (inner.trim()) parts.push(inner.replace(/\s+/g, ' ').trim());
-          parts.push(...collectShadowText(shadow));
-        }
-        return parts;
-      };
-      const body = document.body?.innerText ?? '';
-      const shadow = collectShadowText(document);
-      return shadow.length > 0 ? `${body}\n${shadow.join('\n')}` : body;
-    });
-    // Embedded frames carry their own content from their own origin. Leaving
-    // them out means reading a page and missing the part that mattered, and
-    // each frame's origin is recorded separately because a frame is a
-    // different author with the same access to this page.
-    const frameTexts: string[] = [];
-    for (const frame of page.frames()) {
-      // The main frame is already read above. Identity comparison is not enough
-      // for a host-backed page, whose frame objects are created per call, so the
-      // main frame is the one with no parent.
-      if (frame === page.mainFrame() || frame.parentFrame() === null) continue;
-      const frameText = await frame.evaluate(() => document.body?.innerText ?? '').catch(() => '');
-      if (!frameText.trim()) continue;
-      this.recordPageIngest(frame.url());
-      frameTexts.push(`\n\n[embedded frame ${this.untrusted.originOf(frame.url())}]\n${frameText.trim()}`);
-    }
-    // Scrubbed before it is labelled, recorded, or returned. A page is free to
-    // render what was typed into it as ordinary body text, and this is the path
-    // that would hand that straight back.
-    const normalized = this.scrub(
-      sessionId,
-      pageId,
-      `${text}${frameTexts.join('')}`.replace(/\n{3,}/g, '\n\n').trim(),
-    );
-    const origin = this.recordPageIngest(page.url(), normalized);
-    return {
-      sessionId,
-      pageId,
-      url: page.url(),
-      title: await page.title().catch(() => ''),
-      // The page's words, labelled as the page's words. The envelope carries
-      // the origin and the standing rule with the text wherever it goes next.
-      content: this.untrusted.label({
-        origin,
-        text: normalized.slice(0, limit),
+    target = { ...target }; args = { ...args };
+    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
+      const limit = Math.max(200, Math.min(200_000, args.maxChars ?? DEFAULT_TEXT_LIMIT));
+      // innerText ignores shadow DOM, so a page that renders its content inside a
+      // component would read as empty. Open shadow roots are walked and appended.
+      const text = await page.evaluate(() => {
+        const collectShadowText = (root: Document | ShadowRoot): string[] => {
+          const parts: string[] = [];
+          for (const element of Array.from(root.querySelectorAll('*'))) {
+            const shadow = element.shadowRoot;
+            if (!shadow) continue;
+            const inner = (shadow as unknown as { readonly textContent?: string }).textContent ?? '';
+            if (inner.trim()) parts.push(inner.replace(/\s+/g, ' ').trim());
+            parts.push(...collectShadowText(shadow));
+          }
+          return parts;
+        };
+        const body = document.body?.innerText ?? '';
+        const shadow = collectShadowText(document);
+        return shadow.length > 0 ? `${body}\n${shadow.join('\n')}` : body;
+      });
+      current();
+      // Embedded frames carry their own content from their own origin. Leaving
+      // them out means reading a page and missing the part that mattered, and
+      // each frame's origin is recorded separately because a frame is a
+      // different author with the same access to this page.
+      const frameTexts: string[] = [];
+      for (const frame of page.frames()) {
+        // The main frame is already read above. Identity comparison is not enough
+        // for a host-backed page, whose frame objects are created per call, so the
+        // main frame is the one with no parent.
+        if (frame === page.mainFrame() || frame.parentFrame() === null) continue;
+        current();
+        const frameText = await frame.evaluate(() => document.body?.innerText ?? '').catch(() => ''); current();
+        if (!frameText.trim()) continue;
+        this.recordPageIngest(frame.url());
+        frameTexts.push(`\n\n[embedded frame ${this.untrusted.originOf(frame.url())}]\n${frameText.trim()}`);
+      }
+      // Scrubbed before it is labelled, recorded, or returned. A page is free to
+      // render what was typed into it as ordinary body text, and this is the path
+      // that would hand that straight back.
+      const normalized = this.scrub(
+        sessionId,
+        pageId,
+        `${text}${frameTexts.join('')}`.replace(/\n{3,}/g, '\n\n').trim(),
+      );
+      const title = await page.title().catch(() => ''); current();
+      const origin = this.recordPageIngest(page.url(), normalized); current();
+      return {
+        sessionId,
+        pageId,
+        url: page.url(),
+        title,
+        // The page's words, labelled as the page's words. The envelope carries
+        // the origin and the standing rule with the text wherever it goes next.
+        content: this.untrusted.label({
+          origin,
+          text: normalized.slice(0, limit),
+          truncated: normalized.length > limit,
+        }),
         truncated: normalized.length > limit,
-      }),
-      truncated: normalized.length > limit,
-    };
+      };
+    });
   }
 
   async screenshot(
@@ -886,12 +917,19 @@ export class BrowserEngine {
     target: BrowserTarget,
     args: { readonly url?: string | undefined; readonly launch?: BrowserLaunchOptions | undefined } = {},
   ): Promise<Record<string, unknown>> {
+    target = { ...target }; args = { ...args };
     const sessionId = await this.ensureSession(target, args.launch ?? {});
     const { pageId, page } = await this.sessions.newPage(sessionId);
-    if (args.url) {
-      await page.goto(normalizeUrl(args.url), { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
-    }
-    return { sessionId, pageId, url: page.url(), pages: await this.sessions.pageList(sessionId) };
+    return this.sessions.withPage(sessionId, pageId, async (original, current) => {
+      if (original !== page) throw new BrowserSessionError('The original new browser tab was replaced.', 'Select a live tab before retrying.');
+      current();
+      if (args.url) {
+        await page.goto(normalizeUrl(args.url), { waitUntil: 'domcontentloaded', timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
+      }
+      current();
+      const pages = await this.sessions.pageList(sessionId); current();
+      return { sessionId, pageId, url: page.url(), pages };
+    });
   }
 
   switchTab(target: BrowserTarget, args: { readonly pageId: string }): Record<string, unknown> {
@@ -909,17 +947,23 @@ export class BrowserEngine {
   }
 
   async goBack(target: BrowserTarget): Promise<Record<string, unknown>> {
-    const { sessionId, pageId, page } = await this.target(target);
-    const response = await page.goBack({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
-    this.snapshots.clear(sessionId, pageId);
-    return { sessionId, pageId, url: page.url(), moved: response !== null };
+    target = { ...target };
+    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
+      const response = await page.goBack({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
+      current();
+      this.snapshots.clear(sessionId, pageId);
+      return { sessionId, pageId, url: page.url(), moved: response !== null };
+    });
   }
 
   async goForward(target: BrowserTarget): Promise<Record<string, unknown>> {
-    const { sessionId, pageId, page } = await this.target(target);
-    const response = await page.goForward({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
-    this.snapshots.clear(sessionId, pageId);
-    return { sessionId, pageId, url: page.url(), moved: response !== null };
+    target = { ...target };
+    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
+      const response = await page.goForward({ timeout: DEFAULT_NAVIGATION_TIMEOUT_MS });
+      current();
+      this.snapshots.clear(sessionId, pageId);
+      return { sessionId, pageId, url: page.url(), moved: response !== null };
+    });
   }
 
   /**

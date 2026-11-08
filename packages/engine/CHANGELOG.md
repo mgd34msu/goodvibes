@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Keep navigation, history traversal, snapshots, text reads, waits and new-tab
+  navigation in the original page's shutdown drain. Refuse late results before
+  publishing page content or replacing snapshot references after session closure.
+
 - Check the complete current checkout against the exact notified quote before
   card entry and again before submission. Retain that observation through the
   final click boundary. Changed or unestablished terms stop with no submit;

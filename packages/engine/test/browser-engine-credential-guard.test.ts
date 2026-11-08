@@ -144,6 +144,7 @@ interface PageFixtureOptions {
   readonly onAction?: (method: string, signal: AbortSignal | undefined) => Promise<void>;
   readonly checkout?: () => unknown;
   readonly untrusted?: UntrustedContentPort;
+  readonly onContextClose?: () => Promise<void>;
 }
 function pageState(url: string, title: string, elements: readonly RawElement[]) {
   return { url, documents: [{ frameChain: [], url, title, controls: elements.map(element => ({ documentUrl: url,
@@ -222,7 +223,7 @@ async function buildEngine(url: string, elements: readonly RawElement[], options
     pages: () => [page],
     on: () => undefined,
     newPage: async () => page,
-    close: async () => undefined,
+    close: async () => { await options.onContextClose?.(); },
   } as unknown as BrowserContext;
   const sessions = new BrowserSessionManager({
     profileRoot: join(tmpdir(), 'goodvibes-credential-guard-profiles'),
@@ -1102,3 +1103,65 @@ test('actual checkout driver catches a changed quote after the engine waits for 
     expect(quotes.requests).toHaveLength(1);
   } finally { await gate.drain(); await result; }
 });
+
+for (const operation of ['navigate', 'snapshot', 'readText', 'back', 'forward', 'wait-text', 'wait-url', 'wait-load'] as const)
+  for (const retirement of ['shutdown', 'close'] as const)
+    test(`${operation} retains its actual native read through ${retirement} and never publishes a late result`, async () => {
+      const pending = pendingNativeAction();
+      let holding = false, ingests = 0, closed!: () => void;
+      const contextClosed = new Promise<void>(resolve => { closed = resolve; });
+      class RecordedPagePort extends NoopUntrustedContentPort {
+        override recordIngest(): void { ingests++; }
+      }
+      const native = async <T,>(value: T): Promise<T> => {
+        if (holding) await pending.wait(undefined);
+        return value;
+      };
+      const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, {
+        untrusted: new RecordedPagePort(), onContextClose: async () => { closed(); },
+        preparePage(page) {
+          const methods = {
+            goto: () => native(null), goBack: () => native(null), goForward: () => native(null),
+            waitForURL: () => native(undefined), waitForLoadState: () => native(undefined),
+            getByText: () => ({ first: () => ({ waitFor: () => native(undefined) }) }),
+            ...(operation === 'snapshot' ? { title: () => native('Dashboard') } : {}),
+            ...(operation === 'readText' ? { evaluate: () => native('The original page body') } : {}),
+          };
+          for (const [name, value] of Object.entries(methods)) Object.defineProperty(page, name, { value, configurable: true });
+        },
+      });
+      const original = await engine.snapshot({});
+      const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original session');
+      const { pageId } = await engine.sessionManager().page(sessionId);
+      if (typeof original.snapshotId !== 'string') throw new Error('Missing original snapshot');
+      const originalSnapshotId = original.snapshotId, before = ingests;
+      holding = true;
+      const invoke = (): Promise<Record<string, unknown>> => {
+        switch (operation) {
+          case 'navigate': return engine.navigate({ sessionId, pageId }, { url: ORDINARY_URL });
+          case 'snapshot': return engine.snapshot({ sessionId, pageId });
+          case 'readText': return engine.readText({ sessionId, pageId });
+          case 'back': return engine.goBack({ sessionId, pageId });
+          case 'forward': return engine.goForward({ sessionId, pageId });
+          case 'wait-text': return engine.waitFor({ sessionId, pageId }, { text: 'Original page' });
+          case 'wait-url': return engine.waitFor({ sessionId, pageId }, { url: ORDINARY_URL });
+          case 'wait-load': return engine.waitFor({ sessionId, pageId }, {});
+        }
+      };
+      const result = invoke().catch((error: unknown) => error);
+      let retiring: Promise<unknown> | undefined, retired = false;
+      try {
+        await pending.started;
+        retiring = (retirement === 'shutdown' ? engine.shutdown() : engine.close(sessionId)).then(value => { retired = true; return value; });
+        const observedRetirement = retiring.catch((error: unknown) => error);
+        await contextClosed;
+        await new Promise<void>(resolve => { setImmediate(() => { resolve(); }); });
+        if (retirement === 'shutdown') expect(retired).toBe(false);
+        expect(ingests).toBe(before);
+        pending.release();
+        expect(await result).toBeInstanceOf(BrowserSessionError);
+        await observedRetirement;
+        expect(ingests).toBe(before);
+        expect(() => engine.assertSnapshotCurrent(sessionId, pageId, originalSnapshotId)).not.toThrow();
+      } finally { await pending.drain(); await result; await retiring?.catch(() => undefined); }
+    });

@@ -122,6 +122,10 @@ describe('synthesized knowledge serving authority', () => {
     const low = await store.upsertNode(input('low', { confidence: 0.9 }));
     expect(low.status).toBe('active'); expect(low.confidence).toBe(0.9);
     expect(low.metadata.nodeActivation).toMatchObject({ outcome: 'accepted', probability: 0.99, battery: nodeServingWithoutReview.name });
+    const activation = low.metadata.nodeActivation as Record<string, unknown>;
+    expect(activation.candidateHash).toBeUndefined();
+    expect(activation.evidence).toEqual([{ sourceId: 'manual', extractionId: store.getExtractionBySourceId('manual')?.id }]);
+    expect(activation.subjects).toEqual([]);
     const request = JSON.stringify(fake.requests);
     for (const privateValue of ['NODE_PRIVATE', 'SOURCE_PRIVATE', 'EXTRACTION_PRIVATE', 'createdAt', 'updatedAt']) expect(request).not.toContain(privateValue);
     expect(request).toContain('no wireless charging');

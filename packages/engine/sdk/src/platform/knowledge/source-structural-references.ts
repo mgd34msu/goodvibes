@@ -113,18 +113,22 @@ export function projectKnowledgeNodeActivationMetadata(store: KnowledgeStore, no
   if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return metadata;
   const activation: unknown = Object.getOwnPropertyDescriptor(metadata, 'nodeActivation')?.value;
   if (!activation || typeof activation !== 'object' || Array.isArray(activation)) return metadata;
-  const projected: Record<string, unknown> = { ...activation, candidateHash: 'activation-candidate-reference', evidenceHash: 'activation-evidence-reference' };
+  const projected: Record<string, unknown> = { ...activation };
+  if (Object.hasOwn(activation, 'candidateHash')) projected.candidateHash = 'activation-candidate-reference';
+  if (Object.hasOwn(activation, 'evidenceHash')) projected.evidenceHash = 'activation-evidence-reference';
   const evidence: unknown = Object.getOwnPropertyDescriptor(activation, 'evidence')?.value;
   if (Array.isArray(evidence)) projected.evidence = evidence.map((entry: unknown, index) => {
     if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
     const native = known.evidence[index];
     const references = native?.source ? projectKnowledgeSourceReferences(native.source, native.extraction, native.proof) : undefined;
-    return { ...entry, sourceHash: 'activation-source-content-reference', extractionHash: 'activation-extraction-content-reference',
+    return { ...entry,
+      ...(Object.hasOwn(entry, 'sourceHash') ? { sourceHash: 'activation-source-content-reference' } : {}),
+      ...(Object.hasOwn(entry, 'extractionHash') ? { extractionHash: 'activation-extraction-content-reference' } : {}),
       ...(references ? { sourceId: references.sourceId, ...(references.extractionId ? { extractionId: references.extractionId } : {}) } : {}) };
   });
   const subjects: unknown = Object.getOwnPropertyDescriptor(activation, 'subjects')?.value;
   if (Array.isArray(subjects)) projected.subjects = subjects.map((entry: unknown) => entry && typeof entry === 'object' && !Array.isArray(entry)
-    ? { ...entry, nodeHash: 'activation-subject-content-reference' } : entry);
+    ? { ...entry, ...(Object.hasOwn(entry, 'nodeHash') ? { nodeHash: 'activation-subject-content-reference' } : {}) } : entry);
   return { ...metadata, nodeActivation: projected };
 }
 

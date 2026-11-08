@@ -159,10 +159,9 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
           : reading.operationProvenance === 'classic' ? 'Classic operation: semantic serving approval was not evaluated; retain the untrusted draft for owner review'
           : `Pending review: serving judgment ${reading.reason ?? 'uncertain'}` }),
       nodeActivation: { ...(reading.operationProvenance === 'classic' ? {} : { battery: nodeServingWithoutReview.name, version: nodeServingWithoutReview.version }), ...reading,
-        ownerConfidenceFloor, candidateHash: supportHash(activationContent(draft.record)), evidenceHash: draft.evidenceHash,
-        evidence: draft.evidence.map(({ id, source, extraction }) => ({ sourceId: id, sourceHash: supportHash(source),
-          extractionId: extraction?.id, extractionHash: supportHash(extraction) })),
-        subjects: draft.subjects.map(({ id, node }) => ({ nodeId: id, nodeHash: supportHash(node) })) },
+        ownerConfidenceFloor, evidenceHash: draft.evidenceHash,
+        evidence: draft.evidence.map(({ id, extraction }) => ({ sourceId: id, extractionId: extraction?.id })),
+        subjects: draft.subjects.map(({ id }) => ({ nodeId: id })) },
     } }, draft.record);
     retainKnowledgeNodeActivationReferences(store, record, draft.evidence, draft.references);
     return { ...draft, record };

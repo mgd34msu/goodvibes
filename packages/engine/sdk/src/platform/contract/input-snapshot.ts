@@ -11,7 +11,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 export const CONTRACT_INPUT_EXCLUSIONS = ['.git', '.goodvibes', '.ssh', '.aws', '.gnupg'] as const;
 const GIT_METADATA_BYTES = 256 * 1024 * 1024;
 const READ_CHUNK_BYTES = 64 * 1024;
-const HASH = /^[0-9a-f]{40,64}$/;
+const HASH = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface ContractInputFile {
@@ -19,13 +19,16 @@ export interface ContractInputFile {
   readonly kind: 'file' | 'symlink' | 'missing';
   readonly mode: '100644' | '100755' | '120000' | '0';
   readonly oid?: string | undefined;
+  /** Strong commitment for SHA-1 repositories and retained version-one receipts.
+   * Native SHA-256 object IDs need no additional content digest in version two.
+   */
   readonly digest?: string | undefined;
   readonly identity?: string | undefined;
 }
 
-/** A versioned local receipt. Digests and object ids are provenance, never permission grants. */
+/** A versioned local receipt. Native objects establish provenance, not permission. */
 export interface ContractInputSnapshot {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly id: string;
   readonly sourceRoot: string;
   readonly sourceIdentity: string;
@@ -49,7 +52,10 @@ export interface CaptureContractInputOptions {
   readonly maxFiles?: number | undefined;
 }
 
-function digest(data: string | Buffer): string { return createHash('sha256').update(data).digest('hex'); }
+/** SHA-1 Git IDs need an independent strong byte commitment. Native SHA-256
+ * repositories need none; older receipts still validate their recorded digest.
+ */
+function contentDigest(data: Buffer): string { return createHash('sha256').update(data).digest('hex'); }
 function identity(stat: BigIntStats): string { return `${stat.dev}:${stat.ino}:${stat.mode}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`; }
 function directoryIdentity(stat: BigIntStats): string { return `${stat.dev}:${stat.ino}`; }
 function safePath(path: string): boolean {
@@ -118,8 +124,19 @@ async function assertNoSpecialFiles(root: string, exclusions: readonly string[],
   }
 }
 
+/** The complete logical index includes excluded credential-directory paths.
+ * Persist one opaque commitment instead of exposing those paths through contract
+ * inspection or treating an incidental index-file rewrite as a source change.
+ * Git has no native ID for the combination of staged entries and index flags.
+ */
 function indexFingerprint(root: string): string {
-  return digest(Buffer.concat([git(root, ['ls-files', '--stage', '-z']), git(root, ['ls-files', '-v', '-z'])]));
+  return createHash('sha256').update(git(root, ['ls-files', '--stage', '-z']))
+    .update(git(root, ['ls-files', '-v', '-z'])).digest('hex');
+}
+function objectFormat(root: string): 'sha1' | 'sha256' {
+  const format = gitText(root, ['rev-parse', '--show-object-format']);
+  if (format !== 'sha1' && format !== 'sha256') throw new Error('unsupported contract input Git object format');
+  return format;
 }
 /** Owner Git operations belong to the owner, including abandoned locks that need manual recovery. */
 async function assertOwnerGitIdle(root: string, signal?: AbortSignal): Promise<void> {
@@ -156,10 +173,12 @@ async function directories(root: string, path: string): Promise<string[]> {
 }
 async function readEntry(root: string, path: string, options: {
   readonly signal?: AbortSignal | undefined;
-  readonly objectFormat?: string | undefined;
+  readonly objectFormat: 'sha1' | 'sha256';
+  readonly storeObjects?: boolean | undefined;
+  readonly verifyContentDigest: boolean;
   readonly knownObjects?: ReadonlySet<string> | undefined;
   readonly verified?: Map<string, ContractInputFile> | undefined;
-} = {}): Promise<{ readonly file: ContractInputFile; readonly data?: Buffer; readonly size: number }> {
+}): Promise<{ readonly file: ContractInputFile; readonly data?: Buffer; readonly size: number }> {
   let parents: string[];
   try { parents = await directories(root, path); }
   catch (error) {
@@ -179,23 +198,30 @@ async function readEntry(root: string, path: string, options: {
     return { file: verified, size: Number(before.size) };
   }
   let data: Buffer | undefined;
-  let contentDigest: string;
-  let oid: string | undefined;
+  let strongDigest: string | undefined;
+  let oid: string;
   let mode: ContractInputFile['mode'];
   let kind: ContractInputFile['kind'];
+  if (!before.isFile() && !before.isSymbolicLink()) throw new Error(`contract input contains unsupported special file or submodule: ${path}`);
+  // Reconstruct the actual Git blob ID used by the snapshot's immutable tree.
+  // Its algorithm comes from this repository, never a new application label.
+  const objectHash = createHash(options.objectFormat).update(`blob ${before.size}\0`);
   if (before.isSymbolicLink()) {
     data = await readlink(absolute, { encoding: 'buffer' });
+    if (BigInt(data.length) !== before.size) throw new Error(`contract input symlink changed while reading: ${path}`);
     if (!Buffer.from(data.toString('utf8')).equals(data)) throw new Error(`contract input contains a non-UTF-8 symlink: ${path}`);
     kind = 'symlink'; mode = '120000';
-    contentDigest = digest(data);
-    if (options.objectFormat) oid = gitText(root, ['hash-object', '-w', '--stdin', '--no-filters'], data);
+    if (options.verifyContentDigest) strongDigest = contentDigest(data);
+    oid = objectHash.update(data).digest('hex');
+    if (options.storeObjects && !options.knownObjects?.has(oid)) {
+      if (gitText(root, ['hash-object', '-w', '--stdin', '--no-filters'], data) !== oid)
+        throw new Error(`contract input symlink changed while storing: ${path}`);
+    }
   } else {
-    if (!before.isFile()) throw new Error(`contract input contains unsupported special file or submodule: ${path}`);
     const handle = await open(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     try {
       if (identity(await handle.stat({ bigint: true })) !== identity(before)) throw new Error(`contract input file replaced: ${path}`);
-      const hash = createHash('sha256');
-      const objectHash = options.objectFormat ? createHash(options.objectFormat).update(`blob ${before.size}\0`) : undefined;
+      const hash = options.verifyContentDigest ? createHash('sha256') : undefined;
       const buffer = Buffer.allocUnsafe(Math.min(READ_CHUNK_BYTES, Number(before.size)));
       let count = 0;
       // Read only the initial size, in fixed memory. A growing file cannot keep capture alive.
@@ -203,15 +229,15 @@ async function readEntry(root: string, path: string, options: {
         options.signal?.throwIfAborted();
         const read = await handle.read(buffer, 0, Math.min(buffer.length, Number(before.size) - count), count);
         if (read.bytesRead === 0) break;
-        hash.update(buffer.subarray(0, read.bytesRead));
-        objectHash?.update(buffer.subarray(0, read.bytesRead));
+        hash?.update(buffer.subarray(0, read.bytesRead));
+        objectHash.update(buffer.subarray(0, read.bytesRead));
         count += read.bytesRead;
       }
       if (count !== Number(before.size) || identity(await handle.stat({ bigint: true })) !== identity(before)) throw new Error(`contract input changed while reading: ${path}`);
-      contentDigest = hash.digest('hex');
-      oid = objectHash?.digest('hex');
+      strongDigest = hash?.digest('hex');
+      oid = objectHash.digest('hex');
       // Reuse existing objects; new bytes go directly from the held descriptor to Git.
-      if (oid && !options.knownObjects?.has(oid)) {
+      if (options.storeObjects && !options.knownObjects?.has(oid)) {
         const stored = git(root, ['hash-object', '-w', '--stdin', '--no-filters'], undefined, undefined, false, { input: handle.fd }).toString().trim();
         if (stored !== oid || identity(await handle.stat({ bigint: true })) !== identity(before)) throw new Error(`contract input changed while storing: ${path}`);
       }
@@ -219,7 +245,7 @@ async function readEntry(root: string, path: string, options: {
     kind = 'file'; mode = (before.mode & 0o111n) !== 0n ? '100755' : '100644';
   }
   if (identity(await lstat(absolute, { bigint: true })) !== identity(before) || JSON.stringify(await directories(root, path)) !== JSON.stringify(parents)) throw new Error(`contract input replaced while reading: ${path}`);
-  const file = { path, kind, mode, digest: contentDigest, identity: identity(before), ...(oid ? { oid } : {}) };
+  const file = { path, kind, mode, oid, ...(strongDigest === undefined ? {} : { digest: strongDigest }), identity: identity(before) };
   options.verified?.set(path, file);
   return { file, ...(data ? { data } : {}), size: Number(before.size) };
 }
@@ -272,7 +298,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
   await assertNoSpecialFiles(root, CONTRACT_INPUT_EXCLUSIONS, signal);
   const selected = paths(root, CONTRACT_INPUT_EXCLUSIONS);
   if (options.maxFiles !== undefined && selected.length > options.maxFiles) throw new Error('contract input exceeds caller file-count budget');
-  const objectFormat = gitText(root, ['rev-parse', '--show-object-format']);
+  const format = objectFormat(root);
   const knownObjects = new Set(git(root, ['ls-files', '--stage', '-z']).toString().split('\0').map(entry => entry.split(' ')[1]!));
   const temporary = await mkdtemp(join(tmpdir(), 'goodvibes-contract-input-'));
   const alternateIndex = join(temporary, 'index');
@@ -282,7 +308,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
     let bytes = 0;
     for (const path of selected) {
       check();
-      const entry = await readEntry(root, path, { signal, objectFormat, knownObjects });
+      const entry = await readEntry(root, path, { signal, objectFormat: format, knownObjects, storeObjects: true, verifyContentDigest: format === 'sha1' });
       bytes += entry.size;
       if (options.maxBytes !== undefined && bytes > options.maxBytes) throw new Error('contract input exceeds byte bound selected by caller');
       if (entry.file.kind === 'symlink') links.set(path, entry.data!.toString());
@@ -299,7 +325,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
     const inputCommit = inputTree === headTree ? ownerHead : gitText(root, ['commit-tree', inputTree, '-p', ownerHead, '-m', 'Local contract input; not a deliverable']);
     // Encode generated opaque IDs without numeric runs; the privacy floor still
     // evaluates every original/captured path and must not be relaxed for UUIDs.
-    const receipt: ContractInputSnapshot = { version: 1, id: randomUUID().replace(/[0-9]/g, (digit) => String.fromCharCode(107 + Number(digit))), sourceRoot: root, sourceIdentity, gitIdentity, ownerHead, ownerRef, indexFingerprint: index, inputTree, inputCommit, capturedAt: Date.now(), dirty, exclusions: [...CONTRACT_INPUT_EXCLUSIONS], files };
+    const receipt: ContractInputSnapshot = { version: 2, id: randomUUID().replace(/[0-9]/g, (digit) => String.fromCharCode(107 + Number(digit))), sourceRoot: root, sourceIdentity, gitIdentity, ownerHead, ownerRef, indexFingerprint: index, inputTree, inputCommit, capturedAt: Date.now(), dirty, exclusions: [...CONTRACT_INPUT_EXCLUSIONS], files };
     check();
     await assertContractInputOwner(receipt, signal);
     if (await indexIdentity(root) !== originalIndex) throw new Error('contract input index replaced during capture');
@@ -326,10 +352,13 @@ export async function assertContractInputOwner(snapshot: ContractInputSnapshot, 
   if (indexFingerprint(root) !== snapshot.indexFingerprint) throw new ContractInputOwnerChangedError('index', 'contract input owner index changed');
   await assertNoSpecialFiles(root, snapshot.exclusions, signal);
   if (JSON.stringify(paths(root, snapshot.exclusions)) !== JSON.stringify(snapshot.files.map((file) => file.path))) throw new ContractInputOwnerChangedError('paths', 'contract input owner path set changed');
+  const format = objectFormat(root);
   for (const file of snapshot.files) {
     signal?.throwIfAborted();
-    const current = (await readEntry(root, file.path, { signal })).file;
-    if (current.kind !== file.kind || current.mode !== file.mode || current.digest !== file.digest || current.identity !== file.identity) throw new ContractInputOwnerChangedError('file', `contract input owner changed: ${file.path}`);
+    const current = (await readEntry(root, file.path, { signal, objectFormat: format, verifyContentDigest: snapshot.version === 1 || format === 'sha1' })).file;
+    if (current.kind !== file.kind || current.mode !== file.mode || current.oid !== file.oid
+      || (file.digest !== undefined && current.digest !== file.digest) || current.identity !== file.identity)
+      throw new ContractInputOwnerChangedError('file', `contract input owner changed: ${file.path}`);
   }
   signal?.throwIfAborted();
   await assertOwnerGitIdle(root, signal);
@@ -409,6 +438,7 @@ export async function materializeContractInput(snapshot: ContractInputSnapshot, 
 }
 
 async function materializeFiles(sourceRoot: string, files: readonly ContractInputFile[], commit: string, worktreePath: string, signal?: AbortSignal): Promise<void> {
+  const format = objectFormat(sourceRoot);
   // Git's batch protocol streams raw blobs without checkout filters or a process per file.
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
   const child = spawn('git', ['-C', sourceRoot, '-c', 'core.hooksPath=/dev/null', 'cat-file', '--batch'], {
@@ -453,7 +483,10 @@ async function materializeFiles(sourceRoot: string, files: readonly ContractInpu
       const path = join(worktreePath, file.path);
       await mkdir(dirname(path), { recursive: true });
       const handle = file.kind === 'file' ? await open(path, 'wx', file.mode === '100755' ? 0o755 : 0o644) : undefined;
-      const hash = createHash('sha256');
+      // Native SHA-256 blobs need no second digest. SHA-1 repositories and
+      // existing version-one receipts retain their independent byte commitment.
+      const hash = file.digest === undefined
+        ? createHash(format).update(`blob ${header[2]}\0`) : createHash('sha256');
       const link: Buffer[] = [];
       let remaining = Number(header[2]);
       try {
@@ -463,12 +496,16 @@ async function materializeFiles(sourceRoot: string, files: readonly ContractInpu
           hash.update(data);
           if (handle) {
             let written = 0;
-            while (written < data.length) written += (await handle.write(data.subarray(written))).bytesWritten;
+            while (written < data.length) {
+              const count = (await handle.write(data.subarray(written))).bytesWritten;
+              if (count <= 0) throw new Error('contract input materialization made no write progress');
+              written += count;
+            }
           } else link.push(Buffer.from(data));
           remaining -= data.length; pending = pending.subarray(data.length);
         }
         const actualDigest = hash.digest('hex');
-        if (file.digest && actualDigest !== file.digest) throw new Error(`contract input blob digest mismatch: ${file.path}`);
+        if (actualDigest !== (file.digest ?? file.oid)) throw new Error(`contract input ${file.digest === undefined ? 'native blob' : 'blob digest'} mismatch: ${file.path}`);
       } finally { await handle?.close(); }
       if (await line() !== '') throw new Error('invalid contract input blob terminator');
       if (file.kind === 'symlink') await symlink(Buffer.concat(link).toString(), path);
@@ -489,12 +526,13 @@ async function materializeFiles(sourceRoot: string, files: readonly ContractInpu
   }
 }
 
-/** Strict receipt validation at the persistence boundary; absent receipts remain explicitly legacy. */
+/** Strict receipt validation at the persistence boundary; no receipt grants authority. */
 export function isContractInputSnapshot(value: unknown): value is ContractInputSnapshot {
   if (value === null || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
-  if (v['version'] !== 1 || typeof v['id'] !== 'string' || (!/^[0-9a-f-]{36}$/.test(v['id']) && !/^[a-fk-t]{8}-[a-fk-t]{4}-[a-fk-t]{4}-[a-fk-t]{4}-[a-fk-t]{12}$/.test(v['id'])) || typeof v['sourceRoot'] !== 'string' || !isAbsolute(v['sourceRoot']) || typeof v['sourceIdentity'] !== 'string' || typeof v['gitIdentity'] !== 'string' || typeof v['ownerRef'] !== 'string' || typeof v['capturedAt'] !== 'number' || !Number.isFinite(v['capturedAt']) || typeof v['dirty'] !== 'boolean') return false;
-  if (!['ownerHead', 'inputTree', 'inputCommit'].every((key) => typeof v[key] === 'string' && HASH.test(v[key] as string)) || typeof v['indexFingerprint'] !== 'string' || !SHA256.test(v['indexFingerprint'])) return false;
+  if ((v['version'] !== 1 && v['version'] !== 2) || typeof v['id'] !== 'string' || (!/^[0-9a-f-]{36}$/.test(v['id']) && !/^[a-fk-t]{8}-[a-fk-t]{4}-[a-fk-t]{4}-[a-fk-t]{4}-[a-fk-t]{12}$/.test(v['id'])) || typeof v['sourceRoot'] !== 'string' || !isAbsolute(v['sourceRoot']) || typeof v['sourceIdentity'] !== 'string' || typeof v['gitIdentity'] !== 'string' || typeof v['ownerRef'] !== 'string' || typeof v['capturedAt'] !== 'number' || !Number.isFinite(v['capturedAt']) || typeof v['dirty'] !== 'boolean') return false;
+  if (!['ownerHead', 'inputTree', 'inputCommit'].every((key) => typeof v[key] === 'string' && HASH.test(v[key] as string))
+    || typeof v['indexFingerprint'] !== 'string' || !SHA256.test(v['indexFingerprint']) || v['ownerIndex'] !== undefined) return false;
   if (!Array.isArray(v['exclusions']) || JSON.stringify(v['exclusions']) !== JSON.stringify(CONTRACT_INPUT_EXCLUSIONS) || !Array.isArray(v['files'])) return false;
   const pathsSeen = new Set<string>();
   for (const file of v['files']) {
@@ -503,7 +541,10 @@ export function isContractInputSnapshot(value: unknown): value is ContractInputS
     if (typeof f['path'] !== 'string' || !safePath(f['path']) || excluded(f['path'], CONTRACT_INPUT_EXCLUSIONS) || pathsSeen.has(f['path'])) return false;
     pathsSeen.add(f['path']);
     if (f['kind'] === 'missing') { if (f['mode'] !== '0' || f['oid'] !== undefined || f['digest'] !== undefined || f['identity'] !== undefined) return false; }
-    else if ((f['kind'] !== 'file' && f['kind'] !== 'symlink') || (f['kind'] === 'file' ? f['mode'] !== '100644' && f['mode'] !== '100755' : f['mode'] !== '120000') || typeof f['oid'] !== 'string' || !HASH.test(f['oid']) || typeof f['digest'] !== 'string' || !SHA256.test(f['digest']) || typeof f['identity'] !== 'string') return false;
+    else if ((f['kind'] !== 'file' && f['kind'] !== 'symlink') || (f['kind'] === 'file' ? f['mode'] !== '100644' && f['mode'] !== '100755' : f['mode'] !== '120000') || typeof f['oid'] !== 'string' || !HASH.test(f['oid'])
+      || (v['version'] === 1 || (f['oid'] as string).length === 40
+        ? typeof f['digest'] !== 'string' || !SHA256.test(f['digest']) : f['digest'] !== undefined)
+      || typeof f['identity'] !== 'string') return false;
   }
   return true;
 }
@@ -519,21 +560,41 @@ export async function assertContractInputView(snapshot: ContractInputSnapshot, s
 }
 
 /** The default immutable authority owns this clone and its constant manifest. */
-export function createContractInputViewAssertion(snapshot: ContractInputSnapshot, signal?: AbortSignal, viewPath = contractInputPath(snapshot)): () => Promise<void> {
+export interface ContractInputViewAssertion {
+  (): Promise<void>;
+  /** A batch already validated this view; recheck its actual verified file owner. */
+  readonly assertPath: (path: string, signal?: AbortSignal) => Promise<void>;
+}
+export function createContractInputViewAssertion(snapshot: ContractInputSnapshot, signal?: AbortSignal, viewPath = contractInputPath(snapshot)): ContractInputViewAssertion {
   const owned = structuredClone(snapshot);
   const prepared = prepareInputViewManifest(owned);
   const verified = new Map<string, ContractInputFile>();
-  return () => assertInputView(owned, signal, viewPath, prepared, verified);
+  const byPath = prepared.available;
+  const assertPath = async (path: string, current?: AbortSignal) => {
+    signal?.throwIfAborted(); current?.throwIfAborted();
+    const expected = byPath.get(path), observed = verified.get(path);
+    const stat = await lstat(join(viewPath, path), { bigint: true });
+    signal?.throwIfAborted(); current?.throwIfAborted();
+    if (stat.isDirectory()) return;
+    // Only the independent whole-view check can populate this private cache.
+    // Serialized receipt identity alone cannot establish the first byte match.
+    if (!expected || expected.kind !== 'file' || !observed || observed.kind !== 'file'
+      || observed.mode !== expected.mode || observed.oid !== expected.oid || identity(stat) !== observed.identity)
+      throw new Error('contract input view changed at accessed path');
+  };
+  return Object.freeze(Object.assign(() => assertInputView(owned, signal, viewPath, prepared, verified), { assertPath }));
 }
 
 async function assertInputView(snapshot: ContractInputSnapshot, signal: AbortSignal | undefined, viewPath: string, prepared?: PreparedInputViewManifest, verified?: Map<string, ContractInputFile>): Promise<void> {
   assertInputObjects(snapshot, snapshot.sourceRoot, prepared);
   const root = viewPath;
   if (gitText(root, ['rev-parse', 'HEAD']) !== snapshot.inputCommit) throw new Error('contract input view no longer names the recorded commit');
+  const format = objectFormat(root);
   for (const file of snapshot.files) {
     signal?.throwIfAborted();
-    const current = (await readEntry(root, file.path, { signal, verified })).file;
-    if (current.kind !== file.kind || current.mode !== file.mode || current.digest !== file.digest) throw new Error(`contract input view changed: ${file.path}`);
+    const current = (await readEntry(root, file.path, { signal, verified, objectFormat: format, verifyContentDigest: snapshot.version === 1 || format === 'sha1' })).file;
+    if (current.kind !== file.kind || current.mode !== file.mode || current.oid !== file.oid
+      || (file.digest !== undefined && current.digest !== file.digest)) throw new Error(`contract input view changed: ${file.path}`);
   }
   await assertNoSpecialFiles(root, snapshot.exclusions, signal);
   if (JSON.stringify(paths(root, snapshot.exclusions)) !== (prepared?.expectedPaths ?? JSON.stringify(snapshot.files.filter((file) => file.kind !== 'missing').map((file) => file.path)))) throw new Error('contract input view path set changed');
@@ -542,6 +603,7 @@ async function assertInputView(snapshot: ContractInputSnapshot, signal: AbortSig
 /** Member worktrees inherit the contract's current exact Git tree, without owner checkout filters/hooks. */
 export async function initializeContractMemberWorktree(sourceRoot: string, worktree: { readonly path: string; create(startPoint?: string, checkout?: boolean): Promise<void> }): Promise<void> {
   markCapturedInputPath(worktree.path);
+  const format = objectFormat(sourceRoot);
   const commit = gitText(sourceRoot, ['rev-parse', 'HEAD']);
   const entries = git(sourceRoot, ['ls-tree', '-r', '-z', commit]).toString().split('\0').filter(Boolean);
   const files: ContractInputFile[] = [];
@@ -555,7 +617,9 @@ export async function initializeContractMemberWorktree(sourceRoot: string, workt
     const kind = mode === '120000' ? 'symlink' : 'file';
     const data = kind === 'symlink' ? git(sourceRoot, ['cat-file', 'blob', oid]) : undefined;
     if (data) links.set(path, data.toString());
-    files.push({ path, mode, kind, oid, ...(data ? { digest: digest(data) } : {}) });
+    // The earlier link-confinement check must bind the exact target later
+    // materialized, including in repositories whose native IDs use SHA-1.
+    files.push({ path, mode, kind, oid, ...(data && format === 'sha1' ? { digest: contentDigest(data) } : {}) });
   }
   checkLinks(files, links);
   await worktree.create(commit, false);

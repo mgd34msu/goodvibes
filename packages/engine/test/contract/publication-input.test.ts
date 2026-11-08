@@ -16,14 +16,15 @@ function git(root: string, ...args: string[]): string {
   return result.stdout.trim();
 }
 
-async function fixture(readme?: string, attributes?: string) {
-  const root = makeRepo();
+async function fixture(readme?: string, attributes?: string, version: 1 | 2 = 2, format?: 'sha1' | 'sha256') {
+  const root = makeRepo(format);
   if (readme !== undefined) {
     writeFileSync(join(root, 'README.md'), readme);
     if (attributes !== undefined) writeFileSync(join(root, '.gitattributes'), attributes);
     git(root, 'add', 'README.md', ...(attributes === undefined ? [] : ['.gitattributes'])); git(root, 'commit', '-qm', 'original owner input');
   }
-  const snapshot = await captureContractInput(root);
+  const captured = await captureContractInput(root);
+  const snapshot = { ...captured, version };
   const view = join(root, '.goodvibes/.worktrees/contract/publication');
   mkdirSync(join(root, '.goodvibes/.worktrees/contract'), { recursive: true });
   git(root, 'worktree', 'add', '--no-checkout', '-b', 'publication-result', view, snapshot.inputCommit);
@@ -92,8 +93,8 @@ test.each([false, true])('conflicting publication preserves both versions and ne
   } finally { rmSync(setup.root, { recursive: true, force: true }); }
 });
 
-test('publication admission preserves later owner edits, staging, history and original input and rejects serialized replay', async () => {
-  const setup = await fixture();
+test.each([['sha1', 1], ['sha1', 2], ['sha256', 2]] as const)('publication preserves owner edits, staging, history and the original %s/v%s input and rejects replay', async (format, version) => {
+  const setup = await fixture(undefined, undefined, version, format);
   try {
     const original = JSON.stringify(setup.contract.inputSnapshot), index = readFileSync(join(setup.root, '.git/index'));
     const head = git(setup.root, 'rev-parse', 'HEAD');

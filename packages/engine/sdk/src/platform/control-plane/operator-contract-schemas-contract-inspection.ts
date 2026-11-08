@@ -114,8 +114,7 @@ export const CONTRACT_DURABLE_ADMISSION_SCHEMA = {
   ],
 };
 
-export const CONTRACT_INPUT_SNAPSHOT_SCHEMA = objectSchema({
-  version: VERSION_ONE,
+const INPUT_SNAPSHOT_PROPERTIES = {
   id: STRING_SCHEMA,
   sourceRoot: STRING_SCHEMA,
   sourceIdentity: STRING_SCHEMA,
@@ -128,15 +127,29 @@ export const CONTRACT_INPUT_SNAPSHOT_SCHEMA = objectSchema({
   capturedAt: NUMBER_SCHEMA,
   dirty: BOOLEAN_SCHEMA,
   exclusions: STRING_LIST_SCHEMA,
-  files: arraySchema(objectSchema({
-    path: STRING_SCHEMA,
-    kind: enumSchema(['file', 'symlink', 'missing']),
-    mode: enumSchema(['100644', '100755', '120000', '0']),
-    oid: STRING_SCHEMA,
-    digest: STRING_SCHEMA,
-    identity: STRING_SCHEMA,
-  }, ['path', 'kind', 'mode'])),
-}, ['version', 'id', 'sourceRoot', 'sourceIdentity', 'gitIdentity', 'ownerHead', 'ownerRef', 'indexFingerprint', 'inputTree', 'inputCommit', 'capturedAt', 'dirty', 'exclusions', 'files']);
+};
+const INPUT_SNAPSHOT_REQUIRED = ['version', ...Object.keys(INPUT_SNAPSHOT_PROPERTIES), 'files'];
+const INPUT_FILE_PROPERTIES = {
+  path: STRING_SCHEMA,
+  kind: enumSchema(['file', 'symlink', 'missing']),
+  mode: enumSchema(['100644', '100755', '120000', '0']),
+  oid: STRING_SCHEMA,
+  identity: STRING_SCHEMA,
+};
+export const CONTRACT_INPUT_SNAPSHOT_SCHEMA = { oneOf: [
+  objectSchema({ version: VERSION_ONE, ...INPUT_SNAPSHOT_PROPERTIES,
+    files: arraySchema(objectSchema({ ...INPUT_FILE_PROPERTIES, digest: STRING_SCHEMA }, ['path', 'kind', 'mode'])),
+  }, INPUT_SNAPSHOT_REQUIRED),
+  objectSchema({ version: { const: 2 }, ...INPUT_SNAPSHOT_PROPERTIES,
+    files: arraySchema({ oneOf: [
+      objectSchema({ path: STRING_SCHEMA, kind: { const: 'missing' }, mode: { const: '0' } }, ['path', 'kind', 'mode']),
+      objectSchema({ ...INPUT_FILE_PROPERTIES, digest: STRING_SCHEMA, kind: { const: 'file' }, mode: enumSchema(['100644', '100755']) },
+        ['path', 'kind', 'mode', 'oid', 'identity']),
+      objectSchema({ ...INPUT_FILE_PROPERTIES, digest: STRING_SCHEMA, kind: { const: 'symlink' }, mode: { const: '120000' } },
+        ['path', 'kind', 'mode', 'oid', 'identity']),
+    ] }),
+  }, INPUT_SNAPSHOT_REQUIRED),
+] };
 
 // parseCompletionReport historically persists partial reports, and the runner
 // reads file claims for every archetype (claims.ts). Inspect that stored data

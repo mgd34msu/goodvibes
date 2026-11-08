@@ -129,7 +129,7 @@ test('ordinary worktree inspection preserves captured input and the runner-parse
     const record = await inspectOverHttp(h, id, 'ordinary-completed-worktree');
     expect(record.status).toBe('passed');
     expect(record.isolation).toBe('worktree');
-    expect(record.inputSnapshot).toMatchObject({ version: 1, sourceRoot: h.root });
+    expect(record.inputSnapshot).toMatchObject({ version: 2, sourceRoot: h.root });
     expect(record.inputSnapshot?.files.some((file) => file.path === 'README.md')).toBe(true);
     expect(record.units[0]?.lastReport).toEqual(report);
     expect(record.units[0]?.lastOutput).toBe(output);
@@ -254,7 +254,7 @@ test('durable native worktree deferral survives GET/LIST inspection without losi
       until: { id: 'evidence-ready', revision: '1' },
     });
     expect(record.nativeWaiting).toBeUndefined();
-    expect(record.inputSnapshot).toMatchObject({ version: 1, sourceRoot: h.root });
+    expect(record.inputSnapshot).toMatchObject({ version: 2, sourceRoot: h.root });
     expect(record.durableAdmission).toMatchObject({
       schemaVersion: 2,
       contractId: id,

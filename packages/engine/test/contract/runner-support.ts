@@ -133,9 +133,9 @@ function git(cwd: string, ...args: string[]): void {
   if (result.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`);
 }
 
-export function makeRepo(): string {
+export function makeRepo(format?: 'sha1' | 'sha256'): string {
   const root = mkdtempSync(join(tmpdir(), 'contract-runner-'));
-  git(root, 'init', '-q', '-b', 'main');
+  git(root, 'init', '-q', '-b', 'main', ...(format ? [`--object-format=${format}`] : []));
   git(root, 'config', 'user.email', 'test@example.com');
   git(root, 'config', 'user.name', 'Test');
   writeFileSync(join(root, '.gitignore'), '.goodvibes/\n');

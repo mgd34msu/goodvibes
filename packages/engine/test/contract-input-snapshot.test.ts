@@ -8,10 +8,11 @@ import type { Contract } from '../sdk/src/platform/contract/types.js';
 import { useGateReadings } from './_helpers/gate-readings.js';
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, closeSync, openSync, ftruncateSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, openSync, ftruncateSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assertContractInputObjects, assertContractInputOwner, assertContractInputView, captureContractInput, contractInputPath, isContractInputSnapshot, materializeContractInput, initializeContractMemberWorktree } from '../sdk/src/platform/contract/input-snapshot.js';
+import { deflateSync } from 'node:zlib';
+import { assertContractInputObjects, assertContractInputOwner, assertContractInputView, createContractInputViewAssertion, captureContractInput, contractInputPath, isContractInputSnapshot, materializeContractInput, initializeContractMemberWorktree } from '../sdk/src/platform/contract/input-snapshot.js';
 
 useGateReadings();
 const roots: string[] = [];
@@ -20,9 +21,9 @@ function git(root: string, ...args: string[]): Buffer {
   if (r.status !== 0) throw new Error(r.stderr.toString());
   return r.stdout;
 }
-function repo(): string {
+function repo(format: 'sha1' | 'sha256' = 'sha1'): string {
   const root = mkdtempSync(join(tmpdir(), 'contract-input-test-')); roots.push(root);
-  git(root, 'init', '-q'); git(root, 'config', 'user.name', 'Fixture'); git(root, 'config', 'user.email', 'fixture@example.invalid');
+  git(root, 'init', '-q', `--object-format=${format}`); git(root, 'config', 'user.name', 'Fixture'); git(root, 'config', 'user.email', 'fixture@example.invalid');
   writeFileSync(join(root, '.gitignore'), '.goodvibes/\nignored.txt\n');
   writeFileSync(join(root, 'tracked.ts'), 'export const value = 1;\n');
   mkdirSync(join(root, 'removed')); writeFileSync(join(root, 'removed/deleted.ts'), 'delete me');
@@ -38,7 +39,118 @@ async function view(root: string, snapshot: Awaited<ReturnType<typeof captureCon
   return path;
 }
 
+/** Independent writer for the persisted version-one format; production creates
+ * only version two. These extra digests exercise actual old receipt recovery.
+ */
+function versionOneReceipt(root: string, snapshot: Awaited<ReturnType<typeof captureContractInput>>) {
+  return { ...snapshot, version: 1 as const, files: snapshot.files.map(file => file.kind === 'missing' ? file : {
+    ...file, digest: crypto.createHash('sha256').update(file.kind === 'symlink'
+      ? readlinkSync(join(root, file.path), { encoding: 'buffer' }) : readFileSync(join(root, file.path))).digest('hex'),
+  }) };
+}
+
 describe('local frozen contract input', () => {
+  for (const format of ['sha1', 'sha256'] as const) {
+    test(`new receipts bind exact ${format} input with only the necessary independent byte commitments`, async () => {
+      const root = repo(format);
+      writeFileSync(join(root, 'binary.bin'), Buffer.from([0, 0xff, 1, 0xfe]));
+      writeFileSync(join(root, 'executable.sh'), 'synthetic executable\n'); chmodSync(join(root, 'executable.sh'), 0o755);
+      symlinkSync('tracked.ts', join(root, 'link.ts'));
+      const snapshot = await captureContractInput(root);
+      expect(snapshot.version).toBe(2);
+      expect(snapshot.files.filter(file => file.kind !== 'missing').every(file =>
+        format === 'sha256' ? !Object.hasOwn(file, 'digest') : typeof file.digest === 'string' && file.digest.length === 64)).toBe(true);
+      expect(isContractInputSnapshot(JSON.parse(JSON.stringify(snapshot)))).toBe(true);
+      for (const file of snapshot.files) if (file.kind !== 'missing') {
+        expect(file.oid?.length).toBe(format === 'sha1' ? 40 : 64);
+        const bytes = file.kind === 'symlink' ? readlinkSync(join(root, file.path), { encoding: 'buffer' }) : readFileSync(join(root, file.path));
+        const expected = spawnSync('git', ['-C', root, 'hash-object', '--stdin', '--no-filters'], { input: bytes });
+        expect(expected.status).toBe(0); expect(file.oid).toBe(expected.stdout.toString().trim());
+      }
+      const frozen = await view(root, snapshot);
+      expect(readFileSync(join(frozen, 'binary.bin'))).toEqual(readFileSync(join(root, 'binary.bin')));
+      await assertContractInputOwner(snapshot); await assertContractInputView(snapshot);
+      const first = snapshot.files.find(file => file.kind === 'file')!;
+      const { digest: _digest, ...withoutDigest } = first;
+      expect(isContractInputSnapshot({ ...snapshot, files: snapshot.files.map(file => file === first
+        ? format === 'sha1' ? withoutDigest : { ...file, digest: '0'.repeat(64) } : file) })).toBe(false);
+    });
+  }
+
+  test('version-one receipts resume their recorded bytes and reject a mismatched old digest', async () => {
+    const root = repo(); symlinkSync('tracked.ts', join(root, 'link.ts'));
+    const current = await captureContractInput(root), old = versionOneReceipt(root, current);
+    const restored = JSON.parse(JSON.stringify(old)) as typeof old;
+    expect(isContractInputSnapshot(restored)).toBe(true);
+    const frozen = await view(root, restored);
+    expect(readFileSync(join(frozen, 'tracked.ts'))).toEqual(readFileSync(join(root, 'tracked.ts')));
+    await assertContractInputOwner(restored); await assertContractInputView(restored);
+    const receiptPath = join(root, '.goodvibes/version-one-receipt.json');
+    writeFileSync(receiptPath, JSON.stringify(restored));
+    const source = new URL('../sdk/src/platform/contract/input-snapshot.ts', import.meta.url).href;
+    const child = Bun.spawn([process.execPath, '--eval', `
+      import { assertContractInputOwner, assertContractInputView, isContractInputSnapshot } from ${JSON.stringify(source)};
+      const receipt = JSON.parse(await Bun.file(process.argv[1]).text());
+      if (!isContractInputSnapshot(receipt) || receipt.version !== 1) throw new Error('Stored receipt was not restored');
+      await assertContractInputOwner(receipt); await assertContractInputView(receipt);
+      console.log('restored-version-one');`, receiptPath], { stdout: 'pipe', stderr: 'pipe' });
+    const timer = setTimeout(() => child.kill(), 15_000);
+    try {
+      const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      expect([code, stdout, stderr]).toEqual([0, 'restored-version-one\n', '']);
+    } finally {
+      clearTimeout(timer); if (child.exitCode === null) child.kill(); await child.exited;
+    }
+    const corrupted = { ...restored, files: restored.files.map(file => file.path === 'tracked.ts' ? { ...file, digest: '0'.repeat(64) } : file) };
+    await expect(assertContractInputOwner(corrupted)).rejects.toThrow('owner changed');
+    await expect(assertContractInputView(corrupted)).rejects.toThrow('view changed');
+    const destination = join(root, '.goodvibes/old-corrupt-view');
+    git(root, 'worktree', 'add', '--no-checkout', '-b', 'old-corrupt-view', destination, restored.inputCommit);
+    await expect(materializeContractInput(corrupted, destination)).rejects.toThrow('blob digest mismatch');
+  }, 30_000);
+
+  test('the logical index commitment hides excluded tracked names, tolerates an identical rewrite and detects flag changes', async () => {
+    const root = repo(), name = 'SYNTHETIC_PRIVATE_INDEX_NAME';
+    mkdirSync(join(root, '.aws')); writeFileSync(join(root, '.aws', name), 'synthetic excluded content');
+    git(root, 'add', '-f', `.aws/${name}`);
+    const snapshot = await captureContractInput(root), serialized = JSON.stringify(snapshot);
+    expect(git(root, 'ls-files', '--stage', '-z').toString()).toContain(name);
+    expect(serialized).not.toContain(name); expect(serialized).not.toContain('synthetic excluded content');
+    expect(Object.hasOwn(snapshot, 'ownerIndex')).toBe(false);
+    const index = readFileSync(join(root, '.git/index'));
+    writeFileSync(join(root, '.git/index-identical'), index); renameSync(join(root, '.git/index-identical'), join(root, '.git/index'));
+    await assertContractInputOwner(snapshot);
+    git(root, 'update-index', '--assume-unchanged', 'tracked.ts');
+    await expect(assertContractInputOwner(snapshot)).rejects.toThrow('index changed');
+  });
+
+  test('materialization rejects blob data altered underneath its native object ID', async () => {
+    const root = repo(), payload = Buffer.from('captured payload for the immutable Git object\n');
+    writeFileSync(join(root, 'captured.txt'), payload);
+    const snapshot = await captureContractInput(root), oid = snapshot.files.find(file => file.path === 'captured.txt')!.oid!;
+    const stored = join(root, '.git/objects', oid.slice(0, 2), oid.slice(2));
+    const altered = Buffer.from(payload); altered[0] = altered[0]! ^ 1;
+    chmodSync(stored, 0o600);
+    writeFileSync(stored, deflateSync(Buffer.concat([Buffer.from(`blob ${altered.length}\0`), altered])));
+    const destination = contractInputPath(snapshot);
+    git(root, 'worktree', 'add', '--no-checkout', '-b', 'corrupt-object-view', destination, snapshot.inputCommit);
+    await expect(materializeContractInput(snapshot, destination)).rejects.toThrow(/blob|object|stream/);
+  });
+
+  test('an immutable batch path requires its own byte-verified view and rejects changed file ownership', async () => {
+    const root = repo(), snapshot = await captureContractInput(root), frozen = await view(root, snapshot);
+    const assertView = createContractInputViewAssertion(snapshot);
+    await expect(assertView.assertPath('tracked.ts')).rejects.toThrow('accessed path');
+    await assertView();
+    await assertView.assertPath('tracked.ts');
+    const bytes = readFileSync(join(frozen, 'tracked.ts'));
+    renameSync(join(frozen, 'tracked.ts'), join(frozen, 'previous.ts'));
+    writeFileSync(join(frozen, 'tracked.ts'), bytes);
+    unlinkSync(join(frozen, 'previous.ts'));
+    await expect(assertView.assertPath('tracked.ts')).rejects.toThrow('accessed path');
+    await expect(assertView()).rejects.toThrow('view changed');
+  });
+
   test('preserves staged, unstaged, deleted, untracked, binary and executable bytes without changing owner/index/branch', async () => {
     const root = repo();
     writeFileSync(join(root, 'tracked.ts'), 'staged\n'); git(root, 'add', 'tracked.ts');
@@ -121,7 +233,7 @@ describe('local frozen contract input', () => {
 
   test('receipt corruption and changed recorded view hold recovery', async () => {
     const root = repo(); const snapshot = await captureContractInput(root); const frozen = await view(root, snapshot);
-    expect(isContractInputSnapshot({ ...snapshot, version: 2 })).toBe(false);
+    expect(isContractInputSnapshot({ ...snapshot, version: 3 })).toBe(false);
     expect(isContractInputSnapshot({ ...snapshot, files: [...snapshot.files, snapshot.files[0]] })).toBe(false);
     expect(() => assertContractInputObjects({ ...snapshot, inputTree: '0'.repeat(40) }, root)).toThrow('mismatch');
     writeFileSync(join(frozen, 'tracked.ts'), 'changed snapshot');

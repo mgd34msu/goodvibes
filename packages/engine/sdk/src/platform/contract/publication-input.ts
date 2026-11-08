@@ -75,7 +75,8 @@ export async function admitPublicationInput(contract: Contract, filter: ReadAcce
   const after = new Map(owner.files.map(file => [file.path, file]));
   const changed = [...new Set([...before.keys(), ...after.keys()])].filter(path => {
     const old = before.get(path), current = after.get(path);
-    return old?.kind !== current?.kind || old?.mode !== current?.mode || old?.digest !== current?.digest;
+    return old?.kind !== current?.kind || old?.mode !== current?.mode || old?.oid !== current?.oid
+      || (old?.oid?.length === 40 && old.digest !== current?.digest);
   });
   const targets = git(original.sourceRoot, ['diff', '--name-only', '--no-ext-diff', '--no-textconv', '--no-renames', '-z',
     original.inputCommit, resultHead, '--']).split('\0').filter(Boolean);
@@ -92,15 +93,18 @@ export async function admitPublicationInput(contract: Contract, filter: ReadAcce
     const observations: JsonValue[] = [];
     for (const path of paths) {
       await authorizeContractInputPath(authority, path, filter, signal);
-      const currentOwner = currentFileObservations(original.sourceRoot, [path], { includeText: true });
       const expected = after.get(path);
+      const currentOwner = currentFileObservations(original.sourceRoot, [path], {
+        includeText: true, ...(expected?.kind === 'file' ? { inputFile: expected } : {}),
+      });
       if (expected?.kind === 'file') {
-        const observation = currentOwner[0] as { success?: unknown; sha256?: unknown } | undefined;
-        if (observation?.success !== true || observation.sha256 !== expected.digest)
+        const observation = currentOwner[0] as { success?: unknown; inputBlobOid?: unknown; sha256?: unknown } | undefined;
+        if (observation?.success !== true || observation.inputBlobOid !== expected.oid
+          || (expected.digest !== undefined && observation.sha256 !== expected.digest))
           throw new Error('current owner file observation does not match its captured publication input');
       }
       observations.push({ path, ownerChanged: changed.includes(path), resultChanged: targets.includes(path),
-        original: before.get(path) ? { kind: before.get(path)!.kind, mode: before.get(path)!.mode, digest: before.get(path)!.digest ?? null } : null,
+        original: before.get(path) ? { kind: before.get(path)!.kind, mode: before.get(path)!.mode, oid: before.get(path)!.oid ?? null } : null,
         currentOwner,
         acceptedResult: resultFile(original.sourceRoot, resultHead, path),
         proposedPublication: resultFile(original.sourceRoot, publicationTree, path, 'publicationTree') });

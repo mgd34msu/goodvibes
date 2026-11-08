@@ -135,7 +135,12 @@ test('durable v1/v2 admission records preserve typed input and versioned placeme
 test('captured input receipt includes file, symlink and missing provenance without executable authority', () => {
   const snapshot: ContractInputSnapshot = { version: 1, id: 'snapshot-1', sourceRoot: '/project', sourceIdentity: 'source-identity', gitIdentity: 'git-identity', ownerHead: 'head', ownerRef: 'main', indexFingerprint: 'index', inputTree: 'tree', inputCommit: 'commit', capturedAt: 100, dirty: true, exclusions: ['.git', '.goodvibes'], files: [{ path: 'parser.ts', kind: 'file', mode: '100755', oid: 'blob', digest: 'digest', identity: 'file-identity' }, { path: 'link.ts', kind: 'symlink', mode: '120000', oid: 'link-blob', digest: 'link-digest', identity: 'link-identity' }, { path: 'deleted.ts', kind: 'missing', mode: '0' }] };
   valid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, snapshot);
-  invalid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, { ...snapshot, version: 2 });
+  const versionTwo = { ...snapshot, version: 2 };
+  valid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, versionTwo);
+  valid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, { ...versionTwo, files: snapshot.files.map(({ digest: _digest, ...file }) => file) });
+  invalid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, { ...versionTwo, version: 3 });
+  invalid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, { ...versionTwo, ownerIndex: { stagesBase64: '', flagsBase64: '' } });
+  invalid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, { ...versionTwo, files: [{ path: 'parser.ts', kind: 'file', mode: '100755' }] });
   invalid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, { ...snapshot, files: [{ path: 'parser.ts', kind: 'file', mode: '777' }] });
   invalid(CONTRACT_INPUT_SNAPSHOT_SCHEMA, { ...snapshot, files: [{ ...snapshot.files[0], readPermission: true }] });
 });

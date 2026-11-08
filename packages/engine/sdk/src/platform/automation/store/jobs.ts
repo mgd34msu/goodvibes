@@ -1,3 +1,4 @@
+import { ensureAutomationCronPhase } from '../schedules.js';
 import { PersistentStore } from '../../state/persistent-store.js';
 import { StoreWriteQueue } from '../../state/store-write-queue.js';
 import type { MutationPublication } from '../../utils/file-mutation.js';
@@ -81,13 +82,25 @@ export class AutomationJobStore {
     if (this.fileIdentity() !== before) throw new AutomationJobMutationStaleError();
     // A store row without a writer revision gets one owned by this load. Keep
     // it across reads of the same file image; the next write persists it.
-    snapshot.jobs = snapshot.jobs.map(job => job.mutationRevision ? job : ownedAutomationJob(job, this.committed.get(job.id)?.mutationRevision));
+    let phaseMigration = false;
+    snapshot.jobs = snapshot.jobs.map(job => {
+      const prior = this.committed.get(job.id);
+      const schedule = ensureAutomationCronPhase(job.schedule, prior?.schedule);
+      if (schedule !== job.schedule) {
+        phaseMigration = true;
+        return ownedAutomationJob({ ...job, schedule });
+      }
+      return job.mutationRevision ? job : ownedAutomationJob(job, prior?.mutationRevision);
+    });
     if (!this.initialized) {
       this.committed = new Map(snapshot.jobs.map(job => [job.id, structuredClone(job)]));
       if (!this.requestedInitialized) this.requested = new Map(this.committed);
       this.identity = before;
       this.initialized = true;
     }
+    // A generated phase is not a durable phase until its row is published. Keep
+    // the already scheduled nextRunAt; only subsequent occurrences use it.
+    if (phaseMigration) await this.persist(new Map(snapshot.jobs.map(job => [job.id, job])), () => undefined);
     return snapshot;
   }
 
@@ -98,6 +111,8 @@ export class AutomationJobStore {
     const previous = this.requested;
     const next = new Map(jobs.map(job => {
       const prior = previous.get(job.id);
+      const schedule = ensureAutomationCronPhase(job.schedule, prior?.schedule);
+      if (schedule !== job.schedule) job = { ...job, schedule };
       const { mutationRevision: ignored, ...fields } = job;
       const { mutationRevision: priorIgnored, ...priorFields } = prior ?? {};
       const unchanged = prior && !hasOwnedAutomationRevision(job) && JSON.stringify(fields) === JSON.stringify(priorFields);
@@ -137,7 +152,11 @@ export class AutomationJobStore {
   ): Promise<void> {
     const current = retainAutomationMutation(options);
     if (next && next.id !== jobId) throw new AutomationJobMutationStaleError();
-    const staged = next ? ownedAutomationJob(next, hasOwnedAutomationRevision(next) ? next.mutationRevision : undefined) : null;
+    let staged: ManagedAutomationJob | null = null;
+    if (next) {
+      const schedule = ensureAutomationCronPhase(next.schedule, this.committed.get(jobId)?.schedule);
+      staged = ownedAutomationJob({ ...next, schedule }, hasOwnedAutomationRevision(next) && schedule === next.schedule ? next.mutationRevision : undefined);
+    }
     current();
     await this.writes.run(async () => {
       current();

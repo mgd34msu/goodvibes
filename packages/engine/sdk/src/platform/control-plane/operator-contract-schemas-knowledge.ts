@@ -116,6 +116,7 @@ const KNOWLEDGE_CRON_SCHEDULE_SCHEMA = objectSchema({
   expression: STRING_SCHEMA,
   timezone: STRING_SCHEMA,
   staggerMs: NUMBER_SCHEMA,
+  staggerPhase: { type: 'integer', minimum: 0, maximum: 0xffff_ffff },
 }, ['kind', 'expression'], { additionalProperties: false });
 export const KNOWLEDGE_SCHEDULE_DEFINITION_SCHEMA = {
   anyOf: [

@@ -54,7 +54,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
 
   const now = Date.now();
   const catchUpWindowMs = Number(context.configManager.get('automation.catchUpWindowMinutes') ?? 30) * 60_000;
-  const nextRunAtCandidate = job.nextRunAt ?? computeNextRun(job.schedule, now, job.id);
+  const nextRunAtCandidate = job.nextRunAt ?? computeNextRun(job.schedule, now);
   // A planned occurrence older than the catch-up window never fired. Record it
   // as a missed run (a first-class outcome that flows the same delivery path as
   // a failure) instead of silently recomputing the next occurrence.
@@ -65,7 +65,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
     context.recordMissedRun?.(job, missedPlannedRunAt);
   }
   const nextRunAt = missedPlannedRunAt !== undefined
-    ? computeNextRun(job.schedule, now, job.id)
+    ? computeNextRun(job.schedule, now)
     : nextRunAtCandidate;
   if (nextRunAt === undefined) return;
 
@@ -112,7 +112,7 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
       .finally(() => {
         const current = context.jobs.get(job.id);
         if (!current?.enabled) return;
-        const next = computeNextRun(current.schedule, Date.now(), current.id);
+        const next = computeNextRun(current.schedule, Date.now());
         if (next !== undefined) {
           const updated: AutomationJob = {
             ...current,
@@ -193,7 +193,7 @@ export function advanceScheduledHeartbeatAutomationJob(
 ): void {
   const current = context.jobs.get(jobId);
   if (!current?.enabled) return;
-  const next = computeNextRun(current.schedule, Date.now(), current.id);
+  const next = computeNextRun(current.schedule, Date.now());
   if (next !== undefined) {
     const updated: AutomationJob = {
       ...current,

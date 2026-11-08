@@ -99,9 +99,8 @@ export function sortRuns(runs: Iterable<AutomationRun>): AutomationRun[] {
 export function computeNextRun(
   schedule: import('./schedules.js').AutomationScheduleDefinition,
   from = Date.now(),
-  stableId?: string,
 ): number | undefined {
-  return getNextAutomationOccurrence(schedule, from, stableId);
+  return getNextAutomationOccurrence(schedule, from);
 }
 
 export function buildDefaultSource(enabled: boolean, timestamp: number): AutomationSourceRecord {

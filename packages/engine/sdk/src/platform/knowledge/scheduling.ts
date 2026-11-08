@@ -1,5 +1,5 @@
 import { isClassicOperation, requireDecisionFeature, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
-import { getNextAutomationOccurrence, normalizeCronSchedule, normalizeEverySchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
+import { getNextAutomationOccurrence, ensureAutomationCronPhase, normalizeCronSchedule, normalizeEverySchedule, type AutomationScheduleDefinition } from '../automation/schedules.js';
 import type { KnowledgeStore } from './store.js';
 import type { KnowledgeJobMode, KnowledgeJobRecord, KnowledgeJobRunRecord, KnowledgeScheduleRecord } from './types.js';
 import { emitKnowledgeJobCompleted, emitKnowledgeJobFailed, emitKnowledgeJobQueued, emitKnowledgeJobStarted } from '../runtime/emitters/index.js';
@@ -82,15 +82,17 @@ export class KnowledgeScheduleService {
     const job = this.getJob(input.jobId);
     if (!job) throw new Error(`Unknown knowledge job: ${input.jobId}`);
     if (input.enabled ?? true) assertJobPolicy(job);
+    const previous = input.id ? this.context.store.getSchedule(input.id) : null;
+    const schedule = ensureAutomationCronPhase(input.schedule, previous?.schedule);
     const nextRunAt = (input.enabled ?? true)
-      ? getNextAutomationOccurrence(input.schedule, Date.now(), input.id ?? input.jobId)
+      ? getNextAutomationOccurrence(schedule, Date.now())
       : undefined;
     const record = await this.context.store.upsertSchedule({
       id: input.id,
       jobId: input.jobId,
       label: input.label?.trim() || job.title,
       enabled: input.enabled ?? true,
-      schedule: input.schedule,
+      schedule,
       nextRunAt,
       metadata: {
         ...(input.metadata ?? {}),
@@ -118,7 +120,7 @@ export class KnowledgeScheduleService {
       enabled,
       schedule: schedule.schedule,
       lastRunAt: schedule.lastRunAt,
-      nextRunAt: enabled ? getNextAutomationOccurrence(schedule.schedule, Date.now(), schedule.id) : undefined,
+      nextRunAt: enabled ? getNextAutomationOccurrence(schedule.schedule, Date.now()) : undefined,
       metadata: schedule.metadata,
     });
     await this.reconcileSchedules();
@@ -193,6 +195,13 @@ export class KnowledgeScheduleService {
     this.schedulesInitialized = true;
     await this.context.store.init();
     if (this.disposed) return;
+    // Retain current due timestamps while adopting a phase for older cron rows.
+    // Publish before any timer can use it so reopening cannot choose another phase.
+    for (const record of this.context.store.listSchedules(10_000)) {
+      const schedule = ensureAutomationCronPhase(record.schedule);
+      if (schedule !== record.schedule) await this.context.store.upsertSchedule({ ...record, schedule });
+      if (this.disposed) return;
+    }
     await this.ensureBootstrapSchedule('knowledge-light-consolidation', 'Daily Light Consolidation', normalizeEverySchedule('24h'));
     await this.ensureBootstrapSchedule('knowledge-deep-consolidation', 'Weekly Deep Consolidation', normalizeCronSchedule('15 4 * * 0'));
     await this.ensureBootstrapSchedule('knowledge-semantic-self-improvement', 'Continuous Semantic Self-Improvement', normalizeEverySchedule('1h'));
@@ -206,12 +215,13 @@ export class KnowledgeScheduleService {
   ): Promise<void> {
     const existing = this.context.store.listSchedules(10_000).find((entry) => entry.jobId === jobId && entry.metadata.bootstrap === true);
     if (existing) return;
+    schedule = ensureAutomationCronPhase(schedule);
     await this.context.store.upsertSchedule({
       jobId,
       label,
       enabled: true,
       schedule,
-      nextRunAt: getNextAutomationOccurrence(schedule, Date.now(), jobId),
+      nextRunAt: getNextAutomationOccurrence(schedule, Date.now()),
       metadata: { bootstrap: true },
     });
   }
@@ -234,7 +244,7 @@ export class KnowledgeScheduleService {
     for (const schedule of schedules) {
       this.clearScheduleTimer(schedule.id);
       if (!schedule.enabled) continue;
-      const dueAt = schedule.nextRunAt ?? getNextAutomationOccurrence(schedule.schedule, Date.now(), schedule.id);
+      const dueAt = schedule.nextRunAt ?? getNextAutomationOccurrence(schedule.schedule, Date.now());
       const normalized = await this.context.store.upsertSchedule({
         id: schedule.id,
         jobId: schedule.jobId,
@@ -280,7 +290,7 @@ export class KnowledgeScheduleService {
       enabled: schedule.enabled,
       schedule: schedule.schedule,
       lastRunAt: dispatched ? now : schedule.lastRunAt,
-      nextRunAt: getNextAutomationOccurrence(schedule.schedule, now, schedule.id),
+      nextRunAt: getNextAutomationOccurrence(schedule.schedule, now),
       metadata: schedule.metadata,
     });
     await this.reconcileSchedules();

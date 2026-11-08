@@ -1,3 +1,4 @@
+import { ensureAutomationCronPhase } from './schedules.js';
 import { randomUUID } from 'node:crypto';
 import type { ConfigManager } from '../config/manager.js';
 import type { AutomationJob, ManagedAutomationJob } from './jobs.js';
@@ -43,6 +44,7 @@ export async function createAutomationJobRecord(
   const now = Date.now();
   const enabled = input.enabled ?? true;
   const jobId = `auto-${randomUUID().slice(0, 8)}`;
+  const schedule = ensureAutomationCronPhase(input.schedule);
   const job: AutomationJob = {
     id: jobId,
     labels: [],
@@ -55,12 +57,12 @@ export async function createAutomationJobRecord(
     description: input.description ?? input.prompt,
     status: enabled ? 'enabled' : 'paused',
     enabled,
-    schedule: input.schedule,
+    schedule,
     execution: buildDefaultExecution(input, context.configManager, context.listModels?.()),
     delivery: buildDefaultDelivery(input.delivery),
     failure: buildDefaultFailurePolicy(context.configManager, input.failure),
     source: buildDefaultSource(enabled, now),
-    nextRunAt: enabled ? computeNextRun(input.schedule, now, jobId) : undefined,
+    nextRunAt: enabled ? computeNextRun(schedule, now) : undefined,
     lastRunAt: undefined,
     lastRunId: undefined,
     runCount: 0,
@@ -91,7 +93,7 @@ export async function toggleAutomationJobEnabled(
     status: enabled ? 'enabled' : 'paused',
     pausedReason: enabled ? undefined : 'operator-disabled',
     updatedAt: Date.now(),
-    nextRunAt: enabled ? computeNextRun(job.schedule, Date.now(), job.id) : undefined,
+    nextRunAt: enabled ? computeNextRun(job.schedule, Date.now()) : undefined,
     source: {
       ...job.source,
       enabled,
@@ -122,7 +124,7 @@ export async function updateAutomationJobRecord(
     ? normalizeProviderQualifiedModelList(patch.fallbackModels, 'Automation fallback models', models)
     : undefined;
   const thinkingPatch = normalizeOptionalString(patch.thinking);
-  const nextSchedule = patch.schedule ?? job.schedule;
+  const nextSchedule = ensureAutomationCronPhase(patch.schedule ?? job.schedule, job.schedule);
   const nextModelProvider = patch.provider !== undefined
     ? normalizeOptionalString(patch.provider)
     : job.execution.modelProvider;
@@ -184,7 +186,7 @@ export async function updateAutomationJobRecord(
     }),
     deleteAfterRun: patch.deleteAfterRun ?? job.deleteAfterRun,
     pausedReason: nextEnabled ? undefined : job.pausedReason ?? 'operator-disabled',
-    nextRunAt: nextEnabled ? computeNextRun(nextSchedule, updatedAt, job.id) : undefined,
+    nextRunAt: nextEnabled ? computeNextRun(nextSchedule, updatedAt) : undefined,
     updatedAt,
     source: {
       ...job.source,

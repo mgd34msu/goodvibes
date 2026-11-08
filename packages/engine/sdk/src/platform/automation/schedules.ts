@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { randomInt } from 'node:crypto';
 import { TaskScheduler } from '../scheduler/scheduler.js';
 
 export interface AutomationAtSchedule {
@@ -17,6 +17,8 @@ export interface AutomationCronSchedule {
   readonly expression: string;
   readonly timezone?: string | undefined;
   readonly staggerMs?: number | undefined;
+  /** Scheduler-owned phase retained with the schedule, never derived from its label. */
+  readonly staggerPhase?: number | undefined;
 }
 
 export type AutomationScheduleDefinition =
@@ -121,10 +123,32 @@ export function resolveAutomationCronStaggerMs(schedule: AutomationCronSchedule)
   return resolveDefaultCronStaggerMs(schedule.expression) ?? 0;
 }
 
-export function resolveStableAutomationCronOffsetMs(stableId: string | undefined, staggerMs: number): number {
-  if (!stableId || staggerMs <= 1) return 0;
-  const digest = createHash('sha256').update(stableId).digest();
-  return digest.readUInt32BE(0) % staggerMs;
+/** Assign once before persistence. A changed cron expression/window can retain the same phase. */
+export function ensureAutomationCronPhase(
+  schedule: AutomationScheduleDefinition,
+  previous?: AutomationScheduleDefinition,
+): AutomationScheduleDefinition {
+  if (!schedule || typeof schedule !== 'object') throw new Error('Automation schedule is invalid');
+  if (schedule.kind !== 'cron') return schedule;
+  if (schedule.staggerPhase !== undefined) {
+    assertCronPhase(schedule.staggerPhase);
+    return schedule;
+  }
+  if (resolveAutomationCronStaggerMs(schedule) <= 1) return schedule;
+  const phase = previous?.kind === 'cron' ? previous.staggerPhase : undefined;
+  if (phase !== undefined) assertCronPhase(phase);
+  return { ...schedule, staggerPhase: phase ?? randomInt(0x1_0000_0000) };
+}
+
+function assertCronPhase(phase: number): void {
+  if (!Number.isInteger(phase) || phase < 0 || phase > 0xffff_ffff) throw new Error('schedule.staggerPhase must be an unsigned 32-bit integer');
+}
+
+/** Pure calculation over a persisted phase; parsers without an owned schedule do not stagger. */
+export function resolveAutomationCronOffsetMs(phase: number | undefined, staggerMs: number): number {
+  if (phase === undefined || staggerMs <= 1) return 0;
+  assertCronPhase(phase);
+  return phase % staggerMs;
 }
 
 export function validateSchedule(schedule: AutomationScheduleDefinition): void {
@@ -139,6 +163,7 @@ export function validateSchedule(schedule: AutomationScheduleDefinition): void {
       }
       break;
     case 'cron':
+      if (schedule.staggerPhase !== undefined) assertCronPhase(schedule.staggerPhase);
       if (!schedule.expression.trim()) {
         throw new Error('schedule.expression must not be empty');
       }
@@ -190,7 +215,6 @@ function getNextCronOccurrence(schedule: AutomationCronSchedule, fromMs: number)
 export function getNextAutomationOccurrence(
   schedule: AutomationScheduleDefinition,
   fromMs: number = Date.now(),
-  stableId?: string,
 ): number | undefined {
   validateSchedule(schedule);
   switch (schedule.kind) {
@@ -204,7 +228,7 @@ export function getNextAutomationOccurrence(
       return anchorAt + periodsElapsed * schedule.intervalMs;
     }
     case 'cron': {
-      const offsetMs = resolveStableAutomationCronOffsetMs(stableId, resolveAutomationCronStaggerMs(schedule));
+      const offsetMs = resolveAutomationCronOffsetMs(schedule.staggerPhase, resolveAutomationCronStaggerMs(schedule));
       if (offsetMs <= 0) {
         return getNextCronOccurrence(schedule, fromMs);
       }

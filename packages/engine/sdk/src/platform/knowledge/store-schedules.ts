@@ -1,3 +1,4 @@
+import { ensureAutomationCronPhase } from '../automation/schedules.js';
 import { SQLiteStore } from '../state/sqlite-store.js';
 import { nowMs } from './store-schema.js';
 import type {
@@ -18,7 +19,7 @@ export async function upsertKnowledgeSchedule(
     jobId: input.jobId,
     label: input.label.trim(),
     enabled: input.enabled ?? existing?.enabled ?? true,
-    schedule: input.schedule,
+    schedule: ensureAutomationCronPhase(input.schedule, existing?.schedule),
     ...(typeof input.lastRunAt === 'number' ? { lastRunAt: input.lastRunAt } : existing?.lastRunAt ? { lastRunAt: existing.lastRunAt } : {}),
     ...(typeof input.nextRunAt === 'number' ? { nextRunAt: input.nextRunAt } : existing?.nextRunAt ? { nextRunAt: existing.nextRunAt } : {}),
     metadata: { ...(existing?.metadata ?? {}), ...(input.metadata ?? {}) },

@@ -276,6 +276,7 @@ const AUTOMATION_CRON_SCHEDULE_SCHEMA = objectSchema({
   expression: STRING_SCHEMA,
   timezone: STRING_SCHEMA,
   staggerMs: NUMBER_SCHEMA,
+  staggerPhase: { type: 'integer', minimum: 0, maximum: 0xffff_ffff },
 }, ['kind', 'expression']);
 
 export const AUTOMATION_SCHEDULE_SCHEMA: Record<string, unknown> = {

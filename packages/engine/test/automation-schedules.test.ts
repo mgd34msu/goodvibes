@@ -7,7 +7,8 @@ import {
   normalizeCronSchedule,
   normalizeEverySchedule,
   parseEveryInterval,
-  resolveStableAutomationCronOffsetMs,
+  resolveAutomationCronOffsetMs,
+  ensureAutomationCronPhase,
 } from '@goodvibes-jev/engine/sdk/platform/automation';
 
 describe('automation schedules', () => {
@@ -36,16 +37,30 @@ describe('automation schedules', () => {
     expect(next).toBeGreaterThan(new Date('2024-01-15T07:30:00Z').getTime());
   });
 
-  test('defaults and applies deterministic top-of-hour cron staggering when a stable id is provided', () => {
+  test('uses the persisted phase for top-of-hour cron staggering', () => {
     const schedule = normalizeCronSchedule('0 * * * *', 'UTC');
     expect(schedule.staggerMs).toBe(DEFAULT_TOP_OF_HOUR_STAGGER_MS);
 
     const from = new Date('2024-01-15T09:59:30Z').getTime();
     const baseHour = new Date('2024-01-15T10:00:00Z').getTime();
-    const offset = resolveStableAutomationCronOffsetMs('job-a', DEFAULT_TOP_OF_HOUR_STAGGER_MS);
+    const offset = resolveAutomationCronOffsetMs(123456, DEFAULT_TOP_OF_HOUR_STAGGER_MS);
 
     expect(getNextAutomationOccurrence(schedule, from)).toBe(baseHour);
-    expect(getNextAutomationOccurrence(schedule, from, 'job-a')).toBe(baseHour + offset);
+    expect(getNextAutomationOccurrence({ ...schedule, staggerPhase: 123456 }, from)).toBe(baseHour + offset);
     expect(normalizeCronSchedule('0 * * * *', 'UTC', 0).staggerMs).toBe(0);
   });
+});
+
+test('a schedule retains its phase across serialization and expression changes', () => {
+  const schedule = ensureAutomationCronPhase(normalizeCronSchedule('0 * * * *', 'UTC'));
+  expect(schedule.kind).toBe('cron');
+  if (schedule.kind !== 'cron') throw new Error('Expected cron');
+  expect(Number.isInteger(schedule.staggerPhase)).toBe(true);
+  expect(ensureAutomationCronPhase(schedule)).toBe(schedule);
+  const restored = JSON.parse(JSON.stringify(schedule));
+  expect(ensureAutomationCronPhase(restored)).toBe(restored);
+  const edited = ensureAutomationCronPhase(normalizeCronSchedule('0 */2 * * *', 'UTC'), schedule);
+  expect(edited).toMatchObject({ staggerPhase: schedule.staggerPhase });
+  expect(() => ensureAutomationCronPhase({ ...schedule, staggerPhase: -1 })).toThrow();
+  expect(() => ensureAutomationCronPhase({ ...schedule, staggerPhase: 2 ** 32 })).toThrow();
 });

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import type { NativeConversationIntakeCaptureRequest } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
 import type { NativeWorkExecutionIdentity } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
 import { agentHostPairingStorePath, type AgentHostPairingSecret } from '../../runtime/connected-host-pairing-store.ts';
@@ -41,7 +42,7 @@ function fixture(baseUrl = 'http://127.0.0.1:3421') {
     if ('reason' in connection) throw new Error(connection.reason);
     return { ...connection, workspace: homeDirectory, journalPath: join(homeDirectory, 'native-intake.json') };
   };
-  return { ...options, baseUrl, pairingPath, globalPath, pair, resolve };
+  return { ...options, options, config, baseUrl, pairingPath, globalPath, pair, resolve };
 }
 const auth = (principalId: string) => ({ authenticated: true, authMode: 'shared-token', tokenPresent: true,
   authorizationHeaderPresent: true, sessionCookiePresent: false, principalId, principalKind: 'token', admin: true,
@@ -84,10 +85,14 @@ const flush = async () => { for (let i = 0; i < 15; i++) await Promise.resolve()
 describe('Agent selected credential identity', () => {
   test('binds the canonical endpoint, home, selected source and full private record without exposing its contents', () => {
     const f = fixture('http://example.invalid'); const selected = f.resolve();
-    expect(selected.expectedPrincipalId).toBe('pairing:selected-owner'); expect(selected.selectionIdentity).toMatch(/^[a-f0-9]{64}$/u);
+    expect(selected.expectedPrincipalId).toBe('pairing:selected-owner'); expect(selected.selectionIdentity).toMatch(/^selection-\d+-\d+$/u);
     expect(selected.selectionIdentity).not.toContain(secret.token); expect(selected.selectionIdentity).not.toContain(secret.name);
-    expect(readConnectedHostOperatorToken(f.homeDirectory, 'HTTP://EXAMPLE.INVALID:80/').selectionIdentity).toBe(selected.selectionIdentity);
-    expect(readConnectedHostOperatorToken(f.homeDirectory, 'http://different.invalid').selectionIdentity).not.toBe(selected.selectionIdentity);
+    expect(readConnectedHostOperatorToken(f.homeDirectory, f.baseUrl)).not.toHaveProperty('selectionIdentity');
+    const observation = new OwnedSelectionObservation();
+    const canonical = readConnectedHostOperatorToken(f.homeDirectory, f.baseUrl, observation);
+    expect(readConnectedHostOperatorToken(f.homeDirectory, 'HTTP://EXAMPLE.INVALID:80/', observation).selectionIdentity).toBe(canonical.selectionIdentity);
+    expect(readConnectedHostOperatorToken(f.homeDirectory, 'http://different.invalid', observation).selectionIdentity).not.toBe(canonical.selectionIdentity);
+    expect(readConnectedHostOperatorToken(f.homeDirectory, f.baseUrl, observation).selectionIdentity).not.toBe(canonical.selectionIdentity);
     expect(fixture('http://example.invalid').resolve().selectionIdentity).not.toBe(selected.selectionIdentity);
     const nativeSubmissionIdentity = createNativeSubmissionIdentity('paired').identify;
     const originalNativeIdentity = nativeSubmissionIdentity(selected, 'p');
@@ -97,10 +102,13 @@ describe('Agent selected credential identity', () => {
       expect(nativeSubmissionIdentity(next, 'p')).not.toBe(originalNativeIdentity);
     }
     f.pair();
+    const restored = f.resolve();
+    expect(restored.selectionIdentity).not.toBe(selected.selectionIdentity);
+    expect(nativeSubmissionIdentity(restored, 'p')).not.toBe(originalNativeIdentity);
     const file = JSON.parse(readFileSync(f.pairingPath, 'utf8'));
     file.records.push({ host: 'https://unselected.invalid', pairing: { status: 'paired', ...secret, name: 'Unselected record' } });
     writeFileSync(f.pairingPath, JSON.stringify(file));
-    expect(f.resolve().selectionIdentity).toBe(selected.selectionIdentity);
+    expect(f.resolve().selectionIdentity).toBe(restored.selectionIdentity);
   });
 
   test('preserves env > legacy env > exact-host private pairing > global precedence even for identical token bytes', () => {
@@ -111,13 +119,59 @@ describe('Agent selected credential identity', () => {
     expect(connected.expectedPrincipalId).toBeUndefined(); expect(daemon.expectedPrincipalId).toBeUndefined();
     expect(new Set([privateSelection.selectionIdentity, daemon.selectionIdentity, connected.selectionIdentity]).size).toBe(3);
     f.pair({ ...secret, name: 'Shadowed replacement' }); expect(f.resolve().selectionIdentity).toBe(connected.selectionIdentity);
-    delete process.env.GOODVIBES_CONNECTED_HOST_TOKEN; expect(f.resolve().selectionIdentity).toBe(daemon.selectionIdentity);
-    delete process.env.GOODVIBES_DAEMON_TOKEN; f.pair(); expect(f.resolve().selectionIdentity).toBe(privateSelection.selectionIdentity);
+    delete process.env.GOODVIBES_CONNECTED_HOST_TOKEN;
+    const restoredDaemon = f.resolve();
+    expect(restoredDaemon.token).toBe(daemon.token);
+    expect(restoredDaemon.expectedPrincipalId).toBeUndefined();
+    expect(restoredDaemon.selectionIdentity).not.toBe(daemon.selectionIdentity);
+    delete process.env.GOODVIBES_DAEMON_TOKEN; f.pair();
+    const restoredPrivate = f.resolve();
+    expect(restoredPrivate.expectedPrincipalId).toBe(privateSelection.expectedPrincipalId);
+    expect(restoredPrivate.selectionIdentity).not.toBe(privateSelection.selectionIdentity);
     rmSync(f.pairingPath); const global = f.resolve();
     expect(global.token).toBe(privateSelection.token); expect(global.expectedPrincipalId).toBeUndefined();
     expect(global.selectionIdentity).not.toBe(privateSelection.selectionIdentity);
     process.env.GOODVIBES_DAEMON_TOKEN = secret.token;
     expect(f.resolve().selectionIdentity).not.toBe(global.selectionIdentity);
+  });
+
+  test('retains each operation separately and retires observations across disabled or missing selections', () => {
+    const f = fixture(); const selected = f.resolve();
+    const other = fixture();
+    other.resolve();
+    expect(f.resolve().selectionIdentity).toBe(selected.selectionIdentity);
+    expect(resolveConnectedHostConnection({ ...f.options })).not.toMatchObject({ selectionIdentity: selected.selectionIdentity });
+    expect(f.resolve().selectionIdentity).toBe(selected.selectionIdentity);
+    f.config['daemon.connectedHost.enabled'] = false;
+    expect(resolveConnectedHostConnection(f.options)).toHaveProperty('reason');
+    f.config['daemon.connectedHost.enabled'] = true;
+    const enabled = f.resolve();
+    expect(enabled.selectionIdentity).not.toBe(selected.selectionIdentity);
+    rmSync(f.pairingPath); rmSync(f.globalPath);
+    expect(resolveConnectedHostConnection(f.options)).toHaveProperty('reason');
+    f.pair();
+    expect(f.resolve().selectionIdentity).not.toBe(enabled.selectionIdentity);
+  });
+
+  test('an explicit operation observer follows new option views but retires when the actual config owner changes', () => {
+    const f = fixture(); const observation = new OwnedSelectionObservation();
+    const options = { ...f.options, observation };
+    const initial = resolveConnectedHostConnection(options);
+    if ('reason' in initial) throw new Error(initial.reason);
+    expect(resolveConnectedHostConnection({ ...options })).toEqual(initial);
+    const replacementOwner = { ...f.configManager } as ConfigManager;
+    const replacement = resolveConnectedHostConnection({ ...options, configManager: replacementOwner });
+    expect(replacement).not.toMatchObject({ selectionIdentity: initial.selectionIdentity });
+    expect(resolveConnectedHostConnection(options)).not.toMatchObject({ selectionIdentity: initial.selectionIdentity });
+  });
+
+  test('a failed config read retires the selection before the same credential becomes readable again', () => {
+    const f = fixture(); const initial = f.resolve();
+    const originalGet = f.configManager.get;
+    f.configManager.get = (() => { throw new Error('Synthetic config unavailable'); }) as ConfigManager['get'];
+    expect(() => resolveConnectedHostConnection(f.options)).toThrow('Synthetic config unavailable');
+    f.configManager.get = originalGet;
+    expect(f.resolve().selectionIdentity).not.toBe(initial.selectionIdentity);
   });
 
   for (const change of ['metadata', 'removal', 'environment-source'] as const) {

@@ -1,3 +1,4 @@
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { createShellPathService } from '@/runtime/index.ts';
@@ -13,10 +14,11 @@ import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/sta
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit'): Promise<number> {
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
+  const hostSelection = { configManager, homeDirectory, observation: new OwnedSelectionObservation() };
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
   const journalPath = `${shellPaths.resolveUserPath('agent', 'native-work-submission.json')}.intake`;
   const resolveHost = (): NativeHeadlessHost => {
-    const host = resolveConnectedHostConnection({ configManager, homeDirectory });
+    const host = resolveConnectedHostConnection(hostSelection);
     return 'reason' in host ? host : { ...host, workspace: workingDirectory, journalPath };
   };
   return runHeadlessCommand(runtime, mode, {

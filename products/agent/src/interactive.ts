@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes-jev/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts } from '@goodvibes-jev/engine/terminal-shell/shell-frame-facts';
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
@@ -319,9 +320,11 @@ async function main() {
   const scrollToEnd = (vHeight: number) => transcript.followTail(conversation.history.getLineCount(), vHeight);
 
   const unsubs: Array<() => void> = [];
+  const nativeLedgerHostSelection = { configManager, homeDirectory: () => ctx.services.shellPaths.homeDirectory,
+    observation: new OwnedSelectionObservation() };
   commandContext.nativeWorkLedger = createNativeWorkLedgerView(
     () => {
-      const host = resolveNativeLedgerHost({ configManager, homeDirectory: ctx.services.shellPaths.homeDirectory });
+      const host = resolveNativeLedgerHost(nativeLedgerHostSelection);
       return 'reason' in host
         ? host
         : {

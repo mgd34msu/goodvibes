@@ -38,7 +38,7 @@
  * and must never be laundered into an empty result.
  */
 import { statSync } from 'node:fs';
-import { captureRemoteSettingsPrecondition } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
+import { OwnedSelectionObservation, captureRemoteSettingsPrecondition } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { assertProjectionCurrent } from '@goodvibes-jev/engine/sdk/platform/tools';
 import { agentHostPairingStorePath } from '../connected-host-pairing-store.ts';
 import { connectedHostOperatorTokenPath } from '../connected-host-auth.ts';
@@ -65,6 +65,8 @@ function resolveConnectedHostBaseUrl(configManager: Pick<ConfigManager, 'get'>):
 export interface AgentDaemonVerbCallerOptions {
   readonly configManager: ConfigManager;
   readonly homeDirectory: string | (() => string);
+  /** Kept by the actual operation when it constructs fresh option views. */
+  readonly observation?: OwnedSelectionObservation;
   /** Injectable for tests, so a seam under test never reaches a real port. */
   readonly fetchImpl?: typeof fetch;
 }
@@ -76,48 +78,54 @@ interface ResolvedConnection {
   readonly expectedPrincipalId?: string;
 }
 
-/**
- * Resolve the connected host, or the honest reason there is not one.
- *
- * Every refusal names what is missing and what to do about it, because this is
- * the text a person reads when a setting will not save or an ask will not
- * leave this process.
- */
+// A retained options object identifies the caller's live connection, not a
+// credential or a persisted owner. Explicit observers also support new option
+// views within the same operation; unrelated callers cannot replace its frame.
+const connectionObservations = new WeakMap<AgentDaemonVerbCallerOptions, OwnedSelectionObservation>();
+const getConnectionObservation = WeakMap.prototype.get, setConnectionObservation = WeakMap.prototype.set;
+
+/** Resolve the connected host, or a refusal naming what is missing. */
 function resolveConnection(options: AgentDaemonVerbCallerOptions): ResolvedConnection | { readonly reason: string } {
-  const { configManager } = options;
-  // A context whose config manager cannot answer (a narrow embed, a partially
-  // wired test double) is one more case of "no host can be resolved", never an
-  // exception to raise from a probe.
-  if (typeof (configManager as { get?: unknown } | null)?.get !== 'function') {
-    return { reason: 'no config manager is wired here, so no connected host can be resolved.' };
-  }
-  // `daemon.connectedHost.enabled`, NOT `daemon.enabled`.
-  //
-  // `daemon.enabled` answers whether this surface ADOPTS a session daemon of
-  // its own. It is the wrong question here, and asking it was a real defect:
-  // on a machine with `daemon.enabled: false` and a connected host that was
-  // live and answering, this gate refused every call through this caller, the
-  // session-inputs poll (every two seconds, thousands of log lines an hour),
-  // the conversation-rewind host registration, the approvals update stream and
-  // the hosted-conversation handoff, while the session spine, the memory
-  // spine and the operator tools dialed the SAME host without trouble, because
-  // none of them read the flag. Half the product believed there was no daemon.
-  //
-  // The two meanings are now two settings. This one is the dial permission.
-  if (!resolveConnectedHostDialEnabled(configManager)) {
-    return {
-      reason: 'this surface is set not to dial a connected host (daemon.connectedHost.enabled=false), '
-        + 'nothing to reach. Set it to true in settings, then retry.',
-    };
-  }
-  const homeDirectory = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
-  const baseUrl = resolveConnectedHostBaseUrl(configManager);
-  const token = readConnectedHostOperatorToken(homeDirectory, baseUrl);
-  if (!token.token) {
-    return { reason: token.error ?? connectedHostTokenRequiredMessage(token.path) };
-  }
-  return { baseUrl, token: token.token, selectionIdentity: token.selectionIdentity,
-    ...(token.expectedPrincipalId === undefined ? {} : { expectedPrincipalId: token.expectedPrincipalId }) };
+  let observation = options.observation ?? (Reflect.apply(getConnectionObservation, connectionObservations, [options]) as OwnedSelectionObservation | undefined);
+  const unavailable = (reason: string) => { observation?.retire(); return { reason }; };
+  try {
+    const { configManager } = options;
+    // A context whose config manager cannot answer (a narrow embed, a partially
+    // wired test double) is one more case of "no host can be resolved", never an
+    // exception to raise from a probe.
+    if (typeof (configManager as { get?: unknown } | null)?.get !== 'function') {
+      return unavailable('no config manager is wired here, so no connected host can be resolved.');
+    }
+    // `daemon.connectedHost.enabled`, NOT `daemon.enabled`.
+    //
+    // `daemon.enabled` answers whether this surface ADOPTS a session daemon of
+    // its own. It is the wrong question here, and asking it was a real defect:
+    // on a machine with `daemon.enabled: false` and a connected host that was
+    // live and answering, this gate refused every call through this caller, the
+    // session-inputs poll (every two seconds, thousands of log lines an hour),
+    // the conversation-rewind host registration, the approvals update stream and
+    // the hosted-conversation handoff, while the session spine, the memory
+    // spine and the operator tools dialed the SAME host without trouble, because
+    // none of them read the flag. Half the product believed there was no daemon.
+    //
+    // The two meanings are now two settings. This one is the dial permission.
+    if (!resolveConnectedHostDialEnabled(configManager)) {
+      return unavailable('this surface is set not to dial a connected host (daemon.connectedHost.enabled=false), '
+        + 'nothing to reach. Set it to true in settings, then retry.');
+    }
+    const homeDirectory = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
+    const baseUrl = resolveConnectedHostBaseUrl(configManager);
+    if (!observation) {
+      observation = new OwnedSelectionObservation();
+      Reflect.apply(setConnectionObservation, connectionObservations, [options, observation]);
+    }
+    const token = readConnectedHostOperatorToken(homeDirectory, baseUrl, observation, configManager);
+    if (!token.token) {
+      return unavailable(token.error ?? connectedHostTokenRequiredMessage(token.path));
+    }
+    return { baseUrl, token: token.token, selectionIdentity: token.selectionIdentity,
+      ...(token.expectedPrincipalId === undefined ? {} : { expectedPrincipalId: token.expectedPrincipalId }) };
+  } catch (error) { observation?.retire(); throw error; }
 }
 
 /**

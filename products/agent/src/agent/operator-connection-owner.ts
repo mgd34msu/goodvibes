@@ -1,3 +1,4 @@
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { captureStrictJudgmentJson } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { assertCurrentToolEffect } from '@goodvibes-jev/engine/sdk/platform/tools';
@@ -84,7 +85,8 @@ export function captureOperatorConnection(shellPaths: Pick<ShellPathService, 'ho
   const port = captureStrictJudgmentJson(get.call(reader, 'controlPlane.port'));
   const baseUrl = connectedHostBaseUrl(host, port);
   if (canonicalizePairingHost(baseUrl) !== baseUrl) held();
-  const selected = readConnectedHostOperatorToken(home, baseUrl);
+  const credentialObservation = new OwnedSelectionObservation();
+  const selected = readConnectedHostOperatorToken(home, baseUrl, credentialObservation, reader);
   const path = selected.path === 'Agent host-bound pairing store' ? agentHostPairingStorePath(home) : selected.path;
   const assertFiles = selected.token && !selected.path.startsWith('env:') ? credentialFiles(resolve(path)) : undefined;
   const assertCurrent = () => {
@@ -93,7 +95,7 @@ export function captureOperatorConnection(shellPaths: Pick<ShellPathService, 'ho
       || !isDeepStrictEqual(captureStrictJudgmentJson(get.call(reader, 'controlPlane.host')), host)
       || !isDeepStrictEqual(captureStrictJudgmentJson(get.call(reader, 'controlPlane.port')), port)) held();
     assertGet(); native?.assertCurrent(); assertFiles?.();
-    if (readConnectedHostOperatorToken(home, baseUrl).selectionIdentity !== selected.selectionIdentity) held();
+    if (readConnectedHostOperatorToken(home, baseUrl, credentialObservation, reader).selectionIdentity !== selected.selectionIdentity) held();
     assertGet(); native?.assertCurrent(); assertInvocation();
   };
   assertCurrent();

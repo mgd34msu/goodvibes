@@ -1,5 +1,5 @@
 import { canonicalizePairingHost, readAgentHostPairing, type AgentHostPairing } from './connected-host-pairing-store.ts';
-import { createHash } from 'node:crypto';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -9,8 +9,6 @@ export interface ConnectedHostOperatorToken {
   readonly path: string;
   readonly present: boolean;
   readonly token: string | null;
-  /** Opaque identity of the exact selected credential, including its provenance. */
-  readonly selectionIdentity: string;
   /** Only private pairing records bind a token to a locally known principal. */
   readonly expectedPrincipalId?: string;
   readonly error?: string;
@@ -24,16 +22,19 @@ export function connectedHostOperatorTokenPath(homeDirectory: string): string {
   return join(homeDirectory, '.goodvibes', 'daemon', 'operator-tokens.json');
 }
 
-export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: string): ConnectedHostOperatorToken {
-  const selected = (value: Omit<ConnectedHostOperatorToken, 'selectionIdentity'>, pairing?: AgentHostPairing): ConnectedHostOperatorToken => ({
-    ...value,
-    // Only the selected record participates: shadowed credentials cannot change
-    // this authority. Never expose the private record in the returned identity.
-    selectionIdentity: createHash('sha256').update(JSON.stringify([
-      'agent-connected-host-selection:v1', hostUrl === undefined ? null : canonicalizePairingHost(hostUrl) ?? hostUrl,
-      resolve(homeDirectory), value.path, value.token, pairing ?? null,
-    ])).digest('hex'),
-  });
+/** A live caller supplies its actual observer; passive snapshots issue no ID. */
+export interface SelectedConnectedHostOperatorToken extends ConnectedHostOperatorToken { readonly selectionIdentity: string; }
+export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl: string | undefined,
+  observation: OwnedSelectionObservation, sourceOwner?: object): SelectedConnectedHostOperatorToken;
+export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: string): ConnectedHostOperatorToken;
+export function readConnectedHostOperatorToken(homeDirectory: string, hostUrl?: string,
+  observation?: OwnedSelectionObservation, sourceOwner?: object): ConnectedHostOperatorToken | SelectedConnectedHostOperatorToken {
+  const selected = (value: ConnectedHostOperatorToken, pairing?: AgentHostPairing): ConnectedHostOperatorToken | SelectedConnectedHostOperatorToken => observation
+    ? { ...value, selectionIdentity: observation.observe([
+      'agent-connected-host-selection', hostUrl === undefined ? null : canonicalizePairingHost(hostUrl) ?? hostUrl,
+      resolve(homeDirectory), value, pairing ?? null,
+    ], sourceOwner) }
+    : value;
   const connectedHostEnvToken = process.env.GOODVIBES_CONNECTED_HOST_TOKEN?.trim();
   if (connectedHostEnvToken) {
     return selected({

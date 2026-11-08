@@ -1,3 +1,4 @@
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { captureConfigSelectedScalars, type ConfigScalarSelection } from '@goodvibes-jev/engine/sdk/platform/config';
 import { JudgmentAuthorityRetiredError } from '@goodvibes-jev/engine/errors';
 import { captureVoiceWakeReadSource } from '@goodvibes-jev/engine/sdk/platform/runtime/voice-setup';
@@ -1141,10 +1142,12 @@ export function captureCatalogNativeFacts(context: unknown, family: 'media' | 'p
       if (original.kind === 'absent' && current.kind === 'absent' && original.ancestor !== current.ancestor) held();
     };
     observations.push(assertFile);
-    assertBindings(); assertFile(); const selected = readConnectedHostOperatorToken(home); assertFile(); assertBindings();
+    const credentialObservation = new OwnedSelectionObservation();
+    const sourceOwner = manager !== null && typeof manager === 'object' ? manager : undefined;
+    assertBindings(); assertFile(); const selected = readConnectedHostOperatorToken(home, undefined, credentialObservation, sourceOwner); assertFile(); assertBindings();
     const selection = captureCatalogSnapshot(selected);
     observations.push(() => {
-      assertBindings(); assertFile(); const current = readConnectedHostOperatorToken(home); assertFile(); assertBindings(); selection.assertCurrent(current);
+      assertBindings(); assertFile(); const current = readConnectedHostOperatorToken(home, undefined, credentialObservation, sourceOwner); assertFile(); assertBindings(); selection.assertCurrent(current);
     });
   }
   if (manager !== null && typeof manager === 'object') {

@@ -234,7 +234,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const listeners = new Set<(event: ContractEvent) => void>();
   const runs = new Map<string, ContractRun>();
   const settlements = new Map<string, { readonly promise: Promise<void>; readonly resolve: () => void }>();
-  const settling = new Set<string>();
+  const settling = new Map<string, ContractRun>();
+  // Disposal keeps its resumable control state. Only usage from work already
+  // admitted before disposal may be added after cancellation has drained.
+  const disposalCheckpoints = new Map<string, Contract | null>();
 
   function reserveSettlement(contractId: string) {
     let entry = settlements.get(contractId);
@@ -250,7 +253,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   // Separate from outward terminal events: an abort/status is never a join.
   function settleWork(run: ContractRun): void {
     if (settling.has(run.id)) return;
-    settling.add(run.id);
+    settling.set(run.id, run);
     const entry = reserveSettlement(run.id);
     void (async () => {
       await run.work.join();
@@ -258,10 +261,38 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       // Planning can publish its agent id while unwinding after cancellation.
       // Engine phases independently join unit executors before their cleanup.
       await Promise.all(contractAgentIds(run.contract).map((id) => deps.agentManager.join?.(id)));
+      await run.work.join();
+      let checkpointed = false;
+      try {
+        if (deps.store.get(run.id) !== run.contract) throw new Error('Contract settlement checkpoint owner changed');
+        if (disposed) {
+          const checkpoint = disposalCheckpoints.get(run.id);
+          if (checkpoint === null || checkpoint === undefined) throw new Error('Contract disposal checkpoint is unavailable');
+          const before = checkpoint.judgmentUsage;
+          const after = run.contract.judgmentUsage;
+          if (before.calls !== after.calls || before.inputTokens !== after.inputTokens || before.outputTokens !== after.outputTokens) {
+            checkpoint.judgmentUsage = { ...after };
+            deps.store.hold(checkpoint);
+            if (!deps.store.write(run.id)) throw new Error('Contract disposal usage checkpoint failed');
+          }
+        } else {
+          // Terminal events can precede the last metered response. The final
+          // checkpoint includes late usage and precedes execution lease release.
+          if (!deps.store.write(run.id)) throw new Error('Contract settlement checkpoint failed');
+        }
+        disposalCheckpoints.delete(run.id);
+        checkpointed = true;
+      } catch (error) {
+        // join still reports actual executor drainage. Failed persistence must
+        // not release a durable lease and make a stale checkpoint resumable.
+        logger.error('contract final checkpoint failed', { contractId: run.id, executionLeaseRetained: durableLeases.has(run.id), error: summarizeError(error) });
+      }
       for (const release of run.sharedTreeReleases.values()) release();
       run.sharedTreeReleases.clear();
-      durableLeases.get(run.id)?.();
-      durableLeases.delete(run.id);
+      if (checkpointed) {
+        durableLeases.get(run.id)?.();
+        durableLeases.delete(run.id);
+      }
       entry.resolve();
       settlements.delete(run.id);
       settling.delete(run.id);
@@ -441,6 +472,12 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const checks = createUnitCheckLoop({
     readOwnerEvidence: deps.readOwnerEvidence,
     checkpoint: run => deps.store.scheduleWrite(run.id),
+    checkpointSeverity: run => {
+      // A shutdown snapshot must not be overwritten by cancellation cleanup.
+      // settleWork adds late usage to its detached resumable state instead.
+      if (disposed) return;
+      if (deps.store.get(run.id) !== run.contract || !deps.store.write(run.id)) throw new Error('Contract severity checkpoint failed');
+    },
     findRun: (contractId) => runs.get(contractId),
     agentManager: deps.agentManager,
     messageBus: deps.messageBus,
@@ -1035,12 +1072,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     const { contract } = run;
     if (!isTerminalContractStatus(contract.status) || run.ownerSettled) return;
     run.ownerSettled = true;
-    // A terminal native checkpoint must be durable before its execution lease can be released.
-    if (!disposed && contract.durableAdmission !== undefined && !deps.store.write(run.id)) {
-      logger.error('native contract terminal checkpoint failed; retaining execution lease', { contractId: run.id });
-      // Do not make another runner eligible to resume an unpersisted cancellation.
-      durableLeases.delete(run.id);
-    }
+    // settleWork writes the terminal state after all admitted work has drained,
+    // before releasing the execution lease. join reports executor drainage.
     settleWork(run);
     run.abort.abort();
     groups.stopRun(run);
@@ -1225,6 +1258,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      for (const run of new Set([...runs.values(), ...settling.values()])) {
+        const json = serializeContract(run.contract, now());
+        disposalCheckpoints.set(run.id, json === null ? null : deserializeContract(json));
+      }
       watchdog.dispose();
       failures.dispose();
       // Disposal preserves a restart checkpoint; explicit cancel persists a

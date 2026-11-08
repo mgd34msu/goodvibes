@@ -42,7 +42,7 @@ import type { AgentRecord } from '../tools/agent/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
-import { applySeverities, applyUnitCheck, checkSettings, readUnmetSeverities, runUnitCheck, unitMustWrite, type DecidedCheck, type UnitCheckOutcome } from './check.js';
+import { applySeverities, applyUnitCheck, checkSettings, emptyJudgmentUsage, readUnmetSeverities, runUnitCheck, unitMustWrite, type DecidedCheck, type UnitCheckOutcome } from './check.js';
 import type { ContractConfigReader } from './config.js';
 import { parseUnitCompletionReport } from './claims.js';
 import { collectUnitEvidence, commandReceiptsFromTurns, headAndTail, mergeCommandReceipts, mergeSourceReads, sourceReadsFromTurns, OUTPUT_CAP_CHARS, type ContractTurnRecord } from './evidence.js';
@@ -106,6 +106,8 @@ export interface UnitCheckLoopDeps {
   readonly readOwnerEvidence?: OwnerEvidenceReader | undefined;
   /** Persist actual tool observations independently of acceptance checks. */
   readonly checkpoint?: ((run: ContractRun) => void) | undefined;
+  /** Persist late severity/usage updates before releasing this owned task. */
+  readonly checkpointSeverity?: ((run: ContractRun) => void) | undefined;
   readonly findRun: (contractId: string) => ContractRun | undefined;
   readonly agentManager: {
     getStatus(agentId: string): AgentRecord | null;
@@ -469,10 +471,11 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
 
   /** Severity of the unmet criteria, read after the nudge went out so it never delays one. */
   async function readSeverities(run: ContractRun, unit: ContractUnit, runtime: UnitRuntime, checkId: string, criterionIds: readonly string[]): Promise<void> {
+    const usage = emptyJudgmentUsage();
     try {
-      const read = await readUnmetSeverities({ native: { contract: run.contract, services: run.env.native }, contract: run.contract, unit, criterionIds, signal: runtime.abort.signal });
-      addJudgmentUsage(run.contract.judgmentUsage, read.usage);
-      if (run.terminal) return;
+      const signal = AbortSignal.any([runtime.abort.signal, run.abort.signal]);
+      const read = await readUnmetSeverities({ native: { contract: run.contract, services: run.env.native }, contract: run.contract, unit, criterionIds, signal, usage });
+      if (run.terminal || isTerminalUnitStatus(unit.status) || run.unit(unit.id) !== unit || run.unitRuntimes.get(unit.id) !== runtime) return;
       applySeverities(unit, checkId, read.severities);
     } catch (error) {
       if (isAbortError(error, runtime.abort.signal) || run.terminal) return;
@@ -482,6 +485,18 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
         return;
       }
       logger.warn('contract runner: severity reading did not complete', { contractId: run.id, unitId: unit.id, error: summarizeError(error) });
+    } finally {
+      // readUnmetSeverities has drained its workers on either path. Count each
+      // completed response once, including responses discarded on cancellation.
+      addJudgmentUsage(run.contract.judgmentUsage, usage);
+      if (usage.calls > 0) {
+        try {
+          deps.checkpointSeverity?.(run);
+        } catch {
+          logger.error('contract runner: severity checkpoint failed', { contractId: run.id, unitId: unit.id });
+          if (!run.terminal) deps.failContract(run, 'other', 'The severity usage checkpoint could not be saved');
+        }
+      }
     }
   }
 

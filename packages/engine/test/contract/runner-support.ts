@@ -365,10 +365,16 @@ export function makeHarness(options: HarnessOptions): Harness {
     holds,
     agentsOf: (unitId) => manager.list().filter((record) => record.contractUnitId === unitId).sort((a, b) => a.startedAt - b.startedAt).map((record) => record.id),
     dispose: () => {
+      const ids = runner.list({ includeTerminal: true }).map(contract => contract.id);
       runner.dispose();
-      if (ownedLog !== undefined) void Promise.all(runner.list({ includeTerminal: true }).map(contract => runner.join(contract.id))).finally(() => ownedLog?.[Symbol.dispose]());
+      // Late metered replies may still checkpoint while cancellation drains.
+      // The fixture's log and directory belong to that work until join.
+      const cleanup = () => {
+        ownedLog?.[Symbol.dispose]();
+        if (options.root === undefined) rmSync(root, { recursive: true, force: true });
+      };
+      void Promise.all(ids.map(id => runner.join(id))).then(cleanup, cleanup);
       installJudgmentPort(previous);
-      if (options.root === undefined) rmSync(root, { recursive: true, force: true });
     },
   };
 }

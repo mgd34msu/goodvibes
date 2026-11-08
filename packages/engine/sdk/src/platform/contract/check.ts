@@ -464,9 +464,9 @@ export interface SeverityReading {
 }
 
 /**
- * Reads the severity of each unmet criterion, one request per criterion, all
- * concurrently. Run after the nudge is sent. The state is the person's words,
- * the unit's goal and the criterion.
+ * Reads the severity of each unmet criterion after the nudge is sent. At most
+ * four readings run concurrently. A failed/cancelled batch drains every
+ * admitted reading before returning, so its completed usage is final.
  */
 export async function readUnmetSeverities(input: {
   readonly contract: Pick<ContractView, 'ask'>;
@@ -474,23 +474,51 @@ export async function readUnmetSeverities(input: {
   readonly unit: Pick<ContractUnit, 'goal' | 'criteria'>;
   readonly criterionIds: readonly string[];
   readonly signal?: AbortSignal | undefined;
+  /** Caller-owned accounting remains available even when this batch throws. */
+  readonly usage?: JudgmentUsage | undefined;
 }): Promise<{ readonly severities: ReadonlyMap<string, SeverityReading>; readonly usage: JudgmentUsage }> {
   requireDecisionFeature('autonomous contract semantic checks, planning or continuation; use ordinary Classic tools for explicit work');
-  const usage = emptyJudgmentUsage();
-  const port = meteredPort(input.native === undefined ? judgmentPort(CHECK_SITES.severity) : nativeContractPort(input.native.contract, input.native.services, judgmentPort(CHECK_SITES.severity), input.signal), usage);
-  const criteria = input.unit.criteria.filter((criterion) => input.criterionIds.includes(criterion.id));
-  const entries = await Promise.all(criteria.map(async (criterion): Promise<[string, SeverityReading]> => {
-    const run = await unmetSeverity.run(
-      port,
-      { request: input.contract.ask, goal: input.unit.goal, criterion: criterion.text },
-      { site: CHECK_SITES.severity, ...(input.signal === undefined ? {} : { signal: input.signal }) },
-    );
-    const reading = run.readings.severity;
-    const severity = reading.outcome === 'act' ? reading.choice : undefined;
-    run.recordAction(severity === undefined ? 'severity not settled; left unknown' : `severity ${severity} recorded on ${criterion.id}`);
-    return [criterion.id, { severity, decisionId: run.result.decisionId }];
-  }));
-  return { severities: new Map(entries), usage };
+  const signal = input.signal;
+  signal?.throwIfAborted();
+  const usage = input.usage ?? emptyJudgmentUsage();
+  const metered = meteredPort(judgmentPort(CHECK_SITES.severity), usage);
+  // Meter before the native post-await authority check can discard a response.
+  // A discarded semantic result still consumed its reported tokens.
+  const port = input.native === undefined ? metered : nativeContractPort(input.native.contract, input.native.services, metered, signal);
+  // Queued readings retain this check's words and cancellation owner even if
+  // the live unit is amended or starts another turn while a reading awaits.
+  const request = input.contract.ask;
+  const goal = input.unit.goal;
+  const criteria = input.unit.criteria.filter(criterion => input.criterionIds.includes(criterion.id))
+    .map(({ id, text }) => ({ id, text }));
+  const entries: Array<readonly [string, SeverityReading] | undefined> = new Array(criteria.length);
+  const batch: { next: number; failure?: { readonly error: unknown } } = { next: 0 };
+  async function worker(): Promise<void> {
+    while (batch.failure === undefined) {
+      const index = batch.next++;
+      const criterion = criteria[index];
+      if (criterion === undefined) return;
+      try {
+        signal?.throwIfAborted();
+        const run = await unmetSeverity.run(port, { request, goal, criterion: criterion.text }, { site: CHECK_SITES.severity, ...(signal === undefined ? {} : { signal }) });
+        signal?.throwIfAborted();
+        const reading = run.readings.severity;
+        const severity = reading.outcome === 'act' ? reading.choice : undefined;
+        run.recordAction(severity === undefined ? 'severity not settled; left unknown' : `severity ${severity} recorded on ${criterion.id}`);
+        entries[index] = [criterion.id, { severity, decisionId: run.result.decisionId }];
+      } catch (error) {
+        batch.failure ??= { error };
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, criteria.length) }, () => worker()));
+  if (batch.failure !== undefined) throw batch.failure.error;
+  signal?.throwIfAborted();
+  const severities = new Map<string, SeverityReading>();
+  for (const entry of entries) {
+    if (entry !== undefined) severities.set(...entry);
+  }
+  return { severities, usage };
 }
 
 /** Records severities on the readings of check `checkId`. */

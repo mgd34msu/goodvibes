@@ -120,6 +120,20 @@ interface DriverApi {
   };
 }
 
+function debuggerWebSocket(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'ws:' || url.protocol === 'wss:') && url.hostname && !url.hash ? value : null;
+  } catch { return null; }
+}
+
+/** Retire only our CDP client transport, never the user's browser/context. */
+function detachBrowser(browser: Browser): void {
+  const connection = browser as unknown as { readonly _connection?: { close?: () => void } };
+  connection._connection?.close?.();
+}
+
 async function describeLaunchFailure(message: string, profileDirectory: string, options: BrowserProvisionLifetime): Promise<BrowserSessionError> {
   const cause = await readBrowserLaunchCause(message, options).catch(() => { assertProvisionCurrent(options); return 'unknown' as const; });
   if (cause === 'profile_in_use') {
@@ -382,21 +396,31 @@ export class BrowserSessionManager {
    * permanently marked attached, which is what makes closing it impossible.
    */
   async attach(options: BrowserAttachOptions): Promise<BrowserSessionInfo> {
+    const requestedEndpoint = options.cdpEndpoint;
     const driver = this.driver();
-    const candidates = cdpEndpointCandidates(options.cdpEndpoint);
+    const candidates = cdpEndpointCandidates(requestedEndpoint);
     const reachable = await this.probeEndpoint(candidates);
     if (!reachable) {
       throw new BrowserSessionError(
-        `No browser is listening at ${options.cdpEndpoint} (tried ${candidates.join(', ')}).`,
+        `No browser is listening at ${requestedEndpoint} (tried ${candidates.join(', ')}).`,
         'Start the browser with a remote debugging port (chromium --remote-debugging-port=9222 --user-data-dir=<profile>) and pass that port, or use action:"launch" to have the agent start its own browser with a saved profile.',
       );
     }
+    // Capture the browser WebSocket from this discovery before connecting.
+    // Connecting via HTTP again would rediscover whatever later owns that
+    // address/port, including during the Node-host fallback after a failure.
+    const endpoint = reachable.endpoint;
+    const webSocket = debuggerWebSocket(reachable.webSocketDebuggerUrl);
+    if (!webSocket) throw new BrowserSessionError(
+      'The debugger did not identify a usable browser WebSocket.',
+      'Use the browser WebSocket from its /json/version response, or restart its remote debugging endpoint and attach again.',
+    );
     let browser: Browser | null = null;
     let lastMessage = '';
     try {
       // The endpoint is already known to answer, so a long connect timeout only
       // delays an honest answer.
-      browser = await driver.chromium.connectOverCDP(reachable.endpoint, { timeout: 8_000 });
+      browser = await driver.chromium.connectOverCDP(webSocket, { timeout: 8_000 });
     } catch (error) {
       lastMessage = error instanceof Error ? error.message : String(error);
     }
@@ -404,7 +428,7 @@ export class BrowserSessionManager {
       // This runtime cannot complete a CDP WebSocket handshake, so the
       // connection is made by a Node process instead and driven over a pipe.
       // The result is the same session, with the same operations.
-      const hosted = await this.attachThroughHost(reachable.endpoint).catch((error: unknown) => {
+      const hosted = await this.attachThroughHost(webSocket, requestedEndpoint).catch((error: unknown) => {
         lastMessage = `${lastMessage} | host: ${error instanceof Error ? error.message : String(error)}`;
         return null;
       });
@@ -415,11 +439,11 @@ export class BrowserSessionManager {
       // is alive. Distinguish "this runtime cannot complete the debugger
       // handshake" from a genuine connection problem, because the two have
       // completely different answers and only one of them is the user's doing.
-      const handshake = await cdpWebSocketHandshakeWorks(reachable.webSocketDebuggerUrl);
+      const handshake = await cdpWebSocketHandshakeWorks(webSocket);
       throw new BrowserSessionError(
         handshake
-          ? `The browser at ${reachable.endpoint} is running and reachable, but this build cannot complete the debugger handshake: ${lastMessage.split('\n')[0]}`
-          : `Could not connect to the browser at ${reachable.endpoint}: ${lastMessage.split('\n')[0]}`,
+          ? `The browser at ${endpoint} is running and reachable, but this build cannot complete the debugger handshake: ${lastMessage.split('\n')[0]}`
+          : `Could not connect to the browser at ${endpoint}: ${lastMessage.split('\n')[0]}`,
         handshake
           ? 'Use action:"launch" with a profileName instead. The agent opens its own browser with a saved profile, and a sign-in done there persists across runs.'
           : 'Restart the browser with --remote-debugging-port and try again, or use action:"launch".',
@@ -428,8 +452,9 @@ export class BrowserSessionManager {
     const contexts = browser.contexts();
     const context = contexts[0];
     if (!context) {
+      try { detachBrowser(browser); } catch { /* A failed attach still retires only its client transport. */ }
       throw new BrowserSessionError(
-        `The browser at ${options.cdpEndpoint} exposed no browsing context to attach to.`,
+        `The browser at ${requestedEndpoint} exposed no browsing context to attach to.`,
         'Open a tab in that browser and attach again.',
       );
     }
@@ -438,7 +463,7 @@ export class BrowserSessionManager {
       context,
       browser,
       profileDirectory: null,
-      cdpEndpoint: options.cdpEndpoint,
+      cdpEndpoint: requestedEndpoint,
       executablePath: null,
       source: null,
       headless: false,
@@ -452,7 +477,7 @@ export class BrowserSessionManager {
    * it produces is an ordinary attached session: origin 'attached', so nothing
    * here can close the user's browser.
    */
-  private async attachThroughHost(endpoint: string): Promise<BrowserSessionInfo | null> {
+  private async attachThroughHost(endpoint: string, requestedEndpoint: string): Promise<BrowserSessionInfo | null> {
     const client = new BrowserHostClient(this.hostOptions);
     await client.start();
     try {
@@ -468,7 +493,7 @@ export class BrowserSessionManager {
         context,
         browser: null,
         profileDirectory: null,
-        cdpEndpoint: endpoint,
+        cdpEndpoint: requestedEndpoint,
         executablePath: null,
         source: null,
         headless: false,
@@ -683,13 +708,11 @@ export class BrowserSessionManager {
       host.stop();
       this.hosts.delete(sessionId);
     }
-    if (session.browser) {
+    const browser = session.browser;
+    if (browser) {
       // Detach the transport without issuing any browser-level close.
       void Promise.resolve()
-        .then(async () => {
-          const connection = session.browser as unknown as { readonly _connection?: { close?: () => void } };
-          connection._connection?.close?.();
-        })
+        .then(() => detachBrowser(browser))
         .catch(() => undefined);
     }
     return info;
@@ -703,7 +726,10 @@ export class BrowserSessionManager {
     }
     for (const session of [...this.sessions.values()]) {
       this.sessions.delete(session.sessionId);
-      if (session.origin !== 'launched') continue;
+      if (session.origin !== 'launched') {
+        try { if (session.browser) detachBrowser(session.browser); } catch { /* An already disconnected transport needs no browser close. */ }
+        continue;
+      }
       try {
         await session.context.close();
       } catch {
@@ -732,6 +758,9 @@ export function cdpEndpointCandidates(endpoint: string): readonly string[] {
   } catch {
     return [trimmed];
   }
+  // A proxy route, query capability or credentials select a specific debugger.
+  // Dropping them and probing only the origin could attach another browser.
+  if (parsed.pathname !== '/' || parsed.search || parsed.username || parsed.password) return [parsed.href];
   const port = parsed.port || '9222';
   const host = parsed.hostname;
   const alternates = host === '127.0.0.1' || host === 'localhost'
@@ -751,17 +780,23 @@ export interface ReachableCdpEndpoint {
 async function firstReachableCdpEndpoint(candidates: readonly string[]): Promise<ReachableCdpEndpoint | null> {
   for (const candidate of candidates) {
     if (candidate.startsWith('ws://') || candidate.startsWith('wss://')) {
-      return { endpoint: candidate, webSocketDebuggerUrl: candidate };
+      const webSocketDebuggerUrl = debuggerWebSocket(candidate);
+      if (webSocketDebuggerUrl) return { endpoint: candidate, webSocketDebuggerUrl };
+      continue;
     }
     try {
-      const response = await fetch(`${candidate.replace(/\/$/, '')}/json/version`, {
+      const discovery = new URL(candidate);
+      discovery.pathname = `${discovery.pathname.replace(/\/$/, '')}/json/version`;
+      const response = await fetch(discovery, {
         signal: AbortSignal.timeout(2_500),
       });
       if (!response.ok) continue;
       const payload = await response.json() as { readonly webSocketDebuggerUrl?: unknown };
+      const webSocketDebuggerUrl = debuggerWebSocket(payload.webSocketDebuggerUrl);
+      if (!webSocketDebuggerUrl) continue;
       return {
         endpoint: candidate,
-        webSocketDebuggerUrl: typeof payload.webSocketDebuggerUrl === 'string' ? payload.webSocketDebuggerUrl : null,
+        webSocketDebuggerUrl,
       };
     } catch {
       // Try the next candidate.

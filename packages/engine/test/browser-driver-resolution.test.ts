@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { once } from 'node:events';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { dirname } from 'node:path';
@@ -15,7 +15,9 @@ import { browserHostScriptPath } from '../sdk/src/platform/browser/browser-host-
 import {
   browserProfileRoot,
   browserScreenshotRoot,
+  BrowserSessionManager,
 } from '../sdk/src/platform/browser/browser-sessions.js';
+import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
 import { withTestTimeout } from './_helpers/test-timeout.js';
 
 // The old sdk package's manifest is the engine manifest, packages/engine/package.json.
@@ -92,6 +94,69 @@ describe('the node-hosted browser host', () => {
     const path = browserHostScriptPath();
     expect(readFileSync(path).byteLength).toBeGreaterThan(0);
   });
+
+  test('the real manager and Node host retain the probed browser after the first connection fails and its address changes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'browser-host-pinned-'));
+    const scriptPath = join(root, 'browser-host.mjs'), callsPath = join(root, 'calls.jsonl'), stopped = join(root, 'stopped');
+    const original = 'ws://127.0.0.1:9222/devtools/browser/original';
+    const reachable = { endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: original };
+    const requested = { cdpEndpoint: '9222' }, nativeConnections: string[] = [];
+    const io: BrowserProvisionIo = {
+      resolveDriver: () => ({ available: true, packageDirectory: '/fixture', cliPath: '/fixture/cli.js', version: DRIVER_VERSION, error: null }),
+      expectedExecutablePath: () => '/fixture/chromium', browsersPath: () => '/fixture/cache',
+      pathExists: () => true, isExecutableFile: () => true, directoryWritable: () => true, removePath: () => {},
+      runCommand: async () => ({ code: 0, stdout: '', stderr: '', timedOut: false, spawnError: null }),
+      systemBrowserCandidates: () => [], now: () => 0,
+    };
+    const manager = new BrowserSessionManager({ profileRoot: join(root, 'profiles'), surfaceRoot: 'test-surface', io,
+      host: { scriptPath }, probeEndpoint: async () => reachable,
+      loadDriver: () => ({ chromium: {
+        async launchPersistentContext() { throw new Error('No browser may be launched for this attach'); },
+        async connectOverCDP(endpoint) {
+          nativeConnections.push(endpoint);
+          reachable.endpoint = 'http://127.0.0.1:9999';
+          reachable.webSocketDebuggerUrl = 'ws://127.0.0.1:9999/devtools/browser/replacement';
+          requested.cdpEndpoint = reachable.endpoint;
+          throw new Error('Fixture native WebSocket is unavailable');
+        },
+      } }),
+    });
+    try {
+      copyFileSync(browserHostScriptPath(), scriptPath);
+      const driver = join(root, 'node_modules/playwright-core'); mkdirSync(driver, { recursive: true });
+      writeFileSync(callsPath, '');
+      writeFileSync(join(driver, 'package.json'), JSON.stringify({ name: 'playwright-core', version: DRIVER_VERSION, main: 'index.js' }));
+      writeFileSync(join(driver, 'index.js'), `
+        const { appendFileSync, writeFileSync } = require('node:fs');
+        const record = (value) => appendFileSync(${JSON.stringify(callsPath)}, JSON.stringify(value) + '\\n');
+        process.on('exit', () => writeFileSync(${JSON.stringify(stopped)}, 'stopped'));
+        process.on('SIGTERM', () => process.exit(0));
+        const page = { on() {}, url: () => 'about:blank', title: async () => 'Original page', close: async () => record('page.close') };
+        const context = { pages: () => [page], on() {}, close: async () => record('context.close') };
+        const browser = { contexts: () => [context], close: async () => record('browser.close') };
+        exports.chromium = { connectOverCDP: async endpoint => { record({ endpoint, pid: process.pid }); return browser; } };
+      `);
+      const session = await manager.attach(requested);
+      expect(nativeConnections).toEqual([original]);
+      expect(session).toMatchObject({ origin: 'attached', cdpEndpoint: '9222', closableByAgent: false });
+      const calls = readFileSync(callsPath, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { endpoint?: string });
+      expect(calls).toHaveLength(1); expect(calls[0]?.endpoint).toBe(original);
+    } finally {
+      try {
+        await manager.shutdown();
+        if (existsSync(callsPath) && readFileSync(callsPath, 'utf8').trim()) {
+          const deadline = Date.now() + 5_000;
+          while (!existsSync(stopped) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+          if (!existsSync(stopped)) {
+            const owned = JSON.parse(readFileSync(callsPath, 'utf8').split('\n')[0]!) as { pid: number };
+            if (Number.isSafeInteger(owned.pid) && owned.pid > 0) { try { process.kill(owned.pid, 'SIGKILL'); } catch { /* Host already exited. */ } }
+            throw new Error('The owned Node browser host did not exit after manager shutdown');
+          }
+          expect(readFileSync(callsPath, 'utf8')).not.toMatch(/page\.close|context\.close|browser\.close/);
+        }
+      } finally { rmSync(root, { recursive: true, force: true }); }
+    }
+  }, 30_000);
 
   test('releasing an attached browser drops host state without closing the browser, context, or pages', async () => {
     const root = mkdtempSync(join(tmpdir(), 'browser-host-ownership-'));

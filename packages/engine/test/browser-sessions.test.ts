@@ -5,7 +5,7 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import { BrowserSessionError, BrowserSessionManager, cdpEndpointCandidates } from '../sdk/src/platform/browser/browser-sessions.js';
+import { BrowserSessionError, BrowserSessionManager, cdpEndpointCandidates, type BrowserSessionManagerDeps } from '../sdk/src/platform/browser/browser-sessions.js';
 import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
 
 // BrowserSessionManager.launch() does a real `mkdirSync(profileDirectory, ...)`
@@ -98,6 +98,113 @@ function createControllableManager(
     }),
   });
 }
+
+function attachManager(connect: (endpoint: string) => Promise<Browser>, probe?: BrowserSessionManagerDeps['probeEndpoint']) {
+  return new BrowserSessionManager({ profileRoot: PROFILE_ROOT, surfaceRoot: 'test-surface', io: readyProvisionIo(),
+    loadDriver: () => ({ chromium: { launchPersistentContext: async () => fakeContext('unexpected-launch', []).context,
+      connectOverCDP: connect } }), ...(probe ? { probeEndpoint: probe } : {}),
+  });
+}
+
+describe('exact browser attachment identity', () => {
+  test('actual discovery keeps the selected proxy path and query instead of probing another browser on its origin', async () => {
+    const requests: string[] = [], connections: string[] = [];
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+      const url = new URL(request.url); requests.push(url.pathname + url.search);
+      return Response.json({ webSocketDebuggerUrl: url.pathname === '/owner/browser/json/version' && url.search === '?key=fixture'
+        ? 'ws://127.0.0.1:9222/devtools/browser/selected' : 'ws://127.0.0.1:9222/devtools/browser/wrong-root-browser' });
+    } });
+    const manager = attachManager(async endpoint => {
+      connections.push(endpoint); return { contexts: () => [fakeContext('selected', []).context] } as unknown as Browser;
+    });
+    const endpoint = `${server.url.origin}/owner/browser?key=fixture`;
+    try {
+      expect((await manager.attach({ cdpEndpoint: endpoint })).cdpEndpoint).toBe(endpoint);
+      expect(requests).toEqual(['/owner/browser/json/version?key=fixture']);
+      expect(connections).toEqual(['ws://127.0.0.1:9222/devtools/browser/selected']);
+    } finally { await manager.shutdown(); server.stop(true); }
+  });
+
+  test('the actual HTTP discovery is not repeated when its port could select another browser', async () => {
+    let probes = 0;
+    const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
+      if (new URL(request.url).pathname !== '/json/version') return new Response('', { status: 404 });
+      probes++;
+      return Response.json({ webSocketDebuggerUrl: `ws://127.0.0.1:9222/devtools/browser/${probes === 1 ? 'original' : 'replacement'}` });
+    } });
+    const connections: string[] = [];
+    const manager = attachManager(async endpoint => {
+      // Model the real driver's HTTP rediscovery; a WebSocket connects to
+      // the selected address without performing another HTTP lookup.
+      const selected = endpoint.startsWith('http:')
+        ? (await (await fetch(`${endpoint}/json/version`)).json() as { webSocketDebuggerUrl: string }).webSocketDebuggerUrl : endpoint;
+      connections.push(selected);
+      return { contexts: () => [fakeContext('attached', []).context] } as unknown as Browser;
+    });
+    try {
+      const info = await manager.attach({ cdpEndpoint: server.url.origin });
+      expect(probes).toBe(1);
+      expect(connections).toEqual(['ws://127.0.0.1:9222/devtools/browser/original']);
+      expect(info.cdpEndpoint).toBe(server.url.origin);
+    } finally { await manager.shutdown(); server.stop(true); }
+  });
+
+  test.each([null, 'http://127.0.0.1:9222', 'ws://', 'ws://127.0.0.1:9222/browser#fragment'] as const)(
+    'incomplete or invalid browser identity %s never falls back to HTTP rediscovery', async webSocketDebuggerUrl => {
+      let connects = 0;
+      const manager = attachManager(async () => { connects++; return { contexts: () => [] } as unknown as Browser; },
+        async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl }));
+      try {
+        await expect(manager.attach({ cdpEndpoint: '9222' })).rejects.toThrow('usable browser WebSocket');
+        expect(connects).toBe(0); expect(manager.list()).toEqual([]);
+      } finally { await manager.shutdown(); }
+    },
+  );
+
+  test('caller edits during discovery cannot rename the browser actually attached', async () => {
+    let discovered!: () => void;
+    const ready = new Promise<void>(done => { discovered = done; });
+    let complete!: () => void;
+    const held = new Promise<void>(done => { complete = done; });
+    const connections: string[] = [], options = { cdpEndpoint: '9222' };
+    const manager = attachManager(async endpoint => {
+      connections.push(endpoint); return { contexts: () => [fakeContext('attached', []).context] } as unknown as Browser;
+    }, async () => { discovered(); await held; return { endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/original' }; });
+    try {
+      const attaching = manager.attach(options); await ready;
+      options.cdpEndpoint = 'http://127.0.0.1:9999'; complete();
+      expect((await attaching).cdpEndpoint).toBe('9222');
+      expect(connections).toEqual(['ws://127.0.0.1:9222/original']);
+    } finally { complete(); await manager.shutdown(); }
+  });
+
+  test('a connected browser without a context retires only the new client transport', async () => {
+    const calls: string[] = [];
+    const manager = attachManager(async () => ({ contexts: () => [],
+      close: async () => { calls.push('browser-close'); }, _connection: { close() { calls.push('transport-close'); } },
+    }) as unknown as Browser, async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/original' }));
+    try {
+      await expect(manager.attach({ cdpEndpoint: '9222' })).rejects.toThrow('no browsing context');
+      expect(calls).toEqual(['transport-close']); expect(manager.list()).toEqual([]);
+    } finally { await manager.shutdown(); }
+  });
+
+  test('release and shutdown disconnect their exact attached transports without closing a user browser', async () => {
+    const calls: string[] = [];
+    let count = 0;
+    const manager = attachManager(async () => {
+      const id = ++count;
+      return { contexts: () => [fakeContext(`user-${id}`, calls).context], close: async () => { calls.push(`browser-close:${id}`); },
+        _connection: { close() { calls.push(`transport-close:${id}`); } } } as unknown as Browser;
+    }, async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/original' }));
+    try {
+      const first = await manager.attach({ cdpEndpoint: '9222' }); await manager.attach({ cdpEndpoint: '9222' });
+      manager.release(first.sessionId); await Promise.resolve();
+      await manager.shutdown();
+      expect(calls).toEqual(['transport-close:1', 'transport-close:2']); expect(manager.list()).toEqual([]);
+    } finally { await manager.shutdown(); }
+  });
+});
 
 describe('browser session ownership', () => {
   for (const origin of ['launched', 'attached'] as const) test(`a new ${origin} owner cannot resolve another manager's saved browser/page references`, async () => {
@@ -398,6 +505,11 @@ describe('cdp endpoint candidates', () => {
   test('a remote host is not rewritten to loopback', () => {
     expect(cdpEndpointCandidates('http://192.168.1.5:9222')).toEqual(['http://192.168.1.5:9222']);
   });
+
+  test.each(['http://localhost:9222/owner/browser?key=fixture', 'https://debugger.example.test/route/',
+    'http://fixture-user:fixture-password@localhost:9222'])('an explicit debugger route is retained without origin or loopback substitution: %s', endpoint => {
+      expect(cdpEndpointCandidates(endpoint)).toEqual([new URL(endpoint).href]);
+    });
 });
 
 let prior: JudgmentPort | undefined;

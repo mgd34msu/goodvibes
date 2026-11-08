@@ -802,14 +802,15 @@ two still is.
 
 Both windows run through the same port, `PaymentNotifier.awaitAnswer()`
 (`platform/payments/notice-delivery.ts`), called inline from `runCheckout()`
-while the `payments.checkout.begin` call that started the purchase is still
-open. A second call can answer its live `PaymentReplyInbox` window by exact
-purchase and window reference, but begin still does not acknowledge a detached
-operation. There is no separate use of `ApprovalBroker`
+inside a daemon-owned checkout operation. The real daemon
+`payments.checkout.begin` handler persists admission and returns `accepted`
+before waiting. A separate call can answer the live `PaymentReplyInbox` window
+by exact purchase and window reference, even after the initiating socket closes. There is no separate use of `ApprovalBroker`
 (`platform/control-plane/approval-broker.ts`) anywhere in the payments module,
 and no use of `AutomationManager.createJob()` or `AutomationAtSchedule` either.
-The wait for an answer lives on the stack of that one call, not in a persisted
-record.
+The wait itself is in memory, owned and drained by the payment registration.
+Operation status and checkout phases are durable; restart does not reconstruct
+the browser execution or automatically submit the order.
 
 Each wait now carries its exact `purchaseId`, rendered notice, deadline and
 owning cancellation signal. The notifier does not keep a shared last notice;
@@ -882,8 +883,11 @@ is still pending. A late result cannot stamp or settle a retired recovery.
 SDK embedders should await `PaymentsGatewayServiceImpl.close()`; daemon
 registrations expose an awaited `close()` as well as the compatibility void
 `unregister()`. A caller must await close before registering replacement handlers.
-This lifecycle does not yet provide detached checkout acknowledgement or resume
-an interrupted browser purchase.
+Detached acknowledgement survives a request disconnect. Restart reconciles the
+stored operation against the actual journal and purchase ledger; it does not
+resume an interrupted browser purchase. Recovery takes the original operation
+execution lease, skipping another host’s live checkout, and retains that lease
+until timed-out dependency work has actually drained.
 
 When a window opens, its per-channel delivery report, its deadline, and its
 kind are persisted with the journal record. A restart therefore applies
@@ -1619,29 +1623,43 @@ verb.
 | `payments.cards.create` | admin, `write:payments` | Accepts card material; **returns metadata only**. | yes |
 | `payments.cards.delete` | admin, `write:payments` | Deletes config metadata and every derived secret, reporting how many were cleared. | yes |
 | `payments.purchases.list` | `read:payments` | Audit records. | yes |
-| `payments.checkout.begin` | command-authority principal | Runs the whole flow, §6 steps 0 through 8, in one call, including waiting out the window; returns the final `PurchaseRecord` outcome, a refusal, a cancellation or a challenge. | yes |
+| `payments.checkout.begin` | paired admin owner, `write:payments`, explicit request and prior purchase approval | Persists one stable `requestId` and returns `accepted` with its purchase ID. The daemon owns subsequent processing. | yes |
 | `payments.checkout.fillCard` | command-authority principal | Types the stored card into an already-open checkout page. | yes |
 | `payments.purchase.approve` / `.deny` | paired admin owner, `write:payments`, explicit confirmation | Answers the exact live window; approve acknowledges an in-budget veto too. | live windows |
-| `payments.purchase.cancel` | paired admin owner, `write:payments`, explicit confirmation | Objects to an in-budget veto or denies an approval. | live windows |
-| `payments.purchase.status` | `read:payments` | Live windows: exact notice, deadline, purchase ID and window reference. | live windows |
+| `payments.purchase.cancel` | paired admin owner, `write:payments`, explicit confirmation | Objects to a live window, or requests stopping the exact admitted operation. Does not undo an order. | yes |
+| `payments.purchase.status` | `read:payments` | Durable operation status and live windows, optionally for one original purchase ID. | yes |
 
 The original seven SDK verbs, the pre-checkout `payments.checkout.approve`,
 and the four live-window methods are attached by the daemon payment composition.
-`payments.checkout.begin` still runs the checkout inline, including its wait.
-The new methods address that same live inbox independently, so a second
-connection can inspect and answer a pending window while begin is waiting.
-Detached operation acknowledgement, retained terminal operation status and
-restart-resumable windows are still unfinished (§8.6).
+`payments.checkout.begin` requires a stable `requestId`, saved by the caller
+before sending. Its `accepted` response acknowledges durable admission, not a
+merchant order. A retry using the same ID never creates another executor;
+after a lost response, query that ID through `payments.purchase.status`.
+The background operation retains the original paired owner, host/browser and
+payment settings, with a daemon-owned cancellation lifetime. Request disconnect
+alone does not stop it. Startup status reconciliation is implemented; browser
+resumption and delivery backfill remain unfinished (§8.6).
 
 Settings are not in this list on purpose: they are ordinary daemon-owned config
 and travel the existing `config.get`/`config.set` path, which is what makes a
 value entered in any surface apply to the daemon (§10.1).
 
 `payments.purchase.status` accepts an optional `purchaseId` and returns
-`{ windows: [...] }`. Every window contains `purchaseId`, `windowId`, `kind`,
-`notice` and `deadlineMs`. This is the actual pending-window list, not a report
-of every checkout phase or its final result. Completed purchases remain in
-`payments.purchases.list`.
+`{ windows: [...], operations: [...] }`. Every window contains `purchaseId`,
+`windowId`, `kind`, `notice` and `deadlineMs`. Every operation contains its
+`purchaseId`, immutable `operationId`, state, last durable phase, creation/update
+times, outcome and parsed total/currency when known. The unfiltered response
+retains all open or financially uncertain operations plus the 100 most recent
+operations. Older identities remain queryable by purchase ID. Complete purchase
+records remain in `payments.purchases.list`.
+
+To stop processing outside a window, send
+`{ purchaseId, operationId, confirm: true }` to `payments.purchase.cancel` with
+the explicit-user-request flag. The paired owner check is the same as for a
+window answer. The response acknowledges the stop request and reports whether
+submission may have begun. Wait for final status; cancellation is not a refund
+and never establishes that a merchant click was undone. Do not send both an
+operation and a window reference in one cancellation.
 
 Answer methods take `{ purchaseId, windowId, confirm: true }` and require the
 explicit-user-request transport flag plus current paired admin authority and
@@ -1712,7 +1730,7 @@ added to `SECRET_CONFIG_KEYS`.
 
 ### 10.3 Purchase windows in the product UI
 
-WebUI exposes **Settings → Payments → Purchase windows** beside card setup.
+WebUI exposes **Settings → Payments → Purchases** beside card setup.
 It shows the daemon's exact notice and deadline, with approve/deny controls
 for an approval and proceed-now/cancel controls for a veto. The view refreshes
 the actual windows and drops stale account/connection data when the client
@@ -1732,16 +1750,20 @@ and verifies a paired administrative principal with payment scopes. Model and
 nested slash-command invocations cannot open the owner answer flow. Ordinary
 tool-permission cards continue to answer their own broker.
 
-Full operation status across disconnect/restart and a detached checkout start
-remain unfinished (§8.6).
+The same view lists durable checkout operation status, including when no window
+is open. Select an operation to refresh its status or stop active processing.
+Uncertain submissions stay visible and require checking merchant history.
+Neither interface retries approval, stop or submission automatically.
 
 ### 10.3.1 Checkout ownership while a request is running
 
 The flow captures the original request, checkout reading, controls, limits and
 merchant policy before its first asynchronous step. Changing a borrowed input
 does not replace the purchase that was admitted. The daemon's begin and card-fill
-handlers retain the original transport authorization, payment configuration,
-browser composition and cancellation signal. A change stops further execution.
+handlers retain the original transport authorization, payment configuration and
+browser composition. The initiating signal owns admission until it is persisted;
+the detached checkout then uses its own cancellation signal. Card-fill requests
+keep their request signal. A changed authority or source stops further execution.
 Cart, recurring-charge, merchant and shipping readings receive that owning signal;
 parallel readings stop admitting work on failure and drain admitted siblings.
 

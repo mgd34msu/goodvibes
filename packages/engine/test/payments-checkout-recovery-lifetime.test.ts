@@ -4,6 +4,8 @@ import { CheckoutRecovery, type CheckoutRecoveryDeps } from '../sdk/src/platform
 import { CheckoutOwnershipError } from '../sdk/src/platform/payments/checkout-ownership.js';
 import { CheckoutRegistry, MemoryCheckoutJournal, type InFlightCheckout } from '../sdk/src/platform/payments/checkout-registry.js';
 import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
+import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const releases: (() => void)[] = [], owners: CheckoutRecovery[] = [];
 afterEach(async () => {
@@ -89,4 +91,33 @@ test('leadership retirement during a lookup cannot settle or notify the old purc
   await entered.pending; leader = false; gate.release();
   expect(await handled).toBeInstanceOf(CheckoutOwnershipError);
   expect((await f.journal.list())[0]?.phase).toBe('submit-pending'); expect(f.notices).toEqual([]);
+});
+
+test('a second host cannot settle another process-owned checkout as interrupted', async () => {
+  const operations = new DurablePaymentOperations(makeProjectTempDir('recovery-payment-lease'));
+  const writer = operations.create({ purchaseId: 'interrupted', operationId: 'original-operation', state: 'running', phase: 'awaiting-window',
+    createdAtMs: 1, updatedAtMs: 2, outcome: null, totalMinorUnits: null, currency: null }, null, () => {});
+  releases.push(() => writer.release());
+  const f = fixture({ retainInterrupted: id => operations.retainRecovery(id) });
+  await f.journal.put(record('interrupted', 'awaiting-window'));
+  expect((await f.recovery.recoverInterruptedCheckouts()).settlements).toEqual([]);
+  expect(f.notices).toEqual([]); expect(await f.journal.list()).toHaveLength(1);
+  writer.release();
+  expect((await f.recovery.recoverInterruptedCheckouts()).settlements[0]?.action).toBe('released');
+  expect(await f.journal.list()).toHaveLength(0);
+});
+
+test('a timeout keeps the real cross-process recovery lease until ignored I/O has drained', async () => {
+  const operations = new DurablePaymentOperations(makeProjectTempDir('recovery-payment-timeout'));
+  const entered = barrier(), gate = barrier();
+  const f = fixture({ recoveryIoTimeoutMs: 5, retainInterrupted: id => operations.retainRecovery(id),
+    purchases: { async record() {}, async has() { entered.release(); await gate.pending; return true; } } });
+  await f.journal.put(record());
+  const recovery = f.recovery.recoverInterruptedCheckouts(); await entered.pending;
+  expect((await recovery).settlements[0]?.action).toBe('failed');
+  expect(operations.retainRecovery('interrupted')).toBeNull();
+  const closing = f.recovery.close(); gate.release(); await closing;
+  const released = operations.retainRecovery('interrupted'); expect(released).not.toBeNull(); released?.release();
+  expect((await f.journal.list())[0]?.phase).toBe('submit-pending');
+  expect(f.notices).toEqual([]);
 });

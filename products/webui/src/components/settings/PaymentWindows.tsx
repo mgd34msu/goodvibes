@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import type { PaymentWindowView } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { isLivePaymentOperation, paymentOperationDescription, type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
 import { sdk } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
+import { minorUnitsToMajorText } from '../../lib/money';
 import { getClientLifetime, subscribeClientLifetime } from '../../lib/client-lifetime';
 import { Button } from '../ui/Button';
 import { SettingsBlock } from './dialog/parts';
@@ -48,7 +49,26 @@ export function PaymentWindows() {
     }
   };
 
-  return <SettingsBlock title="Purchase windows" description="Read the exact purchase notice before answering. Approval needs a yes; an in-budget veto proceeds when its stated deadline passes without an objection. Answers require a paired owner connection.">
+  const stop = async (operation: PaymentOperationView) => {
+    if (active.current) return;
+    const controller = new AbortController(); active.current = controller;
+    setPending(operation.operationId); setMessage('');
+    try {
+      const result = await sdk.operator.payments.purchase.stopOperation({ purchaseId: operation.purchaseId, operationId: operation.operationId }, controller.signal);
+      if (controller.signal.aborted) return;
+      setMessage(result.mayHaveSubmitted
+        ? 'Stopping was requested after submission may have begun. Check final status and the merchant; this does not undo an order.'
+        : 'Stopping was requested. Wait for final purchase status before taking further action.');
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      setMessage(`${formatError(error)} Refresh purchase status before trying again.`);
+    } finally {
+      if (active.current === controller) active.current = null;
+      if (!controller.signal.aborted) { setPending(null); void queryClient.invalidateQueries({ queryKey: QUERY_KEY }); }
+    }
+  };
+
+  return <SettingsBlock title="Purchases" description="Track accepted checkouts and read the exact notice before answering. Approval needs a yes; an in-budget veto proceeds when its stated deadline passes without an objection. Answers and stopping require a paired owner connection.">
     <Button size="sm" onClick={() => { void windows.refetch(); }} disabled={windows.isFetching}>Refresh purchases</Button>
     {windows.error && <p role="alert">{formatError(windows.error)}</p>}
     {windows.isPending && <p>Loading purchase windows…</p>}
@@ -64,6 +84,16 @@ export function PaymentWindows() {
       <Button variant="danger" disabled={pending !== null} onClick={() => { void answer(window, window.kind === 'approval' ? 'deny' : 'cancel'); }}>
         {window.kind === 'approval' ? 'Deny purchase' : 'Cancel purchase'}
       </Button>
+    </section>)}
+    {windows.data?.operations.map(operation => <section key={operation.operationId} aria-label={`Checkout operation ${operation.purchaseId}`}>
+      <h4>Checkout {operation.purchaseId}</h4>
+      <p>Status: {operation.state}{operation.phase ? ` · ${operation.phase}` : ''}</p>
+      <p>{paymentOperationDescription(operation)}</p>
+      {operation.totalMinorUnits !== null && operation.currency !== null && <p>Amount: {minorUnitsToMajorText(operation.totalMinorUnits, operation.currency)} {operation.currency}</p>}
+      <p>Updated: {new Date(operation.updatedAtMs).toLocaleString()}</p>
+      {isLivePaymentOperation(operation.state) && <Button variant="danger" disabled={pending !== null || operation.state === 'cancelling'} onClick={() => { void stop(operation); }}>
+        {pending === operation.operationId || operation.state === 'cancelling' ? 'Stopping…' : 'Stop checkout'}
+      </Button>}
     </section>)}
   </SettingsBlock>;
 }

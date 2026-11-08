@@ -176,6 +176,8 @@ export interface BeginCheckoutInput {
 /** Host-only invocation facts; never read from the checkout's wire input. */
 export interface CheckoutBeginOptions extends CheckoutOperationOwnership {
   readonly gates?: GateInput | undefined;
+  /** Native operation identity assigned before background work starts. */
+  readonly purchaseId?: string | undefined;
 }
 
 export class PaymentsGatewayServiceImpl {
@@ -243,12 +245,13 @@ export class PaymentsGatewayServiceImpl {
    */
   async beginCheckout(input: BeginCheckoutInput, options: CheckoutBeginOptions = {}): Promise<PaymentBeginResult> {
     if (this.closed) throw new CheckoutOwnershipError();
+    const purchaseId = options.purchaseId;
     const gates = { ...(options.gates ?? this.deps.gates()) };
     const owner = this.ownership(options);
-    return this.work.run(() => this.runBeginCheckout(input, owner, gates));
+    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId));
   }
 
-  private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput): Promise<PaymentBeginResult> {
+  private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId?: string): Promise<PaymentBeginResult> {
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
@@ -264,13 +267,13 @@ export class PaymentsGatewayServiceImpl {
     // cast: the branded type is what stops page text reaching their phone.
     const item = ownerSuppliedText(input.item, 'owner-direct');
     if (item === null) {
-      return this.refused('The item has to be described in your own words, from your own request.');
+      return { ...this.refused('The item has to be described in your own words, from your own request.'), purchaseId: purchaseId ?? null };
     }
 
     const driver = this.deps.driverFor(input.sessionId, input.pageId);
     options.assertCurrent?.();
     const request: PurchaseRequest = {
-      purchaseId: `pur-${String(now())}-${Math.random().toString(36).slice(2, 10)}`,
+      purchaseId: purchaseId ?? `pur-${String(now())}-${Math.random().toString(36).slice(2, 10)}`,
       merchantDomain: input.merchantDomain,
       checkoutUrl: input.checkoutUrl,
       item,
@@ -284,7 +287,7 @@ export class PaymentsGatewayServiceImpl {
     const cardFields: CardFieldTarget[] = [];
     for (const entry of input.controls.cardFields) {
       if (!isCardFieldName(entry.field)) {
-        return this.refused(`"${entry.field}" is not a card field I can fill.`);
+        return { ...this.refused(`"${entry.field}" is not a card field I can fill.`), purchaseId: request.purchaseId };
       }
       cardFields.push({ field: entry.field, target: entry.ref });
     }
@@ -292,10 +295,10 @@ export class PaymentsGatewayServiceImpl {
     const addressFields: AddressFieldTarget[] = [];
     for (const entry of input.controls.addressFields ?? []) {
       if (entry.kind !== 'shipping' && entry.kind !== 'billing') {
-        return this.refused(`"${entry.kind}" is not an address I hold. Use shipping or billing.`);
+        return { ...this.refused(`"${entry.kind}" is not an address I hold. Use shipping or billing.`), purchaseId: request.purchaseId };
       }
       if (!ADDRESS_FIELDS.includes(entry.field as AddressFieldName)) {
-        return this.refused(`"${entry.field}" is not part of an address I store.`);
+        return { ...this.refused(`"${entry.field}" is not part of an address I store.`), purchaseId: request.purchaseId };
       }
       addressFields.push({ kind: entry.kind, field: entry.field as AddressFieldName, target: entry.ref });
     }
@@ -420,10 +423,10 @@ export class PaymentsGatewayServiceImpl {
 
   private describe(outcome: CheckoutOutcome, purchaseId: string): PaymentBeginResult {
     if (outcome.kind === 'refused') {
-      return { ...this.refused(outcome.reason), outcome: `refused:${outcome.code}` };
+      return { ...this.refused(outcome.reason), purchaseId, outcome: `refused:${outcome.code}` };
     }
     if (outcome.kind === 'cancelled') {
-      return { ...this.refused(outcome.reason), outcome: 'cancelled' };
+      return { ...this.refused(outcome.reason), purchaseId, outcome: 'cancelled' };
     }
     if (outcome.kind === 'challenge') {
       return {

@@ -40,3 +40,35 @@ export function retainCheckoutInvocation(deps: PaymentsHandlerDeps, seam: Browse
   assertCurrent();
   return Object.freeze({ signal, assertCurrent });
 }
+
+/** Explicit handoff to a daemon-owned operation. Only the paired authority and
+ * copied host facts cross this factory scope; the request/context/signal do not.
+ * The initiating request must still be current at durable admission. */
+export function retainDetachedCheckout(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam, context: HandlerContextEnvelope) {
+  const native = context.nativeExecutionAuthority, authorized = context.isAuthorized;
+  const paired = native?.current();
+  if (!native || !authorized || !paired || paired.kind !== 'pairing-token' || !context.admin || context.principalKind !== 'token'
+    || !context.explicitUserRequest || context.principalId !== paired.principalId
+    || !(context.scopes.includes('*') || context.scopes.includes('write:payments'))
+    || !(paired.scopes.includes('*') || paired.scopes.includes('write:payments'))
+    || authorized?.(['write:payments']) !== true) {
+    throw new HandlerError('Checkout admission requires an explicit request from the current paired administrative owner with write:payments.', 'FORBIDDEN', 403);
+  }
+  return detachedSource(deps, seam, native, authorized, paired);
+}
+
+function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
+  native: NonNullable<HandlerContextEnvelope['nativeExecutionAuthority']>, authorized: NonNullable<HandlerContextEnvelope['isAuthorized']>,
+  paired: NonNullable<ReturnType<NonNullable<HandlerContextEnvelope['nativeExecutionAuthority']>['current']>>) {
+  const expected = captureOwnedJson(paired), config = captureOwnedJson(readPaymentsServiceConfig(deps.config));
+  const principalId = paired.principalId;
+  const assertCurrent = () => {
+    try {
+      if (authorized(['write:payments']) !== true || deps.checkout.seam() !== seam || !deps.isPaymentsLeader()
+        || !readPaymentsEnabled(deps.config) || !isDeepStrictEqual(captureOwnedJson(native.current()), expected)
+        || !isDeepStrictEqual(captureOwnedJson(readPaymentsServiceConfig(deps.config)), config)) throw new Error();
+    } catch { throw new HandlerError('The original paired checkout owner, payment settings or browser changed. Inspect this purchase before trying again.', 'FAILED_PRECONDITION', 409); }
+  };
+  assertCurrent();
+  return Object.freeze({ principalId, assertCurrent });
+}

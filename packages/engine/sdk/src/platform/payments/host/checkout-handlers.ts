@@ -1,10 +1,13 @@
 import { PostalAddressHeldError } from '../../config/postal-address.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
-import { retainCheckoutInvocation } from './checkout-invocation.js';
+import { retainCheckoutInvocation, retainDetachedCheckout } from './checkout-invocation.js';
 import { PaymentCheckoutJournalUnavailableError } from './checkout-journal-store.js';
 import { PaymentPurchaseLedgerError } from './purchase-ledger.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from '../checkout-ownership.js';
 import { OwnedWork } from '../../utils/owned-work.js';
+import { CheckoutOperations, type DetachedCheckoutOwner, type DetachedCheckoutSource } from './checkout-operations.js';
+import { PaymentOperationStoreError, checkoutRequestId, type DurablePaymentOperations } from './operation-store.js';
+import type { BeginCheckoutInput } from '../payments-gateway-service.js';
 /**
  * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
  *
@@ -30,7 +33,7 @@ import { OwnedWork } from '../../utils/owned-work.js';
  */
 import { checkAddress } from '../address.js';
 import type { AddressStore } from '../address.js';
-import { CheckoutRegistry, CheckoutRegistryError } from '../checkout-registry.js';
+import { CheckoutRegistry } from '../checkout-registry.js';
 import { CheckoutRecovery } from '../checkout-recovery.js';
 import type { CheckoutJournal } from '../checkout-registry.js';
 import type { MerchantJudgePort } from '../merchant-recourse.js';
@@ -91,6 +94,7 @@ export interface CheckoutComposition {
    * restart; tests may compose the SDK's `MemoryCheckoutJournal`.
    */
   readonly journal: CheckoutJournal;
+  readonly operations: DurablePaymentOperations;
 }
 
 function invalid(field: string, requirement: string): HandlerError {
@@ -343,6 +347,7 @@ export class CheckoutServiceHolder {
   private service: PaymentsGatewayServiceImpl | null = null;
   private readonly registry: CheckoutRegistry;
   private readonly recovery: CheckoutRecovery;
+  readonly operations: CheckoutOperations;
   private readonly work = new OwnedWork();
   private readonly abort = new AbortController();
   private closed = false;
@@ -352,9 +357,13 @@ export class CheckoutServiceHolder {
     private readonly deps: PaymentsHandlerDeps,
     private readonly journal: CheckoutJournal,
   ) {
-    this.registry = new CheckoutRegistry(journal);
+    this.operations = new CheckoutOperations(deps.checkout.operations, journal, deps.purchases,
+      (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now);
+    this.registry = new CheckoutRegistry({ list: () => journal.list(), remove: id => journal.remove(id),
+      put: async record => { await journal.put(record); this.operations.progress(record); } });
     this.recovery = new CheckoutRecovery({ registry: this.registry, journal,
       ledger: deps.budget, purchases: deps.purchases, notifier: deps.checkout.notifier,
+      retainInterrupted: id => deps.checkout.operations.retainRecovery(id),
       isPaymentsLeader: deps.isPaymentsLeader, now: deps.now });
   }
 
@@ -364,7 +373,31 @@ export class CheckoutServiceHolder {
     return this.service;
   }
 
-  recoverInterruptedCheckouts() { return this.recovery.recoverInterruptedCheckouts(); }
+  async recoverInterruptedCheckouts() {
+    const sweep = await this.recovery.recoverInterruptedCheckouts();
+    if (sweep.swept) await this.operations.recover();
+    return sweep;
+  }
+
+  admit(id: string, input: BeginCheckoutInput, source: DetachedCheckoutSource, requestCurrent: () => void, consume: () => void) {
+    if (this.closed) throw new CheckoutOwnershipError();
+    return this.operations.admit(id, input, source, requestCurrent, consume);
+  }
+
+  private async runAdmittedCheckout(input: BeginCheckoutInput, id: string, owner: DetachedCheckoutOwner) {
+    owner.assertCurrent();
+    const seam = this.deps.checkout.seam();
+    if (!seam) throw new CheckoutOwnershipError();
+    const [usableCard, shippingAddress] = await mapLimit([
+      () => hasUsableCard(this.deps.cards, input.cardId, owner),
+      () => hasShippingAddress(this.deps.checkout.addresses, owner),
+    ], 2, read => read());
+    owner.assertCurrent();
+    return this.serviceFor(seam).beginCheckout(input, { ...owner, purchaseId: id, gates: {
+      enabled: readPaymentsEnabled(this.deps.config), isPaymentsLeader: this.deps.isPaymentsLeader(),
+      hasUsableCard: usableCard, hasShippingAddress: shippingAddress, isOwnerDirectRequest: true,
+    } });
+  }
 
   run<T>(callback: () => Promise<T>): Promise<T> {
     if (this.closed) return Promise.reject(new CheckoutOwnershipError());
@@ -393,6 +426,7 @@ export class CheckoutServiceHolder {
     const jobs: Promise<void>[] = [], errors: unknown[] = [];
     try { if (this.service) jobs.push(this.service.close()); } catch (error) { errors.push(error); }
     try { jobs.push(this.recovery.close()); } catch (error) { errors.push(error); }
+    try { jobs.push(this.operations.close()); } catch (error) { errors.push(error); }
     jobs.push(this.work.join());
     void Promise.allSettled(jobs).then(results => {
       for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
@@ -530,36 +564,17 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
   };
 }
 
-/** The sdk's own explicit nine-field projection (routes/payments.ts's `createPaymentsCheckoutBeginHandler`), not a spread. */
-function beginResultView(result: Awaited<ReturnType<PaymentsGatewayServiceImpl['beginCheckout']>>): Record<string, unknown> {
-  return {
-    outcome: String(result.outcome),
-    purchaseId: result.purchaseId ?? null,
-    reason: result.reason ?? null,
-    merchantOrderId: result.merchantOrderId ?? null,
-    totalMinorUnits: result.totalMinorUnits ?? null,
-    currency: result.currency ?? null,
-    shippingTierUsed: result.shippingTierUsed ?? null,
-    steppedDown: result.steppedDown === true,
-    challengeStep: result.challengeStep ?? null,
-  };
-}
-
 /**
  * `payments.checkout.begin`.
  *
  * ── What actually gates a purchase here ────────────────────────────────────
  *
- * `context.explicitUserRequest` is a caller-set header/frame field
- * (`x-goodvibes-explicit-user-request`; see the sdk's
- * `routes/explicit-user-request.ts` and `normalizeContext` in
- * `daemon/handlers/register.ts`), no stronger a claim than `confirm: true` on
- * any other confirmation-gated verb in this daemon. It gates ENTRY to this
- * verb, `isOwnerDirectRequest` in the `GateInput` `checkPaymentGates` reads
- * (gates.ts), and nothing about the submit itself. It also resets the
- * untrusted-content watermark the taint gates read
- * (`security/turn-boundary.ts`), a second, separate effect of the same
- * caller-set claim, not something this handler arranges.
+ * Admission requires explicit-user-request metadata AND the transport's
+ * current paired administrative principal with write:payments. A body flag
+ * does not mint that authority. The original request remains current until
+ * its stable requestId is durably published. The daemon then owns execution,
+ * retaining original paired authorization, host settings and browser source,
+ * independently of the socket. Accepted never means successfully purchased.
  *
  * ── The genuine owner-approval record, consumed here ───────────────────────
  *
@@ -592,59 +607,23 @@ function beginResultView(result: Awaited<ReturnType<PaymentsGatewayServiceImpl['
  */
 export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): TypedHandler<unknown, Record<string, unknown>> {
   return async ({ body, context }) => holder.run(async () => {
-    const params = asRecord(body);
-    const input = parseBeginCheckoutInput(params);
-
-    const seam = deps.checkout.seam();
-    if (seam === undefined) {
-      throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
-    }
-
-    const isOwnerDirectRequest = context.explicitUserRequest === true;
-    const signal = context.signal;
-    const owner = holder.ownership(isOwnerDirectRequest ? retainCheckoutInvocation(deps, seam, context)
-      : { signal, assertCurrent: () => signal?.throwIfAborted() });
-
-    // The approval is only consulted INSIDE the outer explicitUserRequest
-    // layer: a call that never claimed to be owner-direct falls through to
-    // the service, whose own gate refuses it `refused:not-owner-request`
-    // exactly as before this record existed. Consuming an approval for a
-    // call that outer layer was always going to refuse would spend the
-    // owner's answer on nothing.
-    if (isOwnerDirectRequest) {
-      consumeCheckoutApproval(deps.checkout.approvals, input);
-    }
-
-    const [usableCard, shippingAddress] = await mapLimit([
-      () => hasUsableCard(deps.cards, input.cardId, owner),
-      () => hasShippingAddress(deps.checkout.addresses, owner),
-    ], 2, read => read());
-    owner.assertCurrent();
-
-    // Host-only facts belong to this invocation, even under reentrant callbacks.
-    const gates = {
-      enabled: readPaymentsEnabled(deps.config), isPaymentsLeader: deps.isPaymentsLeader(),
-      hasUsableCard: usableCard === true,
-      hasShippingAddress: shippingAddress === true,
-      isOwnerDirectRequest,
-    };
-    const service = holder.serviceFor(seam);
-
     try {
-      const result = await service.beginCheckout(input, { ...owner, gates });
-      return beginResultView(result);
+      const params = asRecord(body), id = checkoutRequestId(params['requestId']), input = parseBeginCheckoutInput(params);
+      const seam = deps.checkout.seam();
+      if (!seam) throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
+      const source = retainDetachedCheckout(deps, seam, context);
+      const admission = retainCheckoutInvocation(deps, seam, context);
+      deps.purchases.assertAvailable();
+      const operation = holder.admit(id, input, source, admission.assertCurrent, () => consumeCheckoutApproval(deps.checkout.approvals, input));
+      return { outcome: 'accepted', purchaseId: operation.purchaseId, reason: null, merchantOrderId: null,
+        totalMinorUnits: null, currency: null, shippingTierUsed: null, steppedDown: false, challengeStep: null };
     } catch (error) {
-      // `CheckoutRegistryError` (a second `begin` finding one already in
-      // flight on this page) is the owner's business and carries no card
-      // material, so it is forwarded, the same containment shape
-      // `checkoutFillCardHandler` gives `FillCardRefusal` below. Anything else
-      // is discarded: the failing call had the card in its arguments, and an
-      // error string is a read path like any other.
-      if (error instanceof CheckoutRegistryError || error instanceof PaymentCheckoutJournalUnavailableError || error instanceof PaymentPurchaseLedgerError) {
-        throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
+      if (error instanceof HandlerError) throw error;
+      if (error instanceof PaymentOperationStoreError && error.kind === 'invalid') throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
+      if (error instanceof PaymentOperationStoreError || error instanceof PaymentPurchaseLedgerError || error instanceof PaymentCheckoutJournalUnavailableError) {
+        throw new HandlerError(error.message, error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);
       }
-      void error;
-      throw new HandlerError('Beginning this checkout failed. Check the purchase list and the merchant\'s order history before trying again.', 'INTERNAL_ERROR', 500);
+      throw new HandlerError('This checkout could not be admitted. Read the original purchase status before trying again.', 'INTERNAL_ERROR', 500);
     }
   });
 }

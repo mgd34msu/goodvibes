@@ -125,7 +125,7 @@ test('status is read-scoped, immutable and does not extend a deadline or invent 
   const wait = replies.waitForAnswer({ purchaseId: 'purchase', kind: 'approval', notice: 'Exact owner notice', deadlineMs: 20, channels: ['telegram'] });
   const owner = authority();
   const context = { ...owner.context, admin: false, scopes: ['read:payments'] };
-  const handler = purchaseWindowStatusHandler({ replies });
+  const handler = purchaseWindowStatusHandler({ replies }, { status: () => [] });
   const first = readPaymentWindowStatus(await handler({ body: {}, query: {}, context }));
   expect(first.windows[0]?.deadlineMs).toBe(20);
   expect(Object.isFrozen(first.windows[0])).toBe(true);
@@ -139,9 +139,33 @@ test('status is read-scoped, immutable and does not extend a deadline or invent 
 
 test('surface decoders reject mismatched/extra/private fields and invalid deadlines without echoing them', () => {
   const valid = { purchaseId: 'purchase', windowId: 'window', kind: 'approval', notice: 'Owner notice', deadlineMs: 1 };
-  expect(readPaymentWindowStatus({ windows: [valid] }).windows).toEqual([valid]);
-  for (const value of [{ windows: [{ ...valid, deadlineMs: Infinity }] }, { windows: [{ ...valid, cardNumber: 'Private fixture content' }] }, { windows: [valid, valid] }]) {
+  expect(readPaymentWindowStatus({ windows: [valid], operations: [] }).windows).toEqual([valid]);
+  for (const value of [{ windows: [{ ...valid, deadlineMs: Infinity }], operations: [] }, { windows: [{ ...valid, cardNumber: 'Private fixture content' }], operations: [] }, { windows: [valid, valid], operations: [] }]) {
     expect(() => readPaymentWindowStatus(value)).toThrow('invalid purchase-window response');
   }
   expect(() => readPaymentWindowAnswer({ purchaseId: 'purchase', windowId: 'window', accepted: false, answer: 'approve' })).toThrow('invalid purchase-window response');
+});
+
+test('an exact operation stop uses the same paired owner guard and never asks a model', async () => {
+  const replies = inbox(), owner = authority(), calls: unknown[] = [];
+  const handler = purchaseWindowAnswerHandler({ replies }, 'cancel', { cancel(purchaseId, operationId) {
+    calls.push({ purchaseId, operationId }); return { purchaseId, operationId, accepted: true, mayHaveSubmitted: true };
+  } });
+  const input = { body: { purchaseId: 'purchase', operationId: 'original-operation', confirm: true }, query: {}, context: owner.context };
+  expect(await handler(input)).toEqual({ purchaseId: 'purchase', operationId: 'original-operation', accepted: true, mayHaveSubmitted: true });
+  expect(calls).toEqual([{ purchaseId: 'purchase', operationId: 'original-operation' }]);
+  owner.revoke(); await expect(handler(input)).rejects.toMatchObject({ status: 403 });
+  expect(calls).toHaveLength(1); expect(readings.requests).toHaveLength(0);
+});
+
+test('a window answer cannot carry an operation stop or change owner while acquiring its lock', async () => {
+  const replies = inbox(), owner = authority(), entered = barrier(), gate = barrier(); let stops = 0;
+  const operations = { cancel(purchaseId: string, operationId: string) { stops++; return { purchaseId, operationId, accepted: true as const, mayHaveSubmitted: false }; } };
+  const body = { purchaseId: 'purchase', operationId: 'operation', confirm: true };
+  await expect(purchaseWindowAnswerHandler({ replies }, 'approve', operations)({ body, query: {}, context: owner.context })).rejects.toMatchObject({ status: 400 });
+  await expect(purchaseWindowAnswerHandler({ replies }, 'cancel', operations)({ body: { ...body, windowId: 'window' }, query: {}, context: owner.context })).rejects.toMatchObject({ status: 400 });
+  owner.hold(async () => { entered.release(); await gate.wait; });
+  const answer = purchaseWindowAnswerHandler({ replies }, 'cancel', operations)({ body, query: {}, context: owner.context }); void answer.catch(() => {});
+  await entered.wait; owner.revoke(); gate.release(); await expect(answer).rejects.toMatchObject({ status: 409 });
+  expect(stops).toBe(0);
 });

@@ -46,21 +46,26 @@ import {
   PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA,
   PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA,
   PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA,
+  PAYMENTS_PURCHASE_CANCEL_INPUT_SCHEMA,
+  PAYMENTS_PURCHASE_CANCEL_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-payments.js';
 
 export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
-    id: 'payments.purchase.status', title: 'Pending Purchase Windows', category: 'payments', scopes: ['read:payments'],
-    description: 'Read the actual live purchase approval and veto windows, including the exact notice, deadline and window reference. Optionally select one purchase. This read does not mark a notification delivered, extend a deadline or resume an interrupted purchase. Completed purchase records are available through payments.purchases.list.',
+    id: 'payments.purchase.status', title: 'Purchase Operations and Windows', category: 'payments', scopes: ['read:payments'],
+    description: 'Read durable checkout operation status and actual live approval/veto windows. Optionally select one purchase, including after reconnect or restart. An accepted operation is not a completed purchase; uncertain submissions must be checked with the merchant and are never automatically retried. Reading does not extend a deadline or resume execution. Complete purchase records are available through payments.purchases.list.',
     http: { method: 'GET', path: '/api/payments/purchase/status' },
     inputSchema: PAYMENTS_PURCHASE_STATUS_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA,
   }),
   ...(['approve', 'deny', 'cancel'] as const).map(action => methodDescriptor({
-    id: `payments.purchase.${action}`, title: action === 'approve' ? 'Approve This Purchase' : action === 'deny' ? 'Deny This Purchase' : 'Cancel This Purchase Window',
+    id: `payments.purchase.${action}`, title: action === 'approve' ? 'Approve This Purchase' : action === 'deny' ? 'Deny This Purchase' : 'Stop This Purchase',
     category: 'payments', scopes: ['write:payments'], access: 'admin', dangerous: true,
-    description: `${action === 'approve' ? 'Approve an above-budget purchase or explicitly acknowledge an in-budget purchase' : 'Refuse the pending purchase'} using the exact live purchase and window references. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The same inbox also consumes authenticated channel replies. A stale, answered or expired window refuses; this never submits directly or overrides budget, merchant, page or address checks.`,
+    description: action === 'cancel'
+      ? 'Stop an admitted checkout using its exact purchaseId and operationId, or object to a live window using purchaseId and windowId. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. Stopping is a request, not proof that an order was undone; inspect final status and merchant history if submission may have begun. No automatic retry.'
+      : `${action === 'approve' ? 'Approve an above-budget purchase or explicitly acknowledge an in-budget purchase' : 'Refuse the pending purchase'} using the exact live purchase and window references. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The same inbox also consumes authenticated channel replies. A stale, answered or expired window refuses; this never submits directly or overrides budget, merchant, page or address checks.`,
     http: { method: 'POST', path: `/api/payments/purchase/${action}` },
-    inputSchema: PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA,
+    inputSchema: action === 'cancel' ? PAYMENTS_PURCHASE_CANCEL_INPUT_SCHEMA : PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA,
+    outputSchema: action === 'cancel' ? PAYMENTS_PURCHASE_CANCEL_OUTPUT_SCHEMA : PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA,
   })),
   methodDescriptor({
     id: 'payments.budget.status',
@@ -112,7 +117,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     id: 'payments.checkout.begin',
     title: 'Buy What Is In This Checkout',
     description:
-      "Run a purchase against an open browser page, end to end: the caller reports the checkout's line items, tax, fees and delivery options AS STRINGS plus the refs of the card, address, delivery and place-order controls, and the daemon does the rest. It parses every amount into integer minor units with its own parser (refusing anything ambiguous rather than guessing), checks the cart against what was actually asked for, refuses a recurring charge, runs the taint gate, applies the daily item budget, the per-purchase ceiling and the overage pool, walks the shipping ladder down one rung at a time when the pool cannot cover the preferred tier, sends ONE notice to the configured command-authority channels and runs the window, above budget an approval where silence denies, within budget a veto where silence proceeds, then fills the stored shipping and billing addresses, types the stored card, submits once, records the purchase, debits the budget and reports the completed purchase. Nothing here knows any merchant's markup: the caller identifies the controls on whatever page it is looking at. Every number the owner is shown is re-rendered from the integers this daemon parsed, never from merchant text, and no response field can carry card material.",
+      "Admit one checkout against an open browser page and return a durable accepted acknowledgement before its approval/veto wait. Supply a stable requestId saved before sending; after a lost response, query payments.purchase.status with that ID. Reusing an admitted ID never starts another execution, even with changed input. The paired owner must have authorized the exact merchant/item/amount through payments.checkout.approve. The daemon parses amounts, checks cart/merchant/taint/recurrence and budget, runs the shipping ladder and owner window, fills stored addresses/card and submits once. Accepted does not mean purchased. Status retains processing, refusal, cancellation, verification and uncertain-submission outcomes. Disconnecting the caller does not cancel the operation; stopping or shutdown drains its actual work. An uncertain merchant submission is never retried automatically.",
     category: 'payments',
     scopes: ['write:payments'],
     access: 'admin',

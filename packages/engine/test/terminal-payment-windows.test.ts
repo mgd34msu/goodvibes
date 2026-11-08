@@ -11,6 +11,7 @@ import { createPaymentWindowCommand } from '../terminal-shell/src/payment-window
 import { createPaymentCardCommands } from '../terminal-shell/src/card-field-prompts.js';
 import { RetainedOperatorConnection } from '../terminal-shell/src/retained-operator-connection.js';
 import type { PaymentWindowView } from '../sdk/src/platform/payments/window-view.js';
+import type { PaymentOperationView } from '../sdk/src/platform/payments/operation-view.js';
 
 const roots: string[] = [];
 const exits: (() => void)[] = [];
@@ -26,7 +27,7 @@ async function until(predicate: () => boolean): Promise<void> {
 }
 function barrier() { let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; }); return { wait, release }; }
 
-function fixture(options: { readonly window?: PaymentWindowView; readonly principal?: string; readonly answerStatus?: number } = {}) {
+function fixture(options: { readonly window?: PaymentWindowView; readonly principal?: string; readonly answerStatus?: number; readonly operation?: PaymentOperationView } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'terminal-purchases-')); roots.push(root);
   const credentialFile = join(root, 'paired.json'); writeFileSync(credentialFile, 'private credential source');
   const manager = new ConfigManager({ surfaceRoot: 'tui', configDir: root, workingDir: root, homeDir: root });
@@ -45,8 +46,9 @@ function fixture(options: { readonly window?: PaymentWindowView; readonly princi
       return Response.json({ authenticated: true, authMode: 'shared-token', tokenPresent: true, authorizationHeaderPresent: true,
         sessionCookiePresent: false, principalId: principal, principalKind: 'token', admin: true, scopes: ['read:payments', 'write:payments'], roles: [] });
     }
-    if (url.pathname.endsWith('/status')) return Response.json({ windows: [view] });
+    if (url.pathname.endsWith('/status')) return Response.json({ windows: options.operation ? [] : [view], operations: options.operation ? [options.operation] : [] });
     if (options.answerStatus) return Response.json({ error: 'private transport diagnostic' }, { status: options.answerStatus });
+    if (options.operation) return Response.json({ purchaseId: options.operation.purchaseId, operationId: options.operation.operationId, accepted: true, mayHaveSubmitted: true });
     const action = url.pathname.split('/').at(-1);
     return Response.json({ purchaseId: view.purchaseId, windowId: view.windowId, accepted: true,
       answer: view.kind === 'approval' ? (action === 'approve' ? 'approve' : 'deny') : (action === 'approve' ? 'acknowledge' : 'object') });
@@ -85,9 +87,23 @@ test('only a direct owner command opens the actual payment picker', async () => 
   await f.registry.execute('payments', ['pending'], f.context);
   expect(f.requests).toHaveLength(0); expect(f.modal.active).toBe(false);
   await f.open();
-  expect(f.modal.title).toBe('Pending purchases');
+  expect(f.modal.title).toBe('Purchases');
   expect(f.modal.items[0]?.detail).toContain(window.notice);
   expect(f.requests.every(request => !request.headers.has('x-goodvibes-explicit-user-request'))).toBe(true);
+});
+
+test('operation status and stop are available through the actual shared terminal picker after a window disappears', async () => {
+  const operation: PaymentOperationView = { purchaseId: 'detached', operationId: 'original-operation', state: 'running', phase: 'submit-pending',
+    createdAtMs: 1, updatedAtMs: 2, totalMinorUnits: 100, currency: 'USD', outcome: null };
+  const f = fixture({ operation }); await f.open(); f.choose('operation-0');
+  expect(f.modal.items.map(item => item.id)).toEqual(['refresh', 'stop']);
+  f.choose('stop'); await until(() => f.messages.some(message => message.includes('Stop requested;')));
+  const stops = f.requests.filter(request => request.url.pathname.endsWith('/cancel'));
+  expect(stops).toHaveLength(1);
+  expect(stops[0]?.body).toEqual({ purchaseId: operation.purchaseId, operationId: operation.operationId, confirm: true });
+  expect(stops[0]?.headers.get('x-goodvibes-explicit-user-request')).toBe('true');
+  expect(f.messages.join(' ')).toContain('does not undo an order');
+  f.ui.handleEscape();
 });
 
 test.each(['approve', 'deny'] as const)('the selected %s is bound to the displayed notice and sent exactly once', async action => {

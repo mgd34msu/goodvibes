@@ -3,6 +3,7 @@ import { requireDecisionFeature } from '../../runtime/decision-policy.js';
 import { PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../reply-inbox.js';
 import { assertConfirmed, HandlerError, type HandlerContextEnvelope, type TypedHandler } from './handler-plumbing.js';
 import type { PaymentReplyInbox } from '../reply-inbox.js';
+import type { CheckoutOperations } from './checkout-operations.js';
 interface PaymentWindowHandlerDeps { readonly replies?: PaymentReplyInbox | undefined }
 
 function scope(scopes: readonly string[], required: string): boolean { return scopes.includes('*') || scopes.includes(required); }
@@ -25,7 +26,7 @@ function forbidden(): HandlerError {
   return new HandlerError('Answering a purchase requires current paired owner access with admin and write:payments. Pair this client and refresh the purchase.', 'FORBIDDEN', 403);
 }
 
-export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps): TypedHandler<unknown, unknown> {
+export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps, operations: Pick<CheckoutOperations, 'status'>): TypedHandler<unknown, unknown> {
   return async ({ body, query, context }) => {
     context.signal?.throwIfAborted();
     if (!context.principalId || !scope(context.scopes, 'read:payments') || !authorizedFor(context, 'read:payments')) {
@@ -36,20 +37,25 @@ export function purchaseWindowStatusHandler(deps: PaymentWindowHandlerDeps): Typ
     const purchaseId = selected === undefined ? undefined : field(selected, 'purchaseId');
     const replies = deps.replies;
     if (!replies) throw unavailable();
-    return { windows: replies.inspect(purchaseId) };
+    try { return { windows: replies.inspect(purchaseId), operations: operations.status(purchaseId) }; }
+    catch { throw new HandlerError('Purchase status is unavailable. Inspect the original payment evidence before taking further action.', 'FAILED_PRECONDITION', 409); }
   };
 }
 
 /** Explicit owner choices have no model interpretation step. Transport-created
  * pairing authority, live scopes and exact window ownership still decide in code. */
-export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, action: 'approve' | 'deny' | 'cancel'): TypedHandler<unknown, unknown> {
+export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, action: 'approve' | 'deny' | 'cancel', operations?: Pick<CheckoutOperations, 'cancel'>): TypedHandler<unknown, unknown> {
   return async ({ body, context }) => {
     assertConfirmed(body, context);
     const input = record(body);
     const purchaseId = field(input['purchaseId'], 'purchaseId');
-    const windowId = field(input['windowId'], 'windowId');
+    const operationId = input['operationId'] === undefined ? undefined : field(input['operationId'], 'operationId');
+    if (operationId !== undefined && (action !== 'cancel' || input['windowId'] !== undefined)) {
+      throw new HandlerError('Choose either the exact window or the exact operation to cancel.', 'INVALID_ARGUMENT', 400);
+    }
+    const windowId = operationId === undefined ? field(input['windowId'], 'windowId') : undefined;
     const replies = deps.replies;
-    if (!replies) throw unavailable();
+    if (operationId === undefined ? !replies : !operations) throw unavailable();
     const authority = context.nativeExecutionAuthority;
     const expected = (() => { try { return authority?.current(); } catch { throw forbidden(); } })();
     if (!expected || !authority || expected.kind !== 'pairing-token' || !context.admin
@@ -72,6 +78,11 @@ export function purchaseWindowAnswerHandler(deps: PaymentWindowHandlerDeps, acti
       current();
       return await authority.withCurrent(expected, assertPaired => {
         assertPaired(); current();
+        if (operationId !== undefined) {
+          if (!operations) throw unavailable();
+          return operations.cancel(purchaseId, operationId);
+        }
+        if (!replies || windowId === undefined) throw unavailable();
         return replies.answer({ purchaseId, windowId, action });
       });
     } catch (error) {

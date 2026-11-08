@@ -5,12 +5,15 @@ import { describeInterruption, type CheckoutRegistry, type InFlightCheckout, typ
 import { recoverInterruptedWindow, type WindowRecovery } from './windows.js';
 import { CheckoutOwnershipError } from './checkout-ownership.js';
 import { OwnedWork } from '../utils/owned-work.js';
+import { isDeepStrictEqual } from 'node:util';
 import type { PaymentsServiceDeps } from './payments-gateway-service.js';
 
 export type CheckoutRecoveryDeps = Pick<PaymentsServiceDeps,
   'ledger' | 'purchases' | 'notifier' | 'journal' | 'now' | 'armingPageCleanup' | 'recoveryIoTimeoutMs'> & {
   readonly registry: CheckoutRegistry;
   readonly isPaymentsLeader: () => boolean;
+  /** Actual host execution lease; null means another process still owns it. */
+  readonly retainInterrupted?: ((purchaseId: string) => { assertCurrent(): void; release(): void } | null) | undefined;
 };
 
 /**
@@ -85,6 +88,7 @@ export class CheckoutRecovery {
   private closed = false;
   private closing: Promise<void> | undefined;
   private sweep: Promise<CheckoutRecoverySweep> | undefined;
+  private readonly retirementErrors: unknown[] = [];
   private readonly deps: CheckoutRecoveryDeps;
   constructor(deps: CheckoutRecoveryDeps) { this.deps = { ...deps }; }
 
@@ -94,7 +98,10 @@ export class CheckoutRecovery {
     this.closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     this.closed = true;
     this.abort.abort(new CheckoutOwnershipError());
-    void this.work.join().then(resolve, reject);
+    void this.work.join().then(() => {
+      if (this.retirementErrors.length) reject(new AggregateError(this.retirementErrors, 'Checkout recovery ownership did not retire cleanly'));
+      else resolve();
+    }, reject);
     return this.closing;
   }
 
@@ -104,13 +111,13 @@ export class CheckoutRecovery {
     this.abort.signal.throwIfAborted();
   }
 
-  private io<T>(operation: () => Promise<T>, label: string): Promise<T> {
-    const pending = this.work.run(async () => {
-      this.current();
+  private io<T>(operation: () => Promise<T>, label: string, current: () => void, owned: OwnedWork): Promise<T> {
+    const pending = this.work.run(() => owned.run(async () => {
+      current();
       const result = await operation();
-      this.current();
+      current();
       return result;
-    });
+    }));
     return withRecoveryTimeout(pending, this.deps.recoveryIoTimeoutMs ?? RECOVERY_IO_TIMEOUT_MS, label);
   }
 
@@ -167,8 +174,21 @@ export class CheckoutRecovery {
     const results: InterruptedCheckoutRecovery[] = [];
     for (const { record, verdict } of interrupted) {
       this.current();
+      let lease: { assertCurrent(): void; release(): void } | null | undefined;
+      let active = true;
+      const io = new OwnedWork();
+      const current = () => { this.current(); if (!active) throw new CheckoutOwnershipError(); lease?.assertCurrent(); };
       try {
-        results.push(await this.settleInterrupted(record, verdict));
+        if (this.deps.retainInterrupted) {
+          lease = this.deps.retainInterrupted(record.purchaseId);
+          if (lease === null) continue;
+          current();
+          const actual = (await this.deps.journal.list()).find(entry => entry.purchaseId === record.purchaseId);
+          current();
+          if (actual === undefined) continue;
+          if (!isDeepStrictEqual(actual, record)) throw new CheckoutOwnershipError();
+        }
+        results.push(await this.settleInterrupted(record, verdict, current, io));
       } catch {
         results.push({
           purchaseId: record.purchaseId,
@@ -180,6 +200,16 @@ export class CheckoutRecovery {
           notice: 'failed',
           message: 'Recovery failed for this purchase. Its remaining payment evidence requires inspection.',
         });
+      } finally {
+        // A reporting timeout retires the record guard immediately, but an
+        // ignored cancellation cannot hand its real execution lease to a new
+        // process until every admitted dependency has actually drained.
+        active = false;
+        if (lease) {
+          const retained = lease;
+          const retirement = this.work.run(async () => { await io.join(); retained.release(); });
+          void retirement.catch(error => { this.retirementErrors.push(error); });
+        }
       }
     }
     this.current();
@@ -189,6 +219,8 @@ export class CheckoutRecovery {
   private async settleInterrupted(
     record: InFlightCheckout,
     verdict: InterruptedVerdict,
+    current: () => void,
+    io: OwnedWork,
   ): Promise<InterruptedCheckoutRecovery> {
     const now = this.deps.now ?? Date.now;
     let action: InterruptedCheckoutRecovery['action'];
@@ -198,7 +230,7 @@ export class CheckoutRecovery {
     let armingPageCleanup: InterruptedCheckoutRecovery['armingPageCleanup'];
 
     if (verdict === 'not-submitted') {
-      this.current();
+      current();
       if (record.reservationId !== null) {
         // In-memory reservations do not survive the restart; releasing is the
         // honest no-op then, and the real release when recovery runs in-process.
@@ -209,16 +241,16 @@ export class CheckoutRecovery {
         message += ` ${this.settleWindowSentence(record, now, (recovery) => { windowRecovery = recovery; })}`;
       }
       if (record.phase === 'arming-payment') {
-        armingPageCleanup = await this.runArmingPageCleanup(record);
-        this.current();
+        armingPageCleanup = await this.runArmingPageCleanup(record, current, io);
+        current();
         message += armingPageCleanup === 'done'
           ? ' The card fields this checkout had started filling were cleared from the page.'
           : ' This checkout was typing card details when it stopped; I cannot reach that page from'
             + ' here, so if the browser window is still open, close it or clear the form yourself.';
       }
-      this.current();
+      current();
       await this.deps.registry.close(record.purchaseId);
-      this.current();
+      current();
       action = 'released';
     } else if (verdict === 'possibly-submitted') {
       // The crash-between-record-and-flush case: the purchase record may
@@ -227,12 +259,12 @@ export class CheckoutRecovery {
       // close honestly instead of holding forever. Anything less certain
       // stays deliberately untouched, because releasing the hold or the
       // record is what makes a restart buy the thing twice.
-      const verified = await this.verifyPurchaseRecord(record.purchaseId);
-      this.current();
+      const verified = await this.verifyPurchaseRecord(record.purchaseId, current, io);
+      current();
       message = describeInterruption(record, verdict, { recordVerified: verified });
       if (verified === true) {
         await this.deps.registry.close(record.purchaseId);
-        this.current();
+        current();
         action = 'closed';
       } else {
         action = 'held';
@@ -241,12 +273,12 @@ export class CheckoutRecovery {
       // `submitted` is only closed once the purchase record is verified on
       // the ledger. Journals written under the old flush ordering can carry
       // `submitted` entries whose crash landed before the record was written.
-      const verified = await this.verifyPurchaseRecord(record.purchaseId);
-      this.current();
+      const verified = await this.verifyPurchaseRecord(record.purchaseId, current, io);
+      current();
       message = describeInterruption(record, verdict, { recordVerified: verified });
       if (verified === true) {
         await this.deps.registry.close(record.purchaseId);
-        this.current();
+        current();
         action = 'closed';
       } else {
         action = 'held';
@@ -260,23 +292,23 @@ export class CheckoutRecovery {
     } else {
       try {
         const deliveries = await this.io(
-          () => this.deps.notifier.deliver({ kind: 'notice', message, signal: this.abort.signal, assertCurrent: () => this.current() }),
-          'The recovery notice delivery',
+          () => this.deps.notifier.deliver({ kind: 'notice', message, signal: this.abort.signal, assertCurrent: () => current() }),
+          'The recovery notice delivery', current, io,
         );
-        this.current();
+        current();
         notified = deliveries.some((delivery) => delivery.delivered);
       } catch {
         notified = false;
       }
       notice = notified ? 'delivered' : 'failed';
       if (notified && action === 'held') {
-        this.current();
+        current();
         // Stamp kept records so the next boot does not repeat the notice.
         await this.deps.journal.put({ ...record, recoveryNotifiedAtMs: now() });
-        this.current();
+        current();
       }
     }
-    this.current();
+    current();
     return {
       purchaseId: record.purchaseId,
       merchantDomain: record.merchantDomain,
@@ -293,12 +325,14 @@ export class CheckoutRecovery {
 
   private async verifyPurchaseRecord(
     purchaseId: string,
+    current: () => void,
+    io: OwnedWork,
   ): Promise<boolean | undefined> {
     const has = this.deps.purchases.has;
     if (has === undefined) return undefined;
     return this.io(
       () => has.call(this.deps.purchases, purchaseId),
-      'The purchases lookup',
+      'The purchases lookup', current, io,
     );
   }
 
@@ -347,6 +381,8 @@ export class CheckoutRecovery {
 
   private async runArmingPageCleanup(
     record: InFlightCheckout,
+    current: () => void,
+    io: OwnedWork,
   ): Promise<'done' | 'failed' | 'unavailable'> {
     const cleanup = this.deps.armingPageCleanup;
     if (cleanup === undefined) return 'unavailable';
@@ -356,8 +392,8 @@ export class CheckoutRecovery {
           purchaseId: record.purchaseId,
           sessionId: record.sessionId,
           pageId: record.pageId,
-        }, { signal: this.abort.signal, assertCurrent: () => this.current() }),
-        'The arming-page cleanup hook',
+        }, { signal: this.abort.signal, assertCurrent: () => current() }),
+        'The arming-page cleanup hook', current, io,
       );
       return cleared ? 'done' : 'failed';
     } catch {

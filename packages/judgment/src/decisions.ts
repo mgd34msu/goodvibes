@@ -21,3 +21,5 @@ export { captureJudgmentBackendSettings, type JudgmentBackendSettings } from './
 export { drainOwned } from './drain-owned.ts';
 
 export { DECISION_MODEL_PROFILES, type JudgmentAdapterKind, type DecisionModelProfile } from './port/model-profiles.ts';
+
+export { opaqueUuid } from './port/opaque-uuid.ts';

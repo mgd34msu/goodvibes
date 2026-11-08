@@ -1,4 +1,11 @@
+import { readPaymentOperation, type PaymentOperationView } from './operation-view.js';
+
 export type PaymentAnswer = 'approve' | 'deny' | 'acknowledge' | 'object';
+
+export interface PaymentPurchaseStatus {
+  readonly windows: readonly PaymentWindowView[];
+  readonly operations: readonly PaymentOperationView[];
+}
 
 /** Owner-facing notice, never card material or a mutable waiter/capability. */
 export interface PaymentWindowView {
@@ -27,12 +34,20 @@ function reference(value: unknown): string {
 }
 
 /** Shared browser/terminal decoder: no stores, native runtime or model calls. */
-export function readPaymentWindowStatus(value: unknown): { readonly windows: readonly PaymentWindowView[] } {
-  const response = object(value, ['windows']);
+export function readPaymentWindowStatus(value: unknown): PaymentPurchaseStatus {
+  const response = object(value, ['windows', 'operations']);
   const windows = response['windows'];
-  if (!Array.isArray(windows) || windows.length > 256) return failure();
+  const operations = response['operations'];
+  if (!Array.isArray(windows) || windows.length > 256 || !Array.isArray(operations) || operations.length > 356) return failure();
+  const purchaseIds = new Set<string>(), operationIds = new Set<string>();
+  const capturedOperations = operations.map((entry: unknown) => {
+    const operation = readPaymentOperation(entry);
+    if (purchaseIds.has(operation.purchaseId) || operationIds.has(operation.operationId)) return failure();
+    purchaseIds.add(operation.purchaseId); operationIds.add(operation.operationId);
+    return operation;
+  });
   const ids = new Set<string>(), windowIds = new Set<string>();
-  return Object.freeze({ windows: Object.freeze(windows.map((entry: unknown): PaymentWindowView => {
+  return Object.freeze({ operations: Object.freeze(capturedOperations), windows: Object.freeze(windows.map((entry: unknown): PaymentWindowView => {
     const row = object(entry, ['purchaseId', 'windowId', 'kind', 'notice', 'deadlineMs']);
     const purchaseId = reference(row['purchaseId']), windowId = reference(row['windowId']);
     if (ids.has(purchaseId) || windowIds.has(windowId)) return failure();

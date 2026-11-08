@@ -28,6 +28,7 @@ import { getProcessUntrustedContentLedger } from '../sdk/src/platform/security/u
 import { DaemonApprovalStore } from '../sdk/src/platform/payments/host/approval-store.js';
 import { DaemonCardStore, type PaymentsSecretStore } from '../sdk/src/platform/payments/host/card-store.js';
 import { DaemonPurchaseLedger } from '../sdk/src/platform/payments/host/purchase-ledger.js';
+import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
 import {
   ATTACHED_PAYMENTS_METHOD_IDS,
   UNATTACHED_PAYMENTS_METHOD_IDS,
@@ -80,6 +81,7 @@ function fakeCheckout(overrides: Partial<CheckoutComposition> = {}): CheckoutCom
     untrusted: getProcessUntrustedContentLedger(),
     approvals: freshApprovals(),
     journal: new MemoryCheckoutJournal(),
+    operations: new DurablePaymentOperations(join(makeProjectTempDir('gv-payments-operations'), 'operations')),
     ...overrides,
   };
 }

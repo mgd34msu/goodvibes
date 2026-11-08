@@ -9,7 +9,7 @@ export {
   describeCardEntryRefusal,
 } from './entry-policy.js';
 export { readPaymentWindowStatus, readPaymentWindowAnswer } from './window-view.js';
-export type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
+export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus } from './window-view.js';
 
 /**
  * What every surface must show at the moment someone selects
@@ -29,3 +29,6 @@ export const CVV_PROMPT_TRADEOFF_WARNING =
   + 'within budget and would otherwise have gone ahead on their own. The veto window still runs, '
   + 'but nothing completes while you are away.';
 
+
+export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation } from './operation-view.js';
+export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation } from './operation-view.js';

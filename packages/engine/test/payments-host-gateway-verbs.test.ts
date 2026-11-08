@@ -61,6 +61,7 @@ import { configBackedAddressStore } from '../sdk/src/platform/payments/host/addr
 import { DaemonApprovalStore } from '../sdk/src/platform/payments/host/approval-store.js';
 import { DaemonCardStore, type PaymentsSecretStore } from '../sdk/src/platform/payments/host/card-store.js';
 import { DaemonPurchaseLedger } from '../sdk/src/platform/payments/host/purchase-ledger.js';
+import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
 import {
   ATTACHED_PAYMENTS_METHOD_IDS,
   UNATTACHED_PAYMENTS_METHOD_IDS,
@@ -156,6 +157,7 @@ async function composePayments(input: {
       untrusted: getProcessUntrustedContentLedger(),
       approvals: new DaemonApprovalStore(join(input.root, 'payments-approvals.json')),
       journal: new MemoryCheckoutJournal(),
+      operations: new DurablePaymentOperations(join(input.root, 'operations')),
     },
   });
   await registration.ready;

@@ -1,4 +1,5 @@
-import { readPaymentWindowStatus, readPaymentWindowAnswer, type PaymentWindowView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation,
+  type PaymentWindowView, type PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { RetainedOperatorConnection, type RetainedOperatorConnectionPolicy, type SelectedOperatorConnection } from './retained-operator-connection.js';
@@ -128,17 +129,46 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
         void answer(window, action);
       });
     };
+    const stop = async (operation: PaymentOperationView): Promise<void> => {
+      try {
+        loading('Requesting checkout stop — Escape closes this view');
+        await authenticate();
+        const result = await connection.run(async (operator, signal) => readPaymentOperationCancellation(await operator.invoke(
+          'payments.purchase.cancel', { purchaseId: operation.purchaseId, operationId: operation.operationId, confirm: true },
+          { signal, headers: { 'x-goodvibes-explicit-user-request': 'true' } },
+        )));
+        if (result.purchaseId !== operation.purchaseId || result.operationId !== operation.operationId) throw new Error('Mismatched stop acknowledgement.');
+        report(result.mayHaveSubmitted
+          ? '[payments] Stop requested; submission may already have begun. Check purchase status and the merchant. This does not undo an order.'
+          : '[payments] Stop requested. Check final purchase status before taking further action.');
+        await refresh();
+      } catch { fail(true); }
+    };
+    const chooseOperation = (operation: PaymentOperationView) => {
+      const description = `${paymentOperationDescription(operation)}\n\nUpdated: ${new Date(operation.updatedAtMs).toLocaleString()}`;
+      const choices: SelectionItem[] = [{ id: 'refresh', label: 'Refresh purchase status', detail: description }];
+      if (isLivePaymentOperation(operation.state) && operation.state !== 'cancelling') choices.push({ id: 'stop', label: 'Stop this checkout', detail: `${description}\n\nStopping does not undo a merchant submission. Wait for final status.` });
+      show(`Checkout ${text(operation.purchaseId)} · ${operation.state}`, choices, result => {
+        if (result.item.id === 'stop') { void stop(operation); return; }
+        if (result.item.id === 'refresh') { void refresh(); return; }
+        finish();
+      });
+    };
     const refresh = async (): Promise<void> => {
       try {
         loading('Reading purchase windows — Escape cancels');
         await authenticate();
-        const { windows } = await connection.run(async (operator, signal) => readPaymentWindowStatus(await operator.invoke('payments.purchase.status', {}, { signal })));
-        if (windows.length === 0) { report('[payments] No purchase windows are awaiting an answer on the selected host.'); finish(); return; }
+        const { windows, operations } = await connection.run(async (operator, signal) => readPaymentWindowStatus(await operator.invoke('payments.purchase.status', {}, { signal })));
+        if (windows.length === 0 && operations.length === 0) { report('[payments] No purchase operations or windows on the selected host.'); finish(); return; }
         const byId = new Map(windows.map((window, index) => [`window-${index}`, window]));
-        const items = [...byId].map(([id, window]) => ({ id, label: `${window.kind === 'approval' ? 'Approval' : 'Veto'}: ${text(window.purchaseId)}`, detail: detail(window) }));
-        items.push({ id: 'refresh', label: 'Refresh purchase windows', detail: 'Read the current windows from this same paired host.' });
-        show('Pending purchases', items, result => {
+        const byOperationId = new Map(operations.map((operation, index) => [`operation-${index}`, operation]));
+        const items: SelectionItem[] = [...byId].map(([id, window]) => ({ id, label: `${window.kind === 'approval' ? 'Approval' : 'Veto'}: ${text(window.purchaseId)}`, detail: detail(window) }));
+        for (const [id, operation] of byOperationId) items.push({ id, label: `${operation.state}: ${text(operation.purchaseId)}`, detail: paymentOperationDescription(operation) });
+        items.push({ id: 'refresh', label: 'Refresh purchases', detail: 'Read current operations and windows from this same paired host.' });
+        show('Purchases', items, result => {
           if (result.item.id === 'refresh') { void refresh(); return; }
+          const operation = byOperationId.get(result.item.id);
+          if (operation) { chooseOperation(operation); return; }
           const window = byId.get(result.item.id);
           if (!window) { finish(); return; }
           choose(window);

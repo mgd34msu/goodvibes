@@ -12,8 +12,8 @@ import { routedFetch } from './relay-connection';
 import { resolveDaemonRefusal } from './daemon-refusal';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
-import type { PaymentWindowView, PaymentWindowAnswer } from '@goodvibes-jev/engine/sdk/platform/payments';
-import { readPaymentWindowStatus, readPaymentWindowAnswer } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentOperationView, PaymentOperationCancellation } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentOperationCancellation } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
 import { readClientCompatibilityFloor, recordObservedClientCompatibilityFloor } from './client-compatibility';
 // The union profile.forget accepts as a target (a field id OR a raw line index), named in
 // lib/owner-profile.ts beside the readers for the same verbs' output. The generated
@@ -542,7 +542,7 @@ function purchaseWindowRoute(action: 'status' | 'approve' | 'deny' | 'cancel'): 
   }
   return route;
 }
-async function readPurchaseWindows(signal?: AbortSignal): Promise<{ readonly windows: readonly PaymentWindowView[] }> {
+async function readPurchaseWindows(signal?: AbortSignal): Promise<PaymentPurchaseStatus> {
   const route = purchaseWindowRoute('status');
   return readPaymentWindowStatus(await requestJson(route.path, { method: 'GET', interpretRefusal: false, signal }));
 }
@@ -551,6 +551,14 @@ async function answerPurchaseWindow(action: 'approve' | 'deny' | 'cancel', input
   const purchaseId = input.purchaseId, windowId = input.windowId;
   const result = readPaymentWindowAnswer(await requestJson(route.path, { method: 'POST', body: { purchaseId, windowId, confirm: true }, explicitUserRequest: true, interpretRefusal: false, signal }));
   if (result.purchaseId !== purchaseId || result.windowId !== windowId) throw new Error('The purchase answer did not match the selected window. Refresh its status.');
+  return result;
+}
+async function stopPurchaseOperation(input: Pick<PaymentOperationView, 'purchaseId' | 'operationId'>, signal?: AbortSignal): Promise<PaymentOperationCancellation> {
+  const route = purchaseWindowRoute('cancel');
+  const purchaseId = input.purchaseId, operationId = input.operationId;
+  const result = readPaymentOperationCancellation(await requestJson(route.path, { method: 'POST',
+    body: { purchaseId, operationId, confirm: true }, explicitUserRequest: true, interpretRefusal: false, signal }));
+  if (result.purchaseId !== purchaseId || result.operationId !== operationId) throw new Error('The stop acknowledgement did not match the selected purchase. Refresh its status.');
   return result;
 }
 
@@ -1886,6 +1894,7 @@ export const sdk = {
     payments: {
       purchase: {
         status: readPurchaseWindows,
+        stopOperation: stopPurchaseOperation,
         approve: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('approve', input, signal),
         deny: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('deny', input, signal),
         cancel: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('cancel', input, signal),

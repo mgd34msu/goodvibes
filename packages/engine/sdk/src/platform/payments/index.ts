@@ -250,6 +250,7 @@ export { createJevMerchantJudge, judgeMerchant } from './merchant-judge-model.js
 
 export { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from './reply-inbox.js';
 export type { PaymentReplyOffer, PaymentWindowView, PaymentWindowAnswer } from './reply-inbox.js';
+export type { PaymentPurchaseStatus } from './window-view.js';
 
 export { registry as paymentsJudgmentRegistry } from './judgment-registry.js';
 
@@ -274,3 +275,6 @@ export type {
   CheckoutRecoverySweep,
   PaymentFillCardResult,
 } from './payments-gateway-service.js';
+
+export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation } from './operation-view.js';
+export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation } from './operation-view.js';

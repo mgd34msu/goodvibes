@@ -151,6 +151,7 @@ export interface PaymentsGatewayService {
 
 /** The shape `payments.checkout.begin` hands the service, already validated. */
 export interface PaymentBeginCheckoutInput {
+  readonly requestId: string;
   readonly sessionId: string;
   readonly pageId: string;
   readonly merchantDomain: string;
@@ -415,7 +416,12 @@ export function createPaymentsCheckoutBeginHandler(service: PaymentsGatewayServi
     }));
 
     const twoDigit = params['twoDigitYear'];
+    const requestId = readString(params['requestId'], 'requestId');
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(requestId)) {
+      throw new GatewayVerbError('requestId must be a stable checkout identity of 1–128 letters, digits, dots, colons, underscores or hyphens.', 'INVALID_ARGUMENT', 400, 'requestId');
+    }
     const result = await service.beginCheckout({
+      requestId,
       sessionId: readString(params['sessionId'], 'sessionId'),
       pageId: readString(params['pageId'], 'pageId'),
       merchantDomain: readString(params['merchantDomain'], 'merchantDomain'),

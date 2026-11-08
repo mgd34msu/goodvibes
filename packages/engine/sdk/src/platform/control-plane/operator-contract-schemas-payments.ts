@@ -27,6 +27,7 @@ import {
   nullableSchema,
   objectSchema,
 } from './operator-contract-schemas-shared.js';
+import { PAYMENT_OPERATION_STATES } from '../payments/operation-view.js';
 
 /** One daily pool: its limit, what today has spent, what is held, what is left. */
 const POOL_SCHEMA = objectSchema(
@@ -130,7 +131,18 @@ const PAYMENT_WINDOW_SCHEMA = objectSchema({
 }, ['purchaseId', 'windowId', 'kind', 'notice', 'deadlineMs']);
 
 export const PAYMENTS_PURCHASE_STATUS_INPUT_SCHEMA = objectSchema({ purchaseId: STRING_SCHEMA });
-export const PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA = objectSchema({ windows: arraySchema(PAYMENT_WINDOW_SCHEMA) }, ['windows']);
+const PAYMENT_OPERATION_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, operationId: STRING_SCHEMA, state: enumSchema(PAYMENT_OPERATION_STATES),
+  phase: nullableSchema(enumSchema(['deciding', 'awaiting-window', 'arming-payment', 'submit-pending', 'submitted'])),
+  createdAtMs: { type: 'integer', minimum: 0, maximum: 8_640_000_000_000_000 },
+  updatedAtMs: { type: 'integer', minimum: 0, maximum: 8_640_000_000_000_000 },
+  outcome: nullableSchema(STRING_SCHEMA), totalMinorUnits: nullableSchema({ type: 'integer', minimum: 0 }),
+  currency: nullableSchema({ type: 'string', pattern: '^[A-Z]{3}$' }),
+}, ['purchaseId', 'operationId', 'state', 'phase', 'createdAtMs', 'updatedAtMs', 'outcome', 'totalMinorUnits', 'currency']);
+export const PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA = objectSchema({
+  windows: { ...arraySchema(PAYMENT_WINDOW_SCHEMA), maxItems: 256 },
+  operations: { ...arraySchema(PAYMENT_OPERATION_SCHEMA), maxItems: 356 },
+}, ['windows', 'operations']);
 export const PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA = objectSchema({
   purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, confirm: BOOLEAN_SCHEMA,
 }, ['purchaseId', 'windowId', 'confirm']);
@@ -138,6 +150,14 @@ export const PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA = objectSchema({
   purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, accepted: BOOLEAN_SCHEMA,
   answer: enumSchema(['approve', 'deny', 'acknowledge', 'object']),
 }, ['purchaseId', 'windowId', 'accepted', 'answer']);
+export const PAYMENTS_PURCHASE_CANCEL_INPUT_SCHEMA = { oneOf: [
+  PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA,
+  objectSchema({ purchaseId: STRING_SCHEMA, operationId: STRING_SCHEMA, confirm: BOOLEAN_SCHEMA }, ['purchaseId', 'operationId', 'confirm']),
+] };
+export const PAYMENTS_PURCHASE_CANCEL_OUTPUT_SCHEMA = { oneOf: [
+  PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA,
+  objectSchema({ purchaseId: STRING_SCHEMA, operationId: STRING_SCHEMA, accepted: { const: true, type: 'boolean' }, mayHaveSubmitted: BOOLEAN_SCHEMA }, ['purchaseId', 'operationId', 'accepted', 'mayHaveSubmitted']),
+] };
 
 /** One purchase, as the audit ledger recorded it. */
 const PURCHASE_RECORD_SCHEMA = objectSchema(
@@ -321,6 +341,8 @@ const CARD_TARGET_SCHEMA = objectSchema(
  */
 export const PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA = objectSchema(
   {
+    /** Persist one ID before sending. Lost responses must query this same ID. */
+    requestId: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$' },
     sessionId: STRING_SCHEMA,
     pageId: STRING_SCHEMA,
     merchantDomain: STRING_SCHEMA,
@@ -346,7 +368,7 @@ export const PAYMENTS_CHECKOUT_BEGIN_INPUT_SCHEMA = objectSchema(
     requestedMax: STRING_SCHEMA,
   },
   [
-    'sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item', 'cardId',
+    'requestId', 'sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item', 'cardId',
     'requestedLines', 'lines', 'shippingOptions', 'cardFields', 'placeOrderTarget',
   ],
 );

@@ -600,9 +600,9 @@ export function registerPaymentsMethods(
       { id: 'payments.checkout.approve', handler: checkoutApproveHandler(deps) as TypedHandler<unknown, unknown>, options: { confirm: true } },
       { id: 'payments.checkout.begin', handler: checkoutBeginHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
       { id: 'payments.checkout.fillCard', handler: checkoutFillCardHandler(deps, checkoutServiceHolder) as TypedHandler<unknown, unknown> },
-      { id: 'payments.purchase.status', handler: purchaseWindowStatusHandler(deps.checkout) },
+      { id: 'payments.purchase.status', handler: purchaseWindowStatusHandler(deps.checkout, checkoutServiceHolder.operations) },
       ...(['approve', 'deny', 'cancel'] as const).map(action => ({
-        id: `payments.purchase.${action}`, handler: purchaseWindowAnswerHandler(deps.checkout, action), options: { confirm: true },
+        id: `payments.purchase.${action}`, handler: purchaseWindowAnswerHandler(deps.checkout, action, checkoutServiceHolder.operations), options: { confirm: true },
       })),
     ]);
   });

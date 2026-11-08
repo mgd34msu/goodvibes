@@ -65,3 +65,6 @@ export {
   registerPaymentsMethods,
 } from './register.js';
 export type { CheckoutComposition, PaymentsHandlerDeps, PaymentsRegistration } from './register.js';
+
+export { DurablePaymentOperations, PaymentOperationStoreError } from './operation-store.js';
+export type { PaymentOperationWriter, PaymentRecoveryLease } from './operation-store.js';

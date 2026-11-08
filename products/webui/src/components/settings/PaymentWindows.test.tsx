@@ -5,12 +5,14 @@ import { flushSync } from 'react-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PaymentWindows } from './PaymentWindows';
 import { tokenStore, invalidateClientLifetime } from '../../lib/client-lifetime';
+import type { PaymentOperationView } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
 
 const originalFetch = globalThis.fetch;
 const cleanups: (() => void)[] = [];
 const window = { purchaseId: 'purchase', windowId: 'exact-window-revision', kind: 'approval', notice: 'Buy the owner-selected item for $25.00.', deadlineMs: Date.now() + 60_000 };
 const requests: { path: string; headers: Headers; body: unknown }[] = [];
 let pending = true, answerStatus = 200;
+let operations: PaymentOperationView[] = [];
 let delay: Promise<void> | undefined;
 function barrier() { let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; }); return { wait, release }; }
 async function until(check: () => boolean) {
@@ -32,13 +34,21 @@ function button(container: HTMLElement, text: string) {
 }
 
 beforeEach(async () => {
-  pending = true; answerStatus = 200; delay = undefined; requests.length = 0;
+  pending = true; answerStatus = 200; delay = undefined; requests.length = 0; operations = [];
   await tokenStore.setToken('fixture-paired-owner-token');
   globalThis.fetch = (async (input: RequestInfo | URL, options?: RequestInit) => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
     const body: unknown = typeof options?.body === 'string' ? JSON.parse(options.body) : undefined;
     requests.push({ path: url.pathname, headers: new Headers(options?.headers), body });
-    if (url.pathname === '/api/payments/purchase/status') return Response.json({ windows: pending ? [window] : [] });
+    if (url.pathname === '/api/payments/purchase/status') return Response.json({ windows: pending ? [window] : [], operations });
+    if (url.pathname === '/api/payments/purchase/cancel') {
+      await delay;
+      if (answerStatus !== 200) return Response.json({ error: 'FAILED_PRECONDITION', message: 'This purchase is no longer current.' }, { status: answerStatus });
+      const operation = operations[0]; if (!operation) throw new Error('Missing operation fixture');
+      operations = [{ ...operation, state: 'cancelling' }];
+      return Response.json({ purchaseId: operation.purchaseId, operationId: operation.operationId, accepted: true,
+        mayHaveSubmitted: operation.phase === 'submit-pending' || operation.phase === 'submitted' });
+    }
     if (url.pathname === '/api/payments/purchase/approve' || url.pathname === '/api/payments/purchase/deny') {
       await delay;
       if (answerStatus !== 200) return Response.json({ error: 'FAILED_PRECONDITION', message: 'This window is no longer current.' }, { status: answerStatus });
@@ -93,4 +103,35 @@ test('switching the connected client cancels the active answer and removes the o
   expect(container.textContent).not.toContain(window.notice);
   expect(container.textContent).not.toContain('Answer accepted.');
   expect(requests.filter(request => request.path.endsWith('/approve'))).toHaveLength(1);
+});
+
+function operation(): PaymentOperationView {
+  return { purchaseId: 'checkout', operationId: 'exact-operation', state: 'running', phase: 'submit-pending',
+    createdAtMs: 1, updatedAtMs: 2, totalMinorUnits: 2500, currency: 'USD', outcome: null };
+}
+test('operation status remains visible without a window and stopping sends the exact original reference once', async () => {
+  pending = false; operations = [operation()];
+  const container = render(); await until(() => container.textContent?.includes('Checkout checkout') === true);
+  expect(container.textContent).toContain('25.00 USD');
+  button(container, 'Stop checkout').click();
+  await until(() => container.textContent?.includes('does not undo an order') === true);
+  const stops = requests.filter(request => request.path.endsWith('/cancel'));
+  expect(stops).toHaveLength(1);
+  expect(stops[0]?.body).toEqual({ purchaseId: 'checkout', operationId: 'exact-operation', confirm: true });
+  expect(stops[0]?.headers.get('x-goodvibes-explicit-user-request')).toBe('true');
+  expect(container.textContent).not.toContain('Purchase completed');
+});
+
+test('a stale operation stop is not retried and changing clients retires an outstanding stop result', async () => {
+  pending = false; operations = [operation()]; answerStatus = 409;
+  const container = render(); await until(() => container.textContent?.includes('Checkout checkout') === true);
+  button(container, 'Stop checkout').click();
+  await until(() => container.textContent?.includes('Refresh purchase status') === true);
+  expect(requests.filter(request => request.path.endsWith('/cancel'))).toHaveLength(1);
+  const gate = barrier(); delay = gate.wait; answerStatus = 200;
+  button(container, 'Stop checkout').click();
+  await until(() => requests.filter(request => request.path.endsWith('/cancel')).length === 2);
+  invalidateClientLifetime(); gate.release();
+  await until(() => requests.filter(request => request.path.endsWith('/status')).length >= 2);
+  expect(container.textContent).not.toContain('Stopping was requested after submission');
 });

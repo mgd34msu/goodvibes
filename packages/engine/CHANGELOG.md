@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Reuse one immutable gateway scope snapshot while registrations are unchanged.
+  Live continuation guards no longer rebuild and hash the complete catalog on
+  every read. Registration changes invalidate it after the durable revocation
+  precondition; reentrant reads cannot publish mixed scope state. Existing
+  continuation digest bytes are preserved pending their format migration.
+
 - Retain each checkout's original untrusted-source evidence before detached
   preflight. Later owner turns cannot erase taint, replace incomplete evidence
   or contaminate an originally clean request. Keep the same evidence through

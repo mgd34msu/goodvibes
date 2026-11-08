@@ -235,6 +235,8 @@ export class GatewayMethodCatalog {
   private scopePolicyOwner: { readonly beforeMutation: () => void } | undefined;
   private scopePolicyChanging = false;
   private scopePolicyRetired = false;
+  private scopePolicyState: object = {};
+  private scopePolicySnapshot: ReturnType<GatewayScopePolicyOwner['current']> | undefined;
 
   /**
    * Called after initial host construction. Startup registration is hydration,
@@ -248,6 +250,8 @@ export class GatewayMethodCatalog {
     return Object.freeze({
       current: () => {
         if (this.scopePolicyOwner !== owner || this.scopePolicyChanging) throw new Error('Gateway scope policy owner is unavailable');
+        if (this.scopePolicySnapshot) return this.scopePolicySnapshot;
+        const state = this.scopePolicyState;
         const methods = [...this.methods].sort(([a], [b]) => a.localeCompare(b)).map(([id, entry]) => {
           const value = entry.descriptor;
           return [id, value.source, value.pluginId ?? null, value.access, [...value.transport].sort(), [...value.scopes].sort(),
@@ -258,17 +262,31 @@ export class GatewayMethodCatalog {
           return [id, value.source, value.pluginId ?? null, [...value.transport].sort(), [...value.scopes].sort(),
             [...(value.domains ?? [])].sort(), [...(value.wireEvents ?? [])].sort()];
         });
-        return Object.freeze({ revision: createHash('sha256').update(JSON.stringify({ methods, events })).digest('hex'),
+        // Existing continuation records use this exact representation. Its
+        // format migration remains open; live guards must not repeatedly sort,
+        // serialize and hash the same unchanged catalog on every await.
+        const snapshot = Object.freeze({ revision: createHash('sha256').update(JSON.stringify({ methods, events })).digest('hex'),
           scopes: Object.freeze(grantedGatewayScopes(this, true)) });
+        if (this.scopePolicyOwner !== owner || this.scopePolicyChanging || this.scopePolicyState !== state) {
+          throw new Error('Gateway scope policy changed while reading its registered state');
+        }
+        this.scopePolicySnapshot = snapshot;
+        return snapshot;
       },
       close: () => {
         if (this.scopePolicyOwner !== owner) return;
         // Daemon retirement is not a policy withdrawal. Reconstructed startup
         // may recover unchanged durable grants. This instance cannot reattach
         // or mint durable custody after teardown starts.
-        this.scopePolicyRetired = true; this.scopePolicyOwner = undefined;
+        this.scopePolicyRetired = true; this.scopePolicyOwner = undefined; this.scopePolicySnapshot = undefined;
       },
     });
+  }
+
+  private invalidateScopePolicySnapshot(): void {
+    if (!this.scopePolicyOwner) return;
+    this.scopePolicyState = {};
+    this.scopePolicySnapshot = undefined;
   }
 
   private beforeScopeMutation(): void {
@@ -305,6 +323,7 @@ export class GatewayMethodCatalog {
     const registered = { descriptor: normalized, handler };
     this.beforeScopeMutation();
     this.methods.set(normalized.id, registered);
+    this.invalidateScopePolicySnapshot();
     return () => {
       const current = this.methods.get(normalized.id);
       if (current === registered) {
@@ -324,6 +343,7 @@ export class GatewayMethodCatalog {
     const registered = { descriptor: normalized };
     this.beforeScopeMutation();
     this.events.set(normalized.id, registered);
+    this.invalidateScopePolicySnapshot();
     return () => {
       const current = this.events.get(normalized.id);
       if (current === registered) {
@@ -335,13 +355,17 @@ export class GatewayMethodCatalog {
   unregister(id: string): boolean {
     if (!this.methods.has(id)) return false;
     this.beforeScopeMutation();
-    return this.methods.delete(id);
+    const removed = this.methods.delete(id);
+    this.invalidateScopePolicySnapshot();
+    return removed;
   }
 
   unregisterEvent(id: string): boolean {
     if (!this.events.has(id)) return false;
     this.beforeScopeMutation();
-    return this.events.delete(id);
+    const removed = this.events.delete(id);
+    this.invalidateScopePolicySnapshot();
+    return removed;
   }
 
   clearPluginMethods(pluginId: string): void {
@@ -357,6 +381,7 @@ export class GatewayMethodCatalog {
         this.events.delete(id);
       }
     }
+    this.invalidateScopePolicySnapshot();
   }
 
   list(options: GatewayMethodListOptions = {}): GatewayMethodDescriptor[] {

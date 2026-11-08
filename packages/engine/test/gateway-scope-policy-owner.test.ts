@@ -35,6 +35,63 @@ test('initial catalog construction and unchanged restart preserve durable scope 
   expect(readFileSync(`${f.config.getConfigPath()}.policy-epoch.json`, 'utf8')).toBe(disk);
 });
 
+test('unchanged guards reuse one immutable scope snapshot and actual replacement invalidates it even with identical scope bytes', () => {
+  const f = fixture(); f.capture();
+  const first = f.owner.current(), previousPolicy = f.config.getDurableConfigurationIncarnation();
+  const reads = spyOn(f.catalog, 'getAllScopes');
+  try {
+    for (let i = 0; i < 500; i++) expect(f.owner.current()).toBe(first);
+    expect(reads).not.toHaveBeenCalled();
+    expect(() => (first.scopes as string[]).push('write:forged')).toThrow();
+    f.catalog.register(method(), () => ({ replacement: true }), { replace: true });
+    const next = f.owner.current();
+    expect(next).not.toBe(first); expect(next.revision).toBe(first.revision); expect(next.scopes).toEqual(first.scopes);
+    expect(f.config.getDurableConfigurationIncarnation()).not.toBe(previousPolicy);
+    expect(reads).toHaveBeenCalledTimes(1); expect(f.owner.current()).toBe(next);
+    f.remove(); expect(f.owner.current()).toBe(next);
+  } finally { reads.mockRestore(); }
+});
+
+test('method/event registration and removal refresh snapshots while rejected and absent mutations retain the current state', () => {
+  const f = fixture(); const first = f.owner.current();
+  expect(f.catalog.unregister('absent')).toBe(false); expect(f.catalog.unregisterEvent('absent')).toBe(false);
+  f.catalog.clearPluginMethods('absent'); expect(f.owner.current()).toBe(first);
+  expect(() => f.catalog.register(method(), handler)).toThrow(); expect(f.owner.current()).toBe(first);
+  const remove = f.catalog.registerEvent({ id: 'synthetic.event', title: 'Fixture', description: 'Fixture', category: 'fixture', source: 'plugin',
+    pluginId: 'synthetic-plugin', transport: ['ws'], scopes: ['read:synthetic-event'] });
+  const event = f.owner.current(); expect(event).not.toBe(first); expect(event.scopes).toContain('read:synthetic-event');
+  remove(); const removed = f.owner.current(); expect(removed).not.toBe(event); expect(removed.revision).toBe(first.revision);
+  expect(removed.scopes).not.toContain('read:synthetic-event');
+  f.catalog.clearPluginMethods('synthetic-plugin'); const cleared = f.owner.current();
+  expect(cleared).not.toBe(removed); expect(cleared.scopes).not.toContain('write:synthetic');
+  expect(f.owner.current()).toBe(cleared);
+});
+
+test('cached snapshots never bypass mutation-in-progress or retirement checks', () => {
+  const catalog = new GatewayMethodCatalog({ includeBuiltins: false }); catalog.register(method(), handler);
+  let duringMutation: (() => void) | undefined;
+  const owner = catalog.attachScopePolicyOwner(() => duringMutation?.()), first = owner.current();
+  duringMutation = () => { expect(() => owner.current()).toThrow('unavailable'); };
+  catalog.register(method('synthetic.second'), handler); expect(owner.current()).not.toBe(first);
+  duringMutation = () => { throw new Error('Mutation refused'); };
+  const current = owner.current(); expect(() => catalog.unregister('synthetic.second')).toThrow('Mutation refused');
+  expect(owner.current()).toBe(current); expect(catalog.get('synthetic.second')).not.toBeNull();
+  owner.close(); expect(() => owner.current()).toThrow('unavailable');
+  expect(() => catalog.attachScopePolicyOwner(() => {})).toThrow('retired');
+});
+
+test('a read that reenters registration cannot publish a mixed old/new catalog snapshot', () => {
+  const catalog = new GatewayMethodCatalog({ includeBuiltins: false }); catalog.register(method(), handler);
+  const owner = catalog.attachScopePolicyOwner(() => {}), read = catalog.getAllScopes.bind(catalog);
+  const reentrant = spyOn(catalog, 'getAllScopes').mockImplementationOnce(options => {
+    catalog.register(method('synthetic.added', ['write:added']), handler);
+    return read(options);
+  });
+  try { expect(() => owner.current()).toThrow('changed while reading'); }
+  finally { reentrant.mockRestore(); }
+  const after = owner.current(); expect(after.scopes).toContain('write:added'); expect(owner.current()).toBe(after);
+});
+
 test('removal and re-addition cannot revive a durable grant across restart', () => {
   const f = fixture(); const before = f.capture(); const catalogBefore = f.owner.current().revision;
   f.catalog.unregister('synthetic.write'); f.catalog.register(method(), handler);

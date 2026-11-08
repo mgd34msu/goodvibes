@@ -67,7 +67,7 @@ export function paymentOperationDescription(operation: PaymentOperationView): st
     case 'failed': return operation.outcome === 'decision-unavailable'
       ? 'No decision models are currently available. Check provider keys, endpoints, model access and any local model service, then review this checkout before starting a new one.'
       : operation.outcome === 'reply-source-unavailable'
-        ? 'The purchase reply channel could not be verified. Check Telegram polling and account settings, or use the paired host’s Payments controls for a new checkout.'
+        ? 'The purchase reply channel could not be verified. Check Telegram polling or webhook registration and bot account settings, or use the paired host’s Payments controls for a new checkout.'
       : operation.outcome === 'decision-disabled'
         ? 'Automated checkout requires decision models. Review the selected decision policy and this checkout before starting a new one.'
         : 'Processing stopped without a confirmed final outcome. Inspect the payment evidence before retrying.';

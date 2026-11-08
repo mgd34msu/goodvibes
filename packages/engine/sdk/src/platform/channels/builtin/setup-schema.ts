@@ -250,7 +250,10 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
           setupField('botUsername', 'Bot username', 'string', false, { configKey: 'surfaces.telegram.botUsername', placeholder: '@goodvibes_bot' }),
           setupField('defaultChatId', 'Default chat id', 'string', false, { configKey: 'surfaces.telegram.defaultChatId', placeholder: '-1001234567890' }),
           setupField('botToken', 'Bot token', 'secret', true, { configKey: 'surfaces.telegram.botToken', secretTargetId: 'primary' }),
-          setupField('webhookSecret', 'Webhook secret', 'secret', false, { configKey: 'surfaces.telegram.webhookSecret', secretTargetId: 'signingSecret' }),
+          setupField('webhookSecret', 'Manual webhook secret', 'secret', false, {
+            configKey: 'surfaces.telegram.webhookSecret', secretTargetId: 'signingSecret',
+            detail: 'Native daemon setup manages this automatically. Set a secret here only for a deployment without managed webhook registration.',
+          }),
         ],
         secretTargets: [
           secretTarget(surface, 'primary', 'Bot token', true, 'Used for Telegram bot API calls and inbound verification.', {
@@ -259,7 +262,7 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
             envKeys: ['TELEGRAM_BOT_TOKEN'],
             configKeys: ['surfaces.telegram.botToken'],
           }),
-          secretTarget(surface, 'signingSecret', 'Webhook secret', false, 'Used to validate webhook callbacks when Telegram is in webhook mode.', {
+          secretTarget(surface, 'signingSecret', 'Manual webhook secret', false, 'Used by deployments without managed webhook registration. Native daemon setup manages its own credential.', {
             serviceName: 'telegram',
             serviceField: 'signingSecret',
             envKeys: ['TELEGRAM_WEBHOOK_SECRET'],
@@ -268,7 +271,7 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
         ],
         externalSteps: [
           'Create a Telegram bot with BotFather.',
-          'Store the bot token and optional webhook secret.',
+          'Store the bot token. Native daemon setup manages its webhook registration credential automatically.',
           'Choose webhook or polling mode and set the default chat/group/channel if you want direct delivery.',
         ],
         metadata: {},

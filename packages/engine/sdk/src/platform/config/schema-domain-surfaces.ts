@@ -405,7 +405,7 @@ export const surfaceConfigSettings: ConfigSettingDefinition[] = [
     key: 'surfaces.telegram.webhookSecret',
     type: 'string',
     default: '',
-    description: 'Telegram webhook secret token used to verify inbound callbacks',
+    description: 'Manual Telegram webhook secret for deployments without managed registration. The native daemon automatically manages its own webhook registration credential.',
   },
   {
     key: 'surfaces.telegram.defaultChatId',

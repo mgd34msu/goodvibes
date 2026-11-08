@@ -100,6 +100,36 @@ function createControllableManager(
 }
 
 describe('browser session ownership', () => {
+  for (const origin of ['launched', 'attached'] as const) test(`a new ${origin} owner cannot resolve another manager's saved browser/page references`, async () => {
+    const first = createManager([]), second = createManager([]);
+    try {
+      const original = origin === 'launched' ? await first.launch({}) : await first.attach({ cdpEndpoint: '9222' });
+      const replacement = origin === 'launched' ? await second.launch({}) : await second.attach({ cdpEndpoint: '9222' });
+      const originalPage = (await first.page(original.sessionId)).pageId;
+      const replacementPage = (await second.page(replacement.sessionId)).pageId;
+      expect(replacement.sessionId).not.toBe(original.sessionId);
+      expect(replacementPage).not.toBe(originalPage);
+      await expect(second.page(original.sessionId, originalPage)).rejects.toThrow(BrowserSessionError);
+      await expect(second.page(replacement.sessionId, originalPage)).rejects.toThrow(BrowserSessionError);
+      expect((await first.page(original.sessionId, originalPage)).pageId).toBe(originalPage);
+      expect((await second.page(replacement.sessionId, replacementPage)).pageId).toBe(replacementPage);
+    } finally { await first.shutdown(); await second.shutdown(); }
+  });
+
+  test('reattaching the same endpoint cannot reuse a released browser or its page references', async () => {
+    const manager = createManager([]);
+    try {
+      const original = await manager.attach({ cdpEndpoint: '9222' });
+      const originalPage = (await manager.page(original.sessionId)).pageId;
+      manager.release(original.sessionId);
+      const attached = await manager.attach({ cdpEndpoint: '9222' });
+      expect(attached.sessionId).not.toBe(original.sessionId);
+      await expect(manager.page(original.sessionId, originalPage)).rejects.toThrow(BrowserSessionError);
+      await expect(manager.page(attached.sessionId, originalPage)).rejects.toThrow(BrowserSessionError);
+      expect((await manager.page(attached.sessionId)).pageId).not.toBe(originalPage);
+    } finally { await manager.shutdown(); }
+  });
+
   test('a launched session is marked closable by the agent', async () => {
     const manager = createManager([]);
     const session = await manager.launch({ profileName: 'test-profile' });

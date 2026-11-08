@@ -1,5 +1,6 @@
 import { assertProvisionCurrent, ownProvisionLifetime, type BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { readBrowserLaunchCause } from './launch-reading.js';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
@@ -174,7 +175,10 @@ export class BrowserSessionManager {
   private readonly sessions = new Map<string, TrackedSession>();
   /** Node-hosted driver processes, one per session that needed one. */
   private readonly hosts = new Map<string, BrowserHostClient>();
-  private sessionCounter = 0;
+  /** Saved tool/journal references must never select another manager's first
+   * browser after a restart. Local ordinals belong to this owner only. */
+  readonly #incarnation = opaqueUuid();
+  #sessionCounter = 0;
   private lastProvision: BrowserProvisionReport | null = null;
   /**
    * A launch already in progress, so a second `launch()` call made while the
@@ -484,8 +488,9 @@ export class BrowserSessionManager {
     readonly source: BrowserProvisionReport['source'];
     readonly headless: boolean;
   }): BrowserSessionInfo {
-    this.sessionCounter += 1;
-    const sessionId = `b${String(this.sessionCounter)}`;
+    if (this.#sessionCounter >= Number.MAX_SAFE_INTEGER) throw new BrowserSessionError('Browser session references are exhausted.');
+    this.#sessionCounter += 1;
+    const sessionId = `b${this.#incarnation}.${String(this.#sessionCounter)}`;
     const session: TrackedSession = {
       sessionId,
       origin: input.origin,
@@ -510,6 +515,7 @@ export class BrowserSessionManager {
   }
 
   private trackPage(session: TrackedSession, page: Page): void {
+    if (session.pageCounter >= Number.MAX_SAFE_INTEGER) throw new BrowserSessionError('Browser page references are exhausted.');
     session.pageCounter += 1;
     const pageId = `${session.sessionId}p${String(session.pageCounter)}`;
     session.pages.set(pageId, { pageId, page });

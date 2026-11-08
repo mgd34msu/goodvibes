@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
-import { BrowserHostClient, remotePage, browserHostScriptPath } from '../sdk/src/platform/browser/browser-host-client.js';
+import { BrowserHostClient, BrowserHostError, remotePage, browserHostScriptPath } from '../sdk/src/platform/browser/browser-host-client.js';
 import { liveControlDescriptor } from './_helpers/browser-control-descriptor.js';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { tmpdir } from 'node:os';
@@ -770,13 +770,16 @@ describe('host request cancellation ownership', () => {
 });
 
 
-function clientHostFixture(client: BrowserHostClient, exitOnKill = true) {
+function clientHostFixture(client: BrowserHostClient, exitOnKill = true, closeOnExit = true) {
   const messages: string[] = [], effects: string[] = [], child = new EventEmitter();
   const stdin = Object.assign(new EventEmitter(), { write: (line: string) => { messages.push(line); return true; }, end: () => { effects.push('stdin ended'); } });
   const stdout = new EventEmitter();
+  const stderr = Object.assign(new EventEmitter(), { resume: () => {} });
+  // A real child emits close only after exit and its stdio have closed.
+  child.on('exit', () => { if (closeOnExit) queueMicrotask(() => child.emit('close')); });
   Object.defineProperties(child, {
     exitCode: { value: null, writable: true }, signalCode: { value: null, writable: true },
-    stdin: { value: stdin }, stdout: { value: stdout },
+    stdin: { value: stdin }, stdout: { value: stdout }, stderr: { value: stderr },
     kill: { value: () => { effects.push('host terminated'); if (exitOnKill) child.emit('exit', null, 'SIGTERM'); return true; } },
   });
   Object.defineProperty(client, 'child', { value: child, writable: true, configurable: true });
@@ -793,6 +796,26 @@ function clientPendingCount(client: BrowserHostClient): number {
 }
 
 describe('native host response retirement', () => {
+  test('reentrant close returns the published promise and waits for stdio after process exit', async () => {
+    const client = new BrowserHostClient(), host = clientHostFixture(client, true, false);
+    let reentrant: Promise<void> | undefined, closed = false;
+    host.child.once('exit', () => { reentrant = client.close(); });
+    const call = client.call('pages').catch((error: unknown) => error);
+    const closing = client.close();
+    void closing.then(() => { closed = true; }, () => {});
+    try {
+      expect(reentrant).toBe(closing);
+      expect(await call).toBeInstanceOf(BrowserHostError);
+      expect(closed).toBe(false);
+      host.child.emit('close');
+      await closing;
+      expect(closed).toBe(true);
+      expect(host.child.listenerCount('error')).toBe(0);
+      expect(host.stdin.listenerCount('error')).toBe(0);
+      expect(host.stdout.listenerCount('data')).toBe(0);
+      expect(host.stdout.listenerCount('error')).toBe(0);
+    } finally { host.child.emit('close'); await closing; }
+  });
   test.each(['exit', 'error', 'stdin-error', 'stdout-error', 'stop'])('host %s settles its pending action response and removes the caller listener', async mode => {
     const client = new BrowserHostClient(), host = clientHostFixture(client), controller = new AbortController();
     const result = client.call('locator', { pageId: 'native-page', method: 'click', selector: '#first', args: {} }, { signal: controller.signal });
@@ -909,18 +932,25 @@ for (const retirement of ['stop', 'error', 'stdin-error'] as const)
       else first.stdin.emit('error', new Error('private delayed stream failure'));
       expect(first.effects).toContain('host terminated'); expect(clientPendingCount(client)).toBe(1);
       await Promise.resolve(); expect(finished).toBe(false);
-      const second = clientHostFixture(client), sibling = client.call('pages'), siblingHandled = sibling.catch(error => error);
+      // Explicit stop closes admission permanently; unexpected transport loss
+      // may still be followed by a separately observed successor on this client.
+      const successor = retirement === 'stop' ? new BrowserHostClient() : client;
+      if (retirement === 'stop') {
+        await expect(client.call('pages')).rejects.toThrow('closing');
+        await expect(client.start()).rejects.toThrow('closing');
+      }
+      const second = clientHostFixture(successor), sibling = successor.call('pages'), siblingHandled = sibling.catch(error => error);
       try {
         first.child.emit('exit', 1, null); expect(await handled).toBeInstanceOf(Error);
-        expect(clientPendingCount(client)).toBe(1);
+        expect(clientPendingCount(successor)).toBe(1);
         const request: unknown = JSON.parse(second.messages[0] ?? 'null');
         if (!request || typeof request !== 'object' || !('id' in request) || typeof request.id !== 'number') throw new Error('Missing replacement native request');
-        const receive: unknown = Reflect.get(client, 'handleLine');
+        const receive: unknown = Reflect.get(successor, 'handleLine');
         if (typeof receive !== 'function') throw new Error('Missing actual response parser');
-        Reflect.apply(receive, client, [JSON.stringify({ id: request.id, ok: true, result: { pages: [] } }), second.child]);
-        expect<unknown>(await siblingHandled).toEqual({ pages: [] }); expect(clientPendingCount(client)).toBe(0);
-      } finally { client.stop(); await siblingHandled; }
-    } finally { first.child.emit('exit', 1, null); controller.abort(); await handled; }
+        Reflect.apply(receive, successor, [JSON.stringify({ id: request.id, ok: true, result: { pages: [] } }), second.child]);
+        expect<unknown>(await siblingHandled).toEqual({ pages: [] }); expect(clientPendingCount(successor)).toBe(0);
+      } finally { successor.stop(); await siblingHandled; await successor.close(); }
+    } finally { first.child.emit('exit', 1, null); controller.abort(); await handled; await client.close(); }
   });
 
 for (const retirement of ['caller', 'reader'] as const)

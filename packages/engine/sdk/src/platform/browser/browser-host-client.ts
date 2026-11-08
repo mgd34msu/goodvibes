@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { BrowserContext, Page } from 'playwright-core';
 import { types as nodeTypes } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
+import { OwnedWork } from '../utils/owned-work.js';
 
 /**
  * Talks to the Node-hosted browser process.
@@ -20,6 +21,17 @@ interface PendingCall {
   readonly child: ChildProcessWithoutNullStreams;
   readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
+}
+
+interface HostLifetime {
+  readonly child: ChildProcessWithoutNullStreams;
+  /** Child close, including its owned stdio, rather than just a kill request. */
+  readonly drained: Promise<void>;
+  exited: boolean;
+  closed: boolean;
+  stopping: Promise<void> | null;
+  startup: { readonly finish: (ready: boolean) => void } | null;
+  startupError: string | null;
 }
 
 export class BrowserHostError extends Error {
@@ -67,18 +79,42 @@ export interface BrowserHostOptions {
 }
 
 export class BrowserHostClient {
+  readonly #work = new OwnedWork();
+  readonly #hosts = new Map<ChildProcessWithoutNullStreams, HostLifetime>();
+  #starting: Promise<void> | null = null;
+  #closing: Promise<void> | null = null;
   private child: ChildProcessWithoutNullStreams | null = null;
   private readonly pending = new Map<number, PendingCall>();
   private nextId = 1;
-  private startupChild: ChildProcessWithoutNullStreams | null = null;
-  private ready: (() => void) | null = null;
-  private notReady: (() => void) | null = null;
-  private startupError: string | null = null;
+  private readonly options: BrowserHostOptions;
 
-  constructor(private readonly options: BrowserHostOptions = {}) {}
+  constructor(options: BrowserHostOptions = {}) {
+    this.options = Object.freeze({ scriptPath: options.scriptPath, missingScriptFix: options.missingScriptFix });
+  }
 
-  async start(): Promise<void> {
-    if (this.child) return;
+  start(): Promise<void> {
+    if (this.#closing) return Promise.reject(this.closedError());
+    if (this.child) return Promise.resolve();
+    if (this.#starting) return this.#starting;
+    // The startup reservation precedes filesystem/spawn callbacks and can be
+    // joined even when close reenters before the child has been created.
+    const starting = this.#work.run(() => Promise.resolve().then(() => this.startOwned()));
+    this.#starting = starting;
+    const clear = (): void => { if (this.#starting === starting) this.#starting = null; };
+    void starting.then(clear, clear);
+    return starting;
+  }
+
+  private closedError(): BrowserHostError {
+    return new BrowserHostError('The browser host is closing.', 'Attach again using a new browser connection.');
+  }
+
+  private async startOwned(): Promise<void> {
+    if (this.#closing) throw this.closedError();
+    // Restart after an unexpected transport failure still owns the old child.
+    // Do not overlap it with a successor or ignore a failed process retirement.
+    for (const host of this.#hosts.values()) await this.closeHost(host);
+    if (this.#closing) throw this.closedError();
     const script = this.options.scriptPath ?? browserHostScriptPath();
     if (!existsSync(script)) {
       throw new BrowserHostError(
@@ -88,33 +124,25 @@ export class BrowserHostClient {
     }
     let lastError = '';
     for (const runtime of nodeCandidates()) {
+      if (this.#closing) throw this.closedError();
+      let child: ChildProcessWithoutNullStreams;
       try {
-        const child = spawn(runtime, [script], { stdio: ['pipe', 'pipe', 'pipe'] });
-        // One reader for the lifetime of the process: the ready line and every
-        // later response arrive through the same parser.
-        let buffer = '';
-        child.stdout.on('data', (chunk: Buffer) => {
-          buffer += chunk.toString();
-          let index = buffer.indexOf('\n');
-          while (index >= 0) {
-            const line = buffer.slice(0, index).trim();
-            buffer = buffer.slice(index + 1);
-            if (line) this.handleLine(line, child);
-            index = buffer.indexOf('\n');
-          }
-        });
-        const started = await this.waitForReady(child);
-        if (started) {
-          this.child = child;
-          this.observeHostLifetime(child);
-          if (this.child !== child) throw new BrowserHostError('The browser host exited during startup.');
-          return;
-        }
-        lastError = this.startupError ?? `${runtime} did not start the browser host`;
-        child.kill('SIGTERM');
+        child = spawn(runtime, [script], { stdio: ['pipe', 'pipe', 'pipe'] });
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
+        continue;
       }
+      const host = this.observeHostLifetime(child);
+      const started = await this.waitForReady(host);
+      if (started && !host.exited && !host.stopping && !this.#closing) {
+        this.child = child;
+        return;
+      }
+      lastError = host.startupError ?? `${runtime} did not start the browser host`;
+      // Never start a successor while an unsuccessful attempt still owns a
+      // live process or stdio. A failed retirement is itself a hard failure.
+      await this.closeHost(host);
+      if (this.#closing) throw this.closedError();
     }
     throw new BrowserHostError(
       `Could not start the browser host: ${lastError}`,
@@ -122,22 +150,19 @@ export class BrowserHostClient {
     );
   }
 
-  private waitForReady(child: ChildProcessWithoutNullStreams): Promise<boolean> {
-    this.startupChild = child;
+  private waitForReady(host: HostLifetime): Promise<boolean> {
+    if (host.exited || host.stopping || this.#closing) return Promise.resolve(false);
     return new Promise((resolve) => {
       let settled = false;
       const finish = (value: boolean): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        if (this.startupChild === child) this.startupChild = null;
+        host.startup = null;
         resolve(value);
       };
       const timer = setTimeout(() => finish(false), 10_000);
-      this.ready = () => finish(true);
-      this.notReady = () => finish(false);
-      child.on('error', () => finish(false));
-      child.on('exit', () => finish(false));
+      host.startup = { finish };
     });
   }
 
@@ -155,17 +180,97 @@ export class BrowserHostClient {
   }
 
   private terminateHost(child: ChildProcessWithoutNullStreams): void {
-    this.retireHost(child);
-    try { child.kill('SIGTERM'); } catch { /* The host may already have exited. */ }
+    const host = this.observeHostLifetime(child);
+    void this.closeHost(host).catch(() => { /* close() retains and reports an undrained host. */ });
   }
 
-  private observeHostLifetime(child: ChildProcessWithoutNullStreams): void {
-    child.once('exit', () => this.settleRetiredHost(child));
-    child.once('close', () => this.settleRetiredHost(child));
-    child.once('error', () => this.terminateHost(child));
-    child.stdin.once('error', () => this.terminateHost(child));
-    child.stdout.once('error', () => this.terminateHost(child));
-    if (child.exitCode !== null || child.signalCode !== null) this.settleRetiredHost(child);
+  private observeHostLifetime(child: ChildProcessWithoutNullStreams): HostLifetime {
+    const existing = this.#hosts.get(child);
+    if (existing) return existing;
+    let drained!: () => void;
+    const host: HostLifetime = {
+      child, drained: new Promise<void>(resolve => { drained = resolve; }),
+      exited: false, closed: false, stopping: null, startup: null, startupError: null,
+    };
+    this.#hosts.set(child, host);
+    // One parser owns hello and every response; stderr must also be consumed
+    // so a noisy dependency cannot block the helper on a full pipe.
+    let buffer = '';
+    const data = (chunk: Buffer): void => {
+      if (host.closed) return;
+      buffer += chunk.toString();
+      let index = buffer.indexOf('\n');
+      while (index >= 0) {
+        const line = buffer.slice(0, index).trim();
+        buffer = buffer.slice(index + 1);
+        if (line) this.handleLine(line, child);
+        index = buffer.indexOf('\n');
+      }
+    };
+    const exit = (): void => {
+      host.exited = true;
+      host.startup?.finish(false);
+      this.settleRetiredHost(child);
+    };
+    const error = (): void => { this.terminateHost(child); };
+    const close = (): void => {
+      exit();
+      host.closed = true;
+      buffer = '';
+      child.stdout.removeListener('data', data);
+      child.removeListener('exit', exit);
+      child.removeListener('error', error);
+      child.stdin.removeListener('error', error);
+      child.stdout.removeListener('error', error);
+      child.stderr.removeListener('error', error);
+      this.#hosts.delete(child);
+      drained();
+    };
+    child.stdout.on('data', data);
+    child.once('exit', exit);
+    child.once('close', close);
+    child.on('error', error);
+    child.stdin.on('error', error);
+    child.stdout.on('error', error);
+    child.stderr.on('error', error);
+    child.stderr.resume();
+    if (child.exitCode !== null || child.signalCode !== null) exit();
+    return host;
+  }
+
+  private closeHost(host: HostLifetime): Promise<void> {
+    if (host.stopping) return host.stopping;
+    if (host.closed) return Promise.resolve();
+    let resolve!: () => void, reject!: (error: Error) => void;
+    host.stopping = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    // Publish the same retirement before stdin/kill can synchronously emit an
+    // error or reenter close. Pending calls stay owned until exit or response.
+    this.retireHost(host.child);
+    host.startup?.finish(false);
+    let settled = false;
+    let force: ReturnType<typeof setTimeout> | undefined;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(force); clearTimeout(deadline);
+      if (error) reject(error); else resolve();
+    };
+    void host.drained.then(() => finish());
+    const signal = (kind: NodeJS.Signals): void => {
+      if (host.exited || host.closed) return;
+      try { host.child.kill(kind); }
+      catch { /* The close event, not kill's return value, proves retirement. */ }
+    };
+    force = setTimeout(() => signal('SIGKILL'), 2_000);
+    deadline = setTimeout(() => finish(new BrowserHostError(
+      'The owned browser helper did not finish shutting down.',
+      'Stop the remaining browser helper before reconnecting. The attached browser has not been closed.',
+    )), 7_000);
+    try { host.child.stdin.end(); } catch { /* Still signal and wait for actual close. */ }
+    signal('SIGTERM');
+    void host.stopping.catch(() => {});
+    return host.stopping;
   }
 
   private handleLine(line: string, child?: ChildProcessWithoutNullStreams): void {
@@ -175,28 +280,32 @@ export class BrowserHostClient {
     } catch {
       return;
     }
-    if (typeof message.id !== 'number') return;
+    if (!message || typeof message !== 'object' || typeof message.id !== 'number') return;
     if (message.id === 0) {
-      if (child && child !== this.startupChild) return;
+      const host = child ? this.#hosts.get(child) : undefined;
+      if (!host?.startup || host.exited || host.stopping || this.#closing) return;
       // The host's own hello line, or its refusal to run under this runtime.
       if (message.ok === false) {
-        this.startupError = message.error ?? 'the browser host refused to start';
-        this.notReady?.();
+        host.startupError = message.error ?? 'the browser host refused to start';
+        host.startup.finish(false);
       } else {
-        this.ready?.();
+        host.startup.finish(message.ok === true);
       }
-      this.ready = null;
-      this.notReady = null;
       return;
     }
     const call = this.pending.get(message.id);
     if (!call || (child && call.child !== child)) return;
     this.pending.delete(message.id);
-    if (message.ok) call.resolve(message.result);
+    if (message.ok === true) call.resolve(message.result);
     else call.reject(new BrowserHostError(message.error ?? 'the browser host reported a failure'));
   }
 
-  async call<T>(command: string, params: Record<string, unknown> = {}, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<T> {
+  call<T>(command: string, params: Record<string, unknown> = {}, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<T> {
+    if (this.#closing) return Promise.reject(this.closedError());
+    return this.#work.run(() => this.callOwned<T>(command, params, options));
+  }
+
+  private async callOwned<T>(command: string, params: Record<string, unknown>, options: { readonly signal?: AbortSignal | undefined }): Promise<T> {
     const signal = options.signal;
     signal?.throwIfAborted();
     const child = this.child;
@@ -218,14 +327,14 @@ export class BrowserHostClient {
     try {
       const request = JSON.stringify({ id, command, params });
       signal?.throwIfAborted();
-      if (this.child !== child) throw new BrowserHostError('The browser host is no longer current.');
+      if (this.#closing || this.child !== child) throw new BrowserHostError('The browser host is no longer current.');
       try { child.stdin.write(`${request}\n`); sent = true; }
       catch { this.terminateHost(child); }
       if (signal?.aborted) cancel();
       // Cancellation receives the original operation's response only after native work settles.
       const result = await response;
       signal?.throwIfAborted();
-      if (this.child !== child) throw new BrowserHostError('The browser host is no longer current.');
+      if (this.#closing || this.child !== child) throw new BrowserHostError('The browser host is no longer current.');
       return result as T;
     } finally {
       signal?.removeEventListener('abort', cancel);
@@ -237,13 +346,23 @@ export class BrowserHostClient {
    * Ends the host process only. The browser it attached to is untouched: this
    * agent never started it, so it is not this agent's to close.
    */
+  close(): Promise<void> {
+    if (this.#closing) return this.#closing;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    this.#closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    const retire = [...this.#hosts.values()].map(host => this.closeHost(host));
+    void Promise.allSettled(retire).then(async results => {
+      const errors = results.flatMap(result => result.status === 'rejected' ? [result.reason as unknown] : []);
+      if (errors.length) throw new AggregateError(errors, 'Browser helper shutdown did not complete');
+      await this.#work.join();
+    }).then(resolve, reject);
+    void this.#closing.catch(() => {});
+    return this.#closing;
+  }
+
+  /** Observed compatibility wrapper; owners must await close() for drainage. */
   stop(): void {
-    const child = this.child;
-    this.child = null;
-    if (!child) return;
-    this.retireHost(child);
-    try { child.stdin.end(); } catch { /* The transport may already be closed. */ }
-    try { child.kill('SIGTERM'); } catch { /* The host may already have exited. */ }
+    void this.close().catch(() => {});
   }
 }
 
@@ -441,8 +560,8 @@ export function remoteContext(client: BrowserHostClient, initialPages: readonly 
     },
     // Releasing the transport, never closing someone else's browser.
     close: async () => {
-      await client.call('release');
-      client.stop();
+      try { await client.call('release'); }
+      finally { await client.close(); }
     },
   };
   return context as unknown as BrowserContext;

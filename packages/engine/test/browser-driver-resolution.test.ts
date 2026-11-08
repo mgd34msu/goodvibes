@@ -23,6 +23,16 @@ import { withTestTimeout } from './_helpers/test-timeout.js';
 // The old sdk package's manifest is the engine manifest, packages/engine/package.json.
 const sdkPackageDir = join(import.meta.dir, '..');
 
+function hostProvisionIo(): BrowserProvisionIo {
+  return {
+    resolveDriver: () => ({ available: true, packageDirectory: '/fixture', cliPath: '/fixture/cli.js', version: DRIVER_VERSION, error: null }),
+    expectedExecutablePath: () => '/fixture/chromium', browsersPath: () => '/fixture/cache',
+    pathExists: () => true, isExecutableFile: () => true, directoryWritable: () => true, removePath: () => {},
+    runCommand: async () => ({ code: 0, stdout: '', stderr: '', timedOut: false, spawnError: null }),
+    systemBrowserCandidates: () => [], now: () => 0,
+  };
+}
+
 describe('driver resolution for a compiled binary', () => {
   /**
    * A compiled binary has no node_modules and no package.json, so it cannot
@@ -101,14 +111,7 @@ describe('the node-hosted browser host', () => {
     const original = 'ws://127.0.0.1:9222/devtools/browser/original';
     const reachable = { endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: original };
     const requested = { cdpEndpoint: '9222' }, nativeConnections: string[] = [];
-    const io: BrowserProvisionIo = {
-      resolveDriver: () => ({ available: true, packageDirectory: '/fixture', cliPath: '/fixture/cli.js', version: DRIVER_VERSION, error: null }),
-      expectedExecutablePath: () => '/fixture/chromium', browsersPath: () => '/fixture/cache',
-      pathExists: () => true, isExecutableFile: () => true, directoryWritable: () => true, removePath: () => {},
-      runCommand: async () => ({ code: 0, stdout: '', stderr: '', timedOut: false, spawnError: null }),
-      systemBrowserCandidates: () => [], now: () => 0,
-    };
-    const manager = new BrowserSessionManager({ profileRoot: join(root, 'profiles'), surfaceRoot: 'test-surface', io,
+    const manager = new BrowserSessionManager({ profileRoot: join(root, 'profiles'), surfaceRoot: 'test-surface', io: hostProvisionIo(),
       host: { scriptPath }, probeEndpoint: async () => reachable,
       loadDriver: () => ({ chromium: {
         async launchPersistentContext() { throw new Error('No browser may be launched for this attach'); },
@@ -145,8 +148,8 @@ describe('the node-hosted browser host', () => {
       try {
         await manager.shutdown();
         if (existsSync(callsPath) && readFileSync(callsPath, 'utf8').trim()) {
-          const deadline = Date.now() + 5_000;
-          while (!existsSync(stopped) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+          // shutdown itself must await the actual helper exit, rather than
+          // making the caller add a second polling/drain mechanism.
           if (!existsSync(stopped)) {
             const owned = JSON.parse(readFileSync(callsPath, 'utf8').split('\n')[0]!) as { pid: number };
             if (Number.isSafeInteger(owned.pid) && owned.pid > 0) { try { process.kill(owned.pid, 'SIGKILL'); } catch { /* Host already exited. */ } }
@@ -157,6 +160,80 @@ describe('the node-hosted browser host', () => {
       } finally { rmSync(root, { recursive: true, force: true }); }
     }
   }, 30_000);
+
+  for (const phase of ['attach', 'released'] as const)
+    test(`manager shutdown drains the actual Node helper during ${phase}, without closing a user browser`, async () => {
+      const root = mkdtempSync(join(tmpdir(), 'browser-host-manager-drain-'));
+      const scriptPath = join(root, 'browser-host.mjs');
+      const paths = {
+        connected: join(root, 'connected'), stopping: join(root, 'stopping'),
+        release: join(root, 'release'), stopped: join(root, 'stopped'), calls: join(root, 'calls'),
+      };
+      copyFileSync(browserHostScriptPath(), scriptPath);
+      const driver = join(root, 'node_modules/playwright-core'); mkdirSync(driver, { recursive: true });
+      writeFileSync(paths.calls, '');
+      writeFileSync(join(driver, 'package.json'), JSON.stringify({ name: 'playwright-core', version: DRIVER_VERSION, main: 'index.js' }));
+      writeFileSync(join(driver, 'index.js'), `
+        const { appendFileSync, existsSync, writeFileSync } = require('node:fs');
+        const paths = ${JSON.stringify(paths)};
+        const record = value => appendFileSync(paths.calls, value + '\\n');
+        process.on('exit', () => writeFileSync(paths.stopped, 'stopped'));
+        process.on('SIGTERM', () => {
+          writeFileSync(paths.stopping, 'stopping');
+          const timer = setInterval(() => { if (existsSync(paths.release)) { clearInterval(timer); process.exit(0); } }, 5);
+        });
+        setInterval(() => {}, 1000);
+        const page = { on() {}, url: () => 'about:blank', title: async () => 'Original page', close: async () => record('page.close') };
+        const context = { pages: () => [page], on() {}, close: async () => record('context.close') };
+        const browser = { contexts: () => [context], close: async () => record('browser.close') };
+        exports.chromium = { connectOverCDP: async () => {
+          writeFileSync(paths.connected, String(process.pid));
+          ${phase === 'attach' ? 'await new Promise(() => {});' : ''}
+          return browser;
+        } };
+      `);
+      const manager = new BrowserSessionManager({
+        profileRoot: join(root, 'profiles'), surfaceRoot: 'test-surface', io: hostProvisionIo(), host: { scriptPath },
+        probeEndpoint: async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/devtools/browser/original' }),
+        loadDriver: () => ({ chromium: {
+          launchPersistentContext: async () => { throw new Error('No browser launch is allowed'); },
+          connectOverCDP: async () => { throw new Error('Use the actual Node helper'); },
+        } }),
+      });
+      const wait = async (path: string): Promise<void> => {
+        const deadline = Date.now() + 5_000;
+        while (!existsSync(path)) {
+          if (Date.now() >= deadline) throw new Error('The actual browser host did not reach its barrier');
+          await new Promise(resolve => setTimeout(resolve, 5));
+        }
+      };
+      const attached = manager.attach({ cdpEndpoint: '9222' });
+      const outcome = attached.catch((error: unknown) => error);
+      let closed = false;
+      try {
+        await wait(paths.connected);
+        if (phase === 'released') {
+          const info = await attached;
+          manager.release(info.sessionId);
+        }
+        const closing = manager.shutdown();
+        expect(manager.shutdown()).toBe(closing);
+        void closing.then(() => { closed = true; }, () => {});
+        await wait(paths.stopping);
+        expect(closed).toBe(false); expect(existsSync(paths.stopped)).toBe(false);
+        writeFileSync(paths.release, 'release');
+        await closing;
+        if (phase === 'attach') expect(await outcome).toBeInstanceOf(Error);
+        else await outcome;
+        expect(existsSync(paths.stopped)).toBe(true);
+        expect(manager.list()).toEqual([]);
+        expect(readFileSync(paths.calls, 'utf8')).toBe('');
+      } finally {
+        writeFileSync(paths.release, 'release');
+        try { await manager.shutdown(); }
+        finally { await outcome; rmSync(root, { recursive: true, force: true }); }
+      }
+    }, 20_000);
 
   test('releasing an attached browser drops host state without closing the browser, context, or pages', async () => {
     const root = mkdtempSync(join(tmpdir(), 'browser-host-ownership-'));

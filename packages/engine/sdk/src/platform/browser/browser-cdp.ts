@@ -82,33 +82,38 @@ export async function firstReachableCdpEndpoint(candidates: readonly string[], s
  * browser is fine and the limitation is ours, which is what the caller is
  * told, instead of a message implying they set something up wrong.
  */
-export async function cdpWebSocketHandshakeWorks(webSocketDebuggerUrl: string | null): Promise<boolean> {
+export async function cdpWebSocketHandshakeWorks(webSocketDebuggerUrl: string | null, signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted();
   if (!webSocketDebuggerUrl) return false;
-  return new Promise<boolean>((resolve) => {
+  return new Promise<boolean>((resolve, reject) => {
     let settled = false;
-    const finish = (value: boolean, socket?: WebSocket): void => {
+    let socket: WebSocket | undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const close = (): void => {
+      if (!socket) return;
+      socket.onopen = null; socket.onerror = null; socket.onclose = null;
+      try { socket.close(); } catch { /* A never-opened socket may already be closed. */ }
+    };
+    const abort = (): void => { finish(false, true); };
+    const finish = (value: boolean, aborted = false): void => {
       if (settled) return;
       settled = true;
-      try {
-        socket?.close();
-      } catch {
-        // Closing a socket that never opened is not an error.
-      }
-      resolve(value);
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      close();
+      if (aborted) reject(signal?.reason); else resolve(value);
     };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) { abort(); return; }
     try {
-      const socket = new WebSocket(webSocketDebuggerUrl);
-      socket.onopen = () => {
-        finish(true, socket);
-      };
-      socket.onerror = () => {
-        finish(false, socket);
-      };
-      setTimeout(() => {
-        finish(false, socket);
-      }, 3_000);
+      socket = new WebSocket(webSocketDebuggerUrl);
+      if (settled) { close(); return; }
+      socket.onopen = () => finish(true);
+      socket.onerror = () => finish(false);
+      socket.onclose = () => finish(false);
+      timer = setTimeout(() => finish(false), 3_000);
     } catch {
-      resolve(false);
+      finish(false);
     }
   });
 }

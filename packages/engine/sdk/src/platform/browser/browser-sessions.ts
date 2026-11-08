@@ -187,6 +187,8 @@ export class BrowserSessionManager {
   #closing: Promise<void> | null = null;
   readonly #unpublishedContexts = new Set<BrowserContext>();
   readonly #unpublishedBrowsers = new Set<Browser>();
+  readonly #unpublishedHosts = new Set<BrowserHostClient>();
+  readonly #hostRetirements = new Map<BrowserHostClient, Promise<void>>();
   private readonly sessions = new Map<string, TrackedSession>();
   /** Node-hosted driver processes, one per session that needed one. */
   private readonly hosts = new Map<string, BrowserHostClient>();
@@ -491,7 +493,7 @@ export class BrowserSessionManager {
       // is alive. Distinguish "this runtime cannot complete the debugger
       // handshake" from a genuine connection problem, because the two have
       // completely different answers and only one of them is the user's doing.
-      const handshake = await cdpWebSocketHandshakeWorks(webSocket);
+      const handshake = await cdpWebSocketHandshakeWorks(webSocket, this.#retiring.signal);
       this.#assertOpen();
       throw new BrowserSessionError(
         handshake
@@ -536,9 +538,13 @@ export class BrowserSessionManager {
    * here can close the user's browser.
    */
   private async attachThroughHost(endpoint: string, requestedEndpoint: string): Promise<BrowserSessionInfo | null> {
+    this.#assertOpen();
     const client = new BrowserHostClient(this.hostOptions);
-    await client.start();
+    this.#unpublishedHosts.add(client);
+    const abort = (): void => { void this.retireHost(client).catch(() => {}); };
+    this.#retiring.signal.addEventListener('abort', abort, { once: true });
     try {
+      await client.start();
       this.#assertOpen();
       const attached = await client.call<{ pages: { pages: { pageId: string; url: string }[] } }>('attach', { endpoint });
       this.#assertOpen();
@@ -560,8 +566,27 @@ export class BrowserSessionManager {
           headless: false,
       });
       this.hosts.set(info.sessionId, client);
+      this.#unpublishedHosts.delete(client);
       return info;
-    } catch (error) { client.stop(); throw error; }
+    } catch (error) {
+      try { await this.retireHost(client); this.#unpublishedHosts.delete(client); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], 'The browser helper could not be retired cleanly'); }
+      throw error;
+    } finally { this.#retiring.signal.removeEventListener('abort', abort); }
+  }
+
+  /** Synchronous release keeps its real asynchronous retirement owned here. */
+  private retireHost(client: BrowserHostClient): Promise<void> {
+    const existing = this.#hostRetirements.get(client);
+    if (existing) return existing;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    const retirement = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    this.#hostRetirements.set(client, retirement);
+    const done = (): void => { this.#hostRetirements.delete(client); resolve(); };
+    try { void client.close().then(done, reject); } catch (error) { reject(error); }
+    // Failed retirements stay retained so root shutdown reports them.
+    void retirement.catch(() => {});
+    return retirement;
   }
 
   private register(input: {
@@ -773,15 +798,16 @@ export class BrowserSessionManager {
     const host = this.hosts.get(sessionId);
     if (host) {
       // Ends the helper process, never the browser it was talking to.
-      host.stop();
+      void this.retireHost(host).catch(() => {});
       this.hosts.delete(sessionId);
     }
     const browser = session.browser;
     if (browser) {
-      // Detach the transport without issuing any browser-level close.
-      void Promise.resolve()
-        .then(() => detachBrowser(browser))
-        .catch(() => undefined);
+      // Retire the transport before another admitted continuation can run.
+      // A failed detach remains owned for shutdown retry/reporting.
+      this.#unpublishedBrowsers.add(browser);
+      detachBrowser(browser);
+      this.#unpublishedBrowsers.delete(browser);
     }
     return info;
   }
@@ -793,12 +819,20 @@ export class BrowserSessionManager {
     // Publish retirement before cancellation can reenter this owner.
     this.#closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
     this.#retiring.abort(new BrowserSessionError('The browser service is shutting down.'));
-    void this.#creations.join().then(async () => {
+    // Stop published and not-yet-published helpers before joining creation:
+    // their pending CDP attach/RPC may otherwise keep creation waiting forever.
+    const helpers = new Set([...this.hosts.values(), ...this.#unpublishedHosts, ...this.#hostRetirements.keys()]);
+    void Promise.allSettled([...helpers].map(host => this.retireHost(host))).then(async results => {
       const errors: unknown[] = [];
-      for (const [sessionId, host] of this.hosts) {
-        try { host.stop(); } catch (error) { errors.push(error); }
-        this.hosts.delete(sessionId);
+      for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
+      if (!errors.length) {
+        await this.#creations.join();
+        this.hosts.clear();
+        this.#unpublishedHosts.clear();
       }
+      // A failed helper retirement must be reported without skipping cleanup
+      // of other browsers already owned by the manager. Its unresolved work
+      // and helper remain retained; failure never becomes successful drainage.
       for (const session of [...this.sessions.values()]) {
         this.sessions.delete(session.sessionId);
         try {

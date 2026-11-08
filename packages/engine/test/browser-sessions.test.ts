@@ -199,9 +199,27 @@ describe('exact browser attachment identity', () => {
     }, async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/original' }));
     try {
       const first = await manager.attach({ cdpEndpoint: '9222' }); await manager.attach({ cdpEndpoint: '9222' });
-      manager.release(first.sessionId); await Promise.resolve();
+      manager.release(first.sessionId);
+      expect(calls).toEqual(['transport-close:1']);
       await manager.shutdown();
       expect(calls).toEqual(['transport-close:1', 'transport-close:2']); expect(manager.list()).toEqual([]);
+    } finally { await manager.shutdown(); }
+  });
+
+  test('failed native detach remains owned for shutdown retry without closing the user browser', async () => {
+    const calls: string[] = [];
+    const context = fakeContext('user-context-close', calls).context;
+    let attempts = 0;
+    const manager = attachManager(async () => ({
+      contexts: () => [context], close: async () => { calls.push('user-browser-close'); },
+      _connection: { close() { calls.push('detach'); if (++attempts === 1) throw new Error('fixture transport failure'); } },
+    } as unknown as Browser), async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: 'ws://127.0.0.1:9222/original' }));
+    try {
+      const session = await manager.attach({ cdpEndpoint: '9222' });
+      expect(() => manager.release(session.sessionId)).toThrow('fixture transport failure');
+      expect(manager.list()).toEqual([]); expect(calls).toEqual(['detach']);
+      await manager.shutdown();
+      expect(calls).toEqual(['detach', 'detach']);
     } finally { await manager.shutdown(); }
   });
 });

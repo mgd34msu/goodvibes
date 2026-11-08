@@ -167,6 +167,7 @@ const nativeGetPrototypeOf = Object.getPrototypeOf, nativeGetDescriptor = Object
 const nativeDefineProperty = Object.defineProperty, nativeDeleteProperty = Reflect.deleteProperty, nativeIsExtensible = Object.isExtensible;
 const nativeEntries = Object.entries, nativeIsProxy = nativeNodeTypes.isProxy;
 const nativeString = String, nativeSafeInteger = Number.isSafeInteger, nativeIsArray = Array.isArray, nativeFreeze = Object.freeze;
+const nativeFiniteNumber = Number.isFinite, nativeSameValue = Object.is;
 const nativeGlobalReceiver = globalThis;
 const nativeGlobalReceiverSelf = !nativeIsProxy(nativeGlobalReceiver)
   ? nativeGetDescriptor(nativeGlobalReceiver, 'globalThis') : undefined;
@@ -831,21 +832,48 @@ function readDatabaseRow(db: SqlDatabase, sql: string, params: string[]) {
   return (state?.raw ?? db).exec(sql, params);
 }
 
-/** Initial and fallback equality reads never consume mutable guard memos. */
-function readActualRecordGenerations(db: SqlDatabase, selectors: readonly PersistedKnowledgeRecordSelector[]): readonly (string | null)[] {
-  const generations: (string | null)[] = [];
+type ActualKnowledgeRecordValues = readonly (readonly [string, string | number | null])[] | null;
+
+/** Initial and fallback equality reads never consume mutable guard memos.
+ * Values live only with the caller's native readset token, never in public IDs
+ * or a global content-keyed cache. Every persisted cell is compared exactly.
+ */
+function readActualRecordValues(db: SqlDatabase, selectors: readonly PersistedKnowledgeRecordSelector[]): readonly ActualKnowledgeRecordValues[] {
+  const records: ActualKnowledgeRecordValues[] = [];
   for (const selector of selectors) {
     const table = selector.kind === 'source' ? 'knowledge_sources' : selector.kind === 'node' ? 'knowledge_nodes' : 'knowledge_extractions';
     const row = readDatabaseRow(db, `SELECT * FROM ${table} WHERE id = ? LIMIT 1`, [selector.id])[0], cells = row?.values[0];
-    if (row && (!row.columns.every(column => typeof column === 'string')
-      || row.values.some(cells => cells.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')))) {
-      throw new SQLiteObservationRetiredError();
+    if (row && (row.values.length > 1 || !row.columns.every(column => typeof column === 'string')
+      || new Set(row.columns).size !== row.columns.length
+      || row.values.some(values => values.length !== row.columns.length))) throw new SQLiteObservationRetiredError();
+    if (!row || !cells) { records.push(null); continue; }
+    const entries: (readonly [string, string | number | null])[] = [];
+    for (const [index, column] of row.columns.entries()) {
+      const cell = cells[index];
+      if (cell !== null && typeof cell !== 'string' && (typeof cell !== 'number' || !nativeFiniteNumber(cell))) throw new SQLiteObservationRetiredError();
+      entries.push(Object.freeze([column, cell] as const));
     }
-    const entries = row && cells ? row.columns.map((column, index) => [column, cells[index]] as const)
-      .sort(([left], [right]) => selector.kind === 'source' ? left < right ? -1 : left > right ? 1 : 0 : left.localeCompare(right)) : null;
-    generations.push(entries ? createHash('sha256').update(JSON.stringify(entries)).digest('hex') : null);
+    entries.sort(([left], [right]) => selector.kind === 'source' ? left < right ? -1 : left > right ? 1 : 0 : left.localeCompare(right));
+    records.push(Object.freeze(entries));
   }
-  return Object.freeze(generations);
+  return Object.freeze(records);
+}
+
+/** The public generation format still has separate consumers. Capture it once;
+ * subsequent expected-readset comparisons use the owned complete values above.
+ */
+function readActualRecordReadset(db: SqlDatabase, selectors: readonly PersistedKnowledgeRecordSelector[]) {
+  const records = readActualRecordValues(db, selectors);
+  const generations = Object.freeze(records.map(entries => entries === null ? null : createHash('sha256').update(JSON.stringify(entries)).digest('hex')));
+  return Object.freeze({ records, generations });
+}
+
+function sameActualRecordValues(left: readonly ActualKnowledgeRecordValues[], right: readonly ActualKnowledgeRecordValues[]): boolean {
+  return left.length === right.length && left.every((record, index) => {
+    const other = right[index];
+    return record === null ? other === null : other !== null && other !== undefined && record.length === other.length
+      && record.every(([column, value], position) => other[position]?.[0] === column && nativeSameValue(other[position]?.[1], value));
+  });
 }
 
 interface DatabaseProbe {
@@ -1146,7 +1174,7 @@ const expectedRecordReadsets = new WeakMap<object, {
   readonly digest: string | undefined;
   readonly canonical: boolean;
   readonly selectors: readonly PersistedKnowledgeRecordSelector[];
-  readonly generations: readonly (string | null)[];
+  readonly records: readonly ActualKnowledgeRecordValues[];
 }>();
 
 export class SQLiteStore {
@@ -1328,7 +1356,8 @@ export class SQLiteStore {
       const image = currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
       const db = frame?.db ?? this.getDb();
       frame?.assertCurrent();
-      const originalGenerations = readActualRecordGenerations(db, captured);
+      const original = readActualRecordReadset(db, captured);
+      const originalGenerations = original.generations;
       const native = frame?.db ? privateMapGet(ownedDatabases, frame.db) : undefined;
       let canonical = Boolean(frame && image?.store === this && image.origin === privateMapGet(nativeReadFrameIdentities, frame)?.identity
         && image.digest === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
@@ -1347,7 +1376,7 @@ export class SQLiteStore {
         origin: frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined, persistence: this.persistence,
         plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
         digest: frame?.persisted, canonical, selectors: Object.freeze(captured.map(selector => Object.freeze(selector))),
-        generations: originalGenerations }));
+        records: original.records }));
       result = Object.freeze({ expected, originalGenerations });
     });
     if (!result) throw new SQLiteObservationRetiredError();
@@ -1366,10 +1395,10 @@ export class SQLiteStore {
       const frame = this.persistedReadFrame;
       const image = currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
       const db = frame?.db ?? this.getDb();
-      const originals: (readonly (string | null)[])[] = [];
+      const originals: ReturnType<typeof readActualRecordReadset>[] = [];
       for (const selectors of captured) {
         frame?.assertCurrent();
-        originals.push(readActualRecordGenerations(db, selectors));
+        originals.push(readActualRecordReadset(db, selectors));
         currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
         frame?.assertCurrent();
       }
@@ -1388,14 +1417,15 @@ export class SQLiteStore {
       frame?.assertCurrent();
       const values: ReturnType<SQLiteStore['captureExpectedRecordReadset']>[] = [];
       for (let index = 0; index < captured.length; index++) {
-        const selectors = captured[index], originalGenerations = originals[index];
-        if (!selectors || !originalGenerations) throw new SQLiteObservationRetiredError();
+        const selectors = captured[index], original = originals[index];
+        if (!selectors || !original) throw new SQLiteObservationRetiredError();
+        const originalGenerations = original.generations;
         const expected = Object.freeze<ExpectedKnowledgeRecordReadset>({ [expectedReadsetBrand]: true });
         privateMapSet(expectedRecordReadsets, expected, nativeFreeze({ token: expected, store: this,
           origin: frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined, persistence: this.persistence,
           plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
           digest: frame?.persisted, canonical, selectors: Object.freeze(selectors.map(selector => Object.freeze(selector))),
-          generations: originalGenerations }));
+          records: original.records }));
         values.push(Object.freeze({ expected, originalGenerations }));
       }
       result = Object.freeze(values);
@@ -1441,10 +1471,10 @@ export class SQLiteStore {
             values.push(true);
           } else {
             frame?.assertCurrent();
-            const current = readActualRecordGenerations(frame?.db ?? this.getDb(), input.selectors);
+            const current = readActualRecordValues(frame?.db ?? this.getDb(), input.selectors);
             currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
             frame?.assertCurrent();
-            values.push(current.length === retained.generations.length && current.every((value, index) => value === retained.generations[index]));
+            values.push(sameActualRecordValues(current, retained.records));
           }
         }
         currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);

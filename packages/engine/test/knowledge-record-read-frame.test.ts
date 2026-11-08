@@ -1340,6 +1340,23 @@ test('compiled expected readsets allow unrelated persistence and reject changed 
   } finally { rows.restore(); }
 });
 
+test('uncertified expected readsets keep exact original SQL values private and detached from borrowed views', async () => {
+  const { store, source, sqlite } = await fixture(path(), () => {});
+  const selectors = [{ kind: 'source' as const, id: source.id }, { kind: 'extraction' as const, id: 'absent-native-row' }];
+  const captured = store.captureExpectedRecordReadset(selectors);
+  const input = [{ expected: captured.expected, selectors }];
+  expect(Object.keys(captured).sort()).toEqual(['expected', 'originalGenerations']);
+  expect(JSON.stringify(captured)).not.toContain('Router operations');
+  source.metadata.nested = { original: 'Changed borrowed presentation' };
+  // Changing a borrowed view never rewrites the original physical witness.
+  expect(store.matchesExpectedRecordReadsets(input)).toEqual([true]);
+  const raw = store.getSourceSnapshot({ id: source.id }).raw!;
+  sqlite.run('UPDATE knowledge_sources SET metadata = ? WHERE id = ?', [' ' + String(raw.metadata), source.id]);
+  await sqlite.save();
+  // JSON meaning is unchanged; the complete persisted bytes are not.
+  expect(store.matchesExpectedRecordReadsets(input)).toEqual([false]);
+});
+
 test.each(['copy', 'proxy', 'cross-store', 'wrong-id', 'wrong-kind', 'selector-accessor', 'expected-accessor', 'index-accessor', 'named-array'] as const)(
   'compiled expected readsets reject %s before raw consumption', async mode => {
     const first = await fixture(), second = mode === 'cross-store' ? await fixture() : first;

@@ -1,7 +1,7 @@
 # Daemon command executable and explicit host (partial migration)
 
-Package: `@goodvibes-jev/daemon` · version `2.0.23` · `private: true`.
-The `goodvibes-jev` repository root owns the daemon's release version.
+Package: `@goodvibes-jev/daemon` · `private: true`.
+The repository root owns the shared release version for all suite products.
 [MIT license](LICENSE),
 Copyright (c) 2026 Mike Davis.
 
@@ -11,7 +11,7 @@ Copyright (c) 2026 Mike Davis.
 - [Configuration](docs/configuration.md): exact homes, layers, persistent keys and runtime overlays
 - [Hosted sessions](docs/hosted-sessions.md): Jev authority, trust, detach/kill, leases and recovery
 - Testing and validation: actual scripts, official runner and proof limits
-- [Suite installation and uninstall](../../docs/installation.md): build this repository and configure the Linux user service
+- [Suite installation and uninstall](../../docs/installation.md): install released suite binaries and configure the Linux user service
 - [Troubleshooting](docs/troubleshooting.md): startup, authentication, binding, services and tool refusals
 
 These guides reconstruct pinned upstream responsibilities against current source,

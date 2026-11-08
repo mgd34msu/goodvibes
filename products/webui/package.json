@@ -5,7 +5,11 @@
   "license": "MIT",
   "type": "module",
   "packageManager": "bun@1.3.14",
-  "description": "GoodVibes WebUI 2.0 over the workspace engine; semantic judgment and contract-tree migration remains in progress.",
+  "engines": {
+    "bun": "1.3.14",
+    "node": ">=22.0.0"
+  },
+  "description": "GoodVibes browser interface for the workspace daemon and native work.",
   "scripts": {
     "dev": "vite",
     "build": "bun run generated:check && vite build",

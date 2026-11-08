@@ -27,25 +27,11 @@
  * anything that can write daemon config.
  */
 
+import { isValidTimezone } from '../utils/timezone.js';
+export { isValidTimezone };
+
 /** A calendar day in some zone: 'YYYY-MM-DD'. */
 export type DayKey = string & { readonly __dayKey: unique symbol };
-
-/**
- * Validate an IANA timezone name.
- *
- * Same predicate the scheduler already trusts (`scheduler/scheduler.ts`),
- * lifted here so config validation and budget arithmetic cannot disagree about
- * what counts as a zone.
- */
-export function isValidTimezone(timezone: string): boolean {
-  if (timezone.trim().length === 0) return false;
-  try {
-    new Intl.DateTimeFormat(undefined, { timeZone: timezone });
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * The zone the daemon reckons calendar days in.

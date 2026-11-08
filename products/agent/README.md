@@ -38,7 +38,8 @@ before any model receives it. With hosted routing enabled, conversational
 results use identity-only native hosted delivery and later inputs retain the
 same daemon-owned conversation. This requires an already paired operator,
 `read:work-ledger`, `write:work-ledger` and `write:sessions`, a registered host
-workspace, and Jev. Turning hosted routing off selects the local native permit
+workspace, and a configured decision model when decision processing is enabled.
+Turning hosted routing off selects the local native permit
 path. Neither path uses a second legacy classification or source-less work
 start. Missing authority, unsupported attachments or an unknown dispatch
 produce a visible diagnostic; there is no legacy conversation fallback.
@@ -46,17 +47,28 @@ produce a visible diagnostic; there is no legacy conversation fallback.
 The exact original and delivery mode survive restart. `/work intake-status`
 inspects and reopens observation; `intake-retry`, `intake-resume` and
 `intake-cancel` recover or cancel that same original. A lost reply never creates
-fresh IDs or switches delivery modes. Remote-owner contract.
+fresh IDs or switches delivery modes.
 
-Pairing remains explicit setup. The existing `pairing.tokens.migrate` operator
-method accepts `{ "name": "Agent" }` from an authenticated existing shared-token
-operator with `write:control-plane`, and returns a per-device token once. The
-new token must then be configured for Agent's selected host. Agent's current
-confirmed local-token provisioning route only prepares the legacy shared token;
-it does not perform that migration or install the returned paired token. Fresh
-onboarding into native authority remains an unresolved integration step. Merely
-opening Agent, finishing its onboarding marker, or answering the first-start
-checkpoint question does not grant that authority.
+With connected-host dialing enabled and the shared operator credential configured,
+pair Agent from its live terminal:
+
+1. Run `/setup pair` to preview the selected host and pairing state.
+2. Run `/setup pair --apply` to review the persistent administrative access being
+   granted, then type the fresh confirmation phrase shown by the terminal.
+
+Use `--name Agent` to choose the device name. Pairing invokes
+`pairing.tokens.migrate` once, stores the returned per-device credential privately
+for that host, and verifies its live principal. It requires the existing shared
+operator's `write:control-plane` authority. Model, harness and nested commands
+cannot confirm this grant. Opening Agent or finishing ordinary onboarding does
+not create a credential, and pairing does not revoke the shared token.
+
+If pairing is interrupted, rerun `/setup pair` to inspect its saved state before
+taking another action. An unknown outcome is preserved for review rather than
+automatically minting another token. A stored but unverified credential is kept
+for verification. Explicit token environment overrides take precedence over the
+host-bound store; a `paired-shadowed` result identifies that condition without
+changing the environment.
 
 ## Explicit native source submission
 

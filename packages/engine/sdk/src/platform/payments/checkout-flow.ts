@@ -6,8 +6,8 @@
  *
  *   0  GATES              enabled, card, address, owner-direct, leader
  *   0b TAINT              the purchase must be owner-initiated; the item and any
- *                        stated limit must be the owner's. The MERCHANT may be one
- *                        the owner found while browsing, see below.
+ *                        stated limit must be the owner's. The MERCHANT may be
+ *                        discovered for that owner request, see below.
  *   0c LINK               the checkout url must resolve to a registrable domain
  *   0d RECOURSE           who takes the card, and what silence will mean
  *   1  EXTRACT            page strings → integers WE parsed
@@ -28,13 +28,13 @@
  * purchases decided in the same minute would otherwise each fit what remains
  * and together exceed it.
  *
- * ══ The merchant the owner named, and the merchant class ═════════════════
+ * ══ Owner-named and discovered merchants, and the recourse standard ══════
  *
- * The taint gate applies exactly as written: the merchant, the checkout url, the item
- * and any stated limit come from the owner or the purchase is refused. The owner
- * names the merchant, or there is no purchase. Buying "the cheapest X you can find
- * online" is therefore refused, and taint-gate.ts documents that as a designed
- * consequence rather than a gap.
+ * The item and any stated limit must originate with the owner. For an owner-named
+ * merchant, its name and checkout URL also pass the taint check. When the owner
+ * asks us to find a merchant (merchantDiscovered), discovery may supply those
+ * two fields. The checkout domain is still validated, and classifyMerchant reads
+ * recourse from that validated domain, never from a page's claims about itself.
  *
  * What the merchant CLASS does here is separate and strictly narrower: it can
  * make an in-budget purchase stricter. A merchant with no established recourse
@@ -185,15 +185,6 @@ export interface CheckoutFlowDeps {
   readonly approvalMinutes: number;
   readonly vetoMinutes: number;
   readonly now: () => number;
-  /**
-   * The owner's additions and removals to the recognised-retailer list, and the
-   * per-listing bar for marketplaces that carry one.
-   *
-   * Curated data, read at decision time. The judgement about what counts as
-   * recourse is exercised when the list is EDITED, never by a model looking at
-   * a page, a storefront built to look trustworthy is the easiest thing in the
-   * world to produce.
-   */
   /** Judges the merchant's recourse from its validated domain alone. */
   readonly merchantJudge: MerchantJudgePort;
   /** Owner-authored overrides from daemon config. */
@@ -278,8 +269,9 @@ export async function runCheckout(
 
   // ── 0b. Taint: what is named must trace back to the owner ───────────────
   //
-  // The merchant, the checkout url, the item and any stated limit are checked
-  // against everything untrusted this turn has read. The merchant's own quoted
+  // The item and any stated limit are checked against untrusted content read
+  // this turn. Owner-named merchants and URLs are checked too; explicit
+  // merchant discovery exempts only those two fields. The merchant's quoted
   // NUMBERS are deliberately not checked, they are read from the merchant by
   // definition, and their defence is the budget. See taint-gate.ts.
   const intent: OwnerOriginIntent = {

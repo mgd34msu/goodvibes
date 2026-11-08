@@ -745,7 +745,7 @@ test('the closed generation batch exit fence catches an actual native alias rest
   alias.run('ATTACH DATABASE ? AS original', [main]);
   const observing = spyOn(internal, 'readPrivatePersistedRows').mockImplementation((sql, params, closed) => {
     const result = read(sql, params, closed);
-    if (!replaced && sql === 'SELECT * FROM knowledge_sources WHERE id = ? LIMIT 1') {
+    if (!replaced && sql === 'SELECT gv_revision FROM knowledge_sources WHERE id = ? LIMIT 1') {
       replaced = true;
       alias.run('UPDATE original.knowledge_sources SET summary = ? WHERE id = ?', ['during batch replacement', source.id]);
       alias.run('UPDATE original.knowledge_sources SET summary = ? WHERE id = ?', [source.summary ?? null, source.id]);
@@ -1865,4 +1865,29 @@ test('scope grouped original capture preserves extraction lookup and cancellatio
     await expect(prepareKnowledgeScopeSelection(store, {}, { kinds: ['source'], signal: controller.signal })).rejects.toMatchObject({ reason: 'aborted' });
     expect(entered).toBe(true); expect(fake.requests).toHaveLength(0);
   } finally { capturing.mockRestore(); reading.mockRestore(); installJudgmentPort(previous); }
+});
+
+
+test('generation-only checks never transfer full source or extraction bodies through their row reads', async () => {
+  const { store, source, extraction, sqlite } = await fixture();
+  const original: unknown = Reflect.get(sqlite, 'readPrivatePersistedRows');
+  if (typeof original !== 'function') throw new Error('No private reader');
+  const descriptor = Object.getOwnPropertyDescriptor(sqlite, 'readPrivatePersistedRows');
+  const reads: string[] = [];
+  Object.defineProperty(sqlite, 'readPrivatePersistedRows', { configurable: true, value(...args: unknown[]) {
+    if (typeof args[0] === 'string') reads.push(args[0]);
+    return Reflect.apply(original, sqlite, args);
+  } });
+  try {
+    expect(store.getSourceGeneration(source.id)).toMatch(/^kr-/);
+    expect(store.getRecordGenerations([{ kind: 'source', id: source.id }, { kind: 'extraction', id: extraction.id }]))
+      .toEqual([store.getSourceSnapshot({ id: source.id }).generation, store.getRecordSnapshot('extraction', extraction.id).generation]);
+    const revisionReads = reads.filter(sql => sql.startsWith('SELECT gv_revision '));
+    expect(revisionReads).toHaveLength(3);
+    // The two later explicit snapshot calls still retrieve complete admission evidence.
+    expect(reads.filter(sql => sql.startsWith('SELECT * FROM knowledge_'))).toHaveLength(2);
+  } finally {
+    if (descriptor) Object.defineProperty(sqlite, 'readPrivatePersistedRows', descriptor);
+    else Reflect.deleteProperty(sqlite, 'readPrivatePersistedRows');
+  }
 });

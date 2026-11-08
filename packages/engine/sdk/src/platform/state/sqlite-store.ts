@@ -1283,7 +1283,7 @@ export class SQLiteStore {
     } catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
   }
 
-  /** Complete raw values, with a primitive memo only in one certified frame. */
+  /** SQLite write revision only; complete evidence stays in separate raw-row reads. */
   readPersistedRowGeneration(table: 'knowledge_sources' | 'knowledge_nodes' | 'knowledge_extractions' | 'knowledge_edges',
     column: 'id' | 'canonical_uri', value: string): string | null {
     const frame = this.persistedReadFrame;
@@ -1296,7 +1296,7 @@ export class SQLiteStore {
         frame.assertCurrent();
         return frame.generations.get(key)!;
       }
-      const generation = knowledgeRowGenerationFromRows(this.readPersistedRow(table, column, value));
+      const generation = knowledgeRowGenerationFromRows(this.readPrivatePersistedRows(`SELECT gv_revision FROM ${table} WHERE ${column} = ? LIMIT 1`, [value]));
       frame?.assertCurrent();
       if (frame?.localState) frame.generations.set(key, generation);
       return generation;
@@ -1319,7 +1319,7 @@ export class SQLiteStore {
             values.push(frame.generations.get(key)!);
             continue;
           }
-          const rows = this.readPrivatePersistedRows(`SELECT * FROM ${table} WHERE id = ? LIMIT 1`, [selector.id], frame?.localState !== undefined);
+          const rows = this.readPrivatePersistedRows(`SELECT gv_revision FROM ${table} WHERE id = ? LIMIT 1`, [selector.id], frame?.localState !== undefined);
           const row = rows[0];
           if (row && (!row.columns.every(column => typeof column === 'string')
             || row.values.some(cells => cells.some(cell => cell !== null && typeof cell !== 'string' && typeof cell !== 'number')))) {

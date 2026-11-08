@@ -156,11 +156,14 @@ test('shared bootstrap credentials cannot open payment approval controls', async
 });
 
 test('connection shutdown drains a borrowed transport instead of declaring an abandoned request settled', async () => {
-  const f = fixture(); const entered = barrier(), gate = barrier();
+  const f = fixture(); const entered = barrier(), gate = barrier(), cancelling = barrier(), cancelled = barrier();
   const connection = new RetainedOperatorConnection({ owner: () => f.manager, home: () => f.root,
     read: observation => ({ baseUrl: 'https://retained.invalid', token: 'private-fixture', identity: observation.observe(['original'], f.manager) }),
     files: () => [f.credentialFile], signal: new AbortController().signal,
-    fetchImpl: async () => { entered.release(); await gate.wait; return Response.json({}); } });
+    fetchImpl: async () => {
+      entered.release(); await gate.wait;
+      return new Response(new ReadableStream({ cancel() { cancelling.release(); return cancelled.wait; } }));
+    } });
   const reading = connection.run((operator, signal) => operator.control.auth.current({}, { signal }));
   void reading.catch(() => {});
   await entered.wait;
@@ -169,6 +172,8 @@ test('connection shutdown drains a borrowed transport instead of declaring an ab
   await Promise.resolve(); await Promise.resolve();
   expect(connection.signal.aborted).toBe(true); expect(closed).toBe(false);
   gate.release();
+  await cancelling.wait; expect(closed).toBe(false);
+  cancelled.release();
   await expect(reading).rejects.toThrow(); await close;
   expect(closed).toBe(true);
 });

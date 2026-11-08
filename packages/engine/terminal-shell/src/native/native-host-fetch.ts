@@ -10,7 +10,13 @@ export function createNativeHostFetch(options: { readonly current: () => boolean
   return async (input, init) => {
     if (!options.current()) throw new Error('Native host selection changed.');
     const response = await (options.fetchImpl ?? fetch)(input, { ...init, redirect: 'error' });
-    if (!options.current()) throw new Error('Native host selection changed.');
+    if (!options.current()) {
+      // A borrowed transport may ignore AbortSignal and return a streaming
+      // response after retirement. Release its body before the request drains.
+      try { await response.body?.cancel(); }
+      catch { /* A failed cleanup cannot make the stale response usable. */ }
+      throw new Error('Native host selection changed.');
+    }
     return response;
   };
 }

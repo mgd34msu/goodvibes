@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { realpathSync } from 'node:fs';
 import { resolveConnectedHostDialEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
 import { openLegacyImportOperator, registerLegacyImportCommands, resolveLegacyImportJournalLocation, type LegacyImportOperatorSession } from '@goodvibes-jev/engine/terminal-shell/legacy-work-ledger-import';
@@ -10,18 +10,22 @@ export type OpenLegacyImportCommandSession = (context: CommandContext, projectId
 export function registerLegacyWorkLedgerImportCommands(registry: CommandRegistry, open: OpenLegacyImportCommandSession = async (context, projectId) => {
   const paths = requireShellPaths(context);
   const { journalPath } = resolveLegacyImportJournalLocation({ workspace: paths.workingDirectory, projectId, stateDirectory: paths.resolveUserPath() });
+  const selection = new OwnedSelectionObservation();
+  const unavailable = (reason: string) => { selection.retire(); return { reason }; };
   return openLegacyImportOperator({ projectId, journalPath, resolve: () => {
-    const current = requireShellPaths(context), config = context.platform.configManager;
-    if (!resolveConnectedHostDialEnabled(config)) return { reason: 'Connected-host dialing is disabled.' };
-    const baseUrl = canonicalizePairingHost(connectedHostBaseUrl(config.get('controlPlane.host'), config.get('controlPlane.port')));
-    if (!baseUrl) return { reason: 'Select an exact HTTP(S) daemon origin.' };
-    const pairing = readAgentHostPairing(current.homeDirectory, baseUrl);
-    if (pairing.status !== 'paired') return { reason: pairing.status === 'unknown'
-      ? 'The selected Agent host pairing outcome is unknown; inspect it before importing.'
-      : 'An existing private Agent pairing for this exact host is required. Use /setup pair to inspect pairing.' };
-    // Passive private state only: neither an unbound environment token nor a
-    // daemon-global credential can mask or replace this selected native owner.
-    return { baseUrl, token: pairing.token, workspace: realpathSync(current.workingDirectory),
-      selectionIdentity: createHash('sha256').update(JSON.stringify([current.homeDirectory, baseUrl, pairing])).digest('hex') };
+    try {
+      const current = requireShellPaths(context), config = context.platform.configManager;
+      if (!resolveConnectedHostDialEnabled(config)) return unavailable('Connected-host dialing is disabled.');
+      const baseUrl = canonicalizePairingHost(connectedHostBaseUrl(config.get('controlPlane.host'), config.get('controlPlane.port')));
+      if (!baseUrl) return unavailable('Select an exact HTTP(S) daemon origin.');
+      const pairing = readAgentHostPairing(current.homeDirectory, baseUrl);
+      if (pairing.status !== 'paired') return unavailable(pairing.status === 'unknown'
+        ? 'The selected Agent host pairing outcome is unknown; inspect it before importing.'
+        : 'An existing private Agent pairing for this exact host is required. Use /setup pair to inspect pairing.');
+      // Passive private state only: neither an unbound environment token nor a
+      // daemon-global credential can mask or replace this selected native owner.
+      return { baseUrl, token: pairing.token, workspace: realpathSync(current.workingDirectory),
+        selectionIdentity: selection.observe([current.homeDirectory, baseUrl, pairing]) };
+    } catch (error) { selection.retire(); throw error; }
   } });
 }): void { registerLegacyImportCommands(registry, open); }

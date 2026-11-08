@@ -23,6 +23,7 @@
  */
 
 export type { DaemonReachability, DaemonVerbCaller } from './daemon-verbs.js';
+export { OwnedSelectionObservation } from './selection-observation.js';
 
 export { createClientApprovalRaiser } from './approval-raiser.js';
 export type { ApprovalUpdateSubscriber, ClientApprovalRaiserOptions, LocalPermissionPrompt } from './approval-raiser.js';

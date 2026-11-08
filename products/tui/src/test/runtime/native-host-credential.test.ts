@@ -7,9 +7,12 @@ import { beginTuiHostPairing, completeTuiHostPairing, tuiHostPairingStorePath } 
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 function fixture() {
-  let host = 'https://host.example:4443'; let enabled = true; let home = makeProjectTempDir('native-credential');
-  const options = { homeDirectory: () => home, configManager: { get: (key: string) => key === 'daemon.enabled' ? enabled : key === 'controlPlane.publicBaseUrl' ? host : undefined } as unknown as ConfigManager };
-  return { options, get home() { return home; }, set home(value: string) { home = value; }, get host() { return host; }, set host(value: string) { host = value; }, set enabled(value: boolean) { enabled = value; } };
+  let host = 'https://host.example:4443'; let enabled = true; let home = makeProjectTempDir('native-credential'); let broken = false;
+  const options = { homeDirectory: () => home, configManager: { get: (key: string) => {
+    if (broken) throw new Error('Fixture config unavailable');
+    return key === 'daemon.enabled' ? enabled : key === 'controlPlane.publicBaseUrl' ? host : undefined;
+  } } as unknown as ConfigManager };
+  return { options, get home() { return home; }, set home(value: string) { home = value; }, get host() { return host; }, set host(value: string) { host = value; }, set enabled(value: boolean) { enabled = value; }, set broken(value: boolean) { broken = value; } };
 }
 async function seed(f: ReturnType<typeof fixture>) {
   await beginTuiHostPairing(f.home, f.host, { attemptId: 'attempt', name: 'Fixture', startedAt: 1 });
@@ -39,7 +42,22 @@ test('captured exact-origin credentials preserve scope-neutral read resolution a
   expect(resolveNativeHostCredential(f.options)).toEqual(initial); expect(readFileSync(path, 'utf8')).toBe(before);
   const changed = JSON.parse(before); changed.records[0].pairing.createdAt++;
   writeFileSync(path, JSON.stringify(changed)); expect(resolveNativeHostCredential(f.options).identity).not.toBe(initial.identity);
+  writeFileSync(path, before); expect(resolveNativeHostCredential(f.options).identity).not.toBe(initial.identity);
   for (const host of ['https://other.example:4443', 'http://host.example:4443', 'https://host.example:4444']) { f.host = host; expect(resolveNativeHostCredential(f.options).available).toBe(false); }
+});
+
+test('credential labels belong to their actual config owner and cannot survive an observed read failure', async () => {
+  const f = fixture(); await seed(f);
+  const initial = resolveNativeHostCredential(f.options);
+  expect(initial.identity).not.toContain('synthetic'); expect(initial.identity).not.toContain(f.home); expect(initial.identity).not.toContain(f.host);
+  const otherOwner = { get: f.options.configManager.get.bind(f.options.configManager) } as unknown as ConfigManager;
+  const other = resolveNativeHostCredential({ ...f.options, configManager: otherOwner });
+  expect(other.available).toBe(true); expect(other.identity).not.toBe(initial.identity);
+  expect(resolveNativeHostCredential(f.options).identity).toBe(initial.identity);
+  f.broken = true; expect(resolveNativeHostCredential(f.options).available).toBe(false);
+  f.broken = false;
+  const recovered = resolveNativeHostCredential(f.options);
+  expect(recovered.available).toBe(true); expect(recovered.identity).not.toBe(initial.identity);
 });
 
 for (const host of ['https://host.example:4443///', ' https://host.example:4443', 'https://host.example:4443?x=1', 'https://user@host.example:4443', 'https://host.example:4443/path/..']) test(`explicit malformed origin is not normalized into credential authority: ${host}`, async () => {

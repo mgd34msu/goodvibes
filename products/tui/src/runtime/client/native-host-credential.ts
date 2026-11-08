@@ -1,8 +1,14 @@
-import { createHash } from 'node:crypto';
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { resolveDaemonEnabled } from '@goodvibes-jev/engine/sdk/platform/config';
 import { resolveControlPlaneBaseUrl } from './operator-endpoint.ts';
 import { canonicalizePairingHost, readTuiHostPairing } from '../tui-host-credential-store.ts';
+
+// Actual config owners retain only their latest selected frame. No host/token
+// string is a process-global lookup key, and independent owners cannot share a label.
+const observations = new WeakMap<ConfigManager, OwnedSelectionObservation>();
+const getObservation = WeakMap.prototype.get, setObservation = WeakMap.prototype.set;
+const applyObservation = Reflect.apply;
 
 export interface NativeHostCredentialOptions {
   readonly configManager: ConfigManager;
@@ -23,15 +29,22 @@ export type NativeHostCredential =
  * Live scopes are enforced by each operation; a read does not require write/admin.
  */
 export function resolveNativeHostCredential(options: NativeHostCredentialOptions): NativeHostCredential {
+  let owner: ConfigManager | undefined;
   try {
+    owner = options.configManager;
     const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
-    const enabled = resolveDaemonEnabled(options.configManager);
-    const selected = resolveControlPlaneBaseUrl(options.configManager);
-    const baseUrl = resolveTuiHostOrigin(options.configManager);
+    const enabled = resolveDaemonEnabled(owner);
+    const selected = resolveControlPlaneBaseUrl(owner);
+    const baseUrl = resolveTuiHostOrigin(owner);
     const pairing = baseUrl ? readTuiHostPairing(home, baseUrl) : null;
     // Full state, not merely the bearer: replacement and indeterminate state
     // invalidate queued reads, permits and mutation preflights as well.
-    const identity = createHash('sha256').update(JSON.stringify([home, enabled, selected, baseUrl, pairing])).digest('hex');
+    let observation = applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined;
+    if (!observation) {
+      observation = new OwnedSelectionObservation();
+      applyObservation(setObservation, observations, [owner, observation]);
+    }
+    const identity = observation.observe([home, enabled, selected, baseUrl, pairing]);
     if (!enabled) return { available: false, identity, reason: 'Selected daemon is disabled.' };
     if (!baseUrl) return { available: false, identity, reason: 'Select an exact HTTP(S) daemon origin without a path, query, fragment or user information.' };
     if (pairing?.status === 'paired') return { available: true, baseUrl, token: pairing.token, identity };
@@ -39,6 +52,7 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     if (pairing?.status === 'unavailable') return { available: false, identity, reason: 'The TUI host credential store could not be read safely. Native work is unavailable.' };
     return { available: false, identity, reason: 'No TUI credential is bound to this exact daemon origin. Run goodvibes host pair --bootstrap-shared to review pairing, then use --apply in an owner terminal.' };
   } catch {
+    if (owner) (applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined)?.retire();
     return { available: false, identity: 'tui-host-credential-unavailable', reason: 'The selected TUI host credential is unavailable.' };
   }
 }

@@ -44,6 +44,7 @@ export interface AutomationJobStoreConfig {
 
 export class AutomationJobStore {
   private readonly store: PersistentStore<AutomationJobsSnapshot>;
+  private loading: Promise<AutomationJobsSnapshot> | undefined;
   /** Whole-file writes run one at a time, in call order. See StoreWriteQueue. */
   private readonly writes = new StoreWriteQueue();
   private readonly path: string;
@@ -76,6 +77,16 @@ export class AutomationJobStore {
   }
 
   async load(): Promise<AutomationJobsSnapshot> {
+    // Concurrent readers share the actual migration, rather than publishing
+    // separate phases/revisions for the same stored row.
+    if (this.loading) return structuredClone(await this.loading);
+    const work = this.loadSnapshot();
+    this.loading = work;
+    try { return await work; }
+    finally { if (this.loading === work) this.loading = undefined; }
+  }
+
+  private async loadSnapshot(): Promise<AutomationJobsSnapshot> {
     const before = this.fileIdentity();
     if (this.initialized && before !== this.identity) throw new AutomationJobMutationStaleError();
     const snapshot = validateSnapshot(await this.store.load());

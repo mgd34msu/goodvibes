@@ -25,7 +25,10 @@ test('automation migration persists a phase before exposure and preserves the pe
     const path = join(root, 'jobs.json'); const original = oldJob();
     writeFileSync(path, JSON.stringify({ version: 1, jobs: [original] }));
     const store = new AutomationJobStore(path);
-    const first = (await store.load()).jobs[0]!;
+    const [firstLoad, parallelLoad] = await Promise.all([store.load(), store.load()]);
+    const first = firstLoad.jobs[0]!;
+    expect(parallelLoad.jobs[0]?.schedule).toEqual(first.schedule);
+    expect(parallelLoad.jobs[0]?.mutationRevision).toBe(first.mutationRevision);
     expect(first.schedule.kind).toBe('cron');
     if (first.schedule.kind !== 'cron') throw new Error('Expected cron');
     const phase = first.schedule.staggerPhase;

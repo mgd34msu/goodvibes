@@ -802,6 +802,17 @@ native answers. Missing receipt evidence or interrupted account verification
 fails the wait instead of allowing a veto purchase as silence. Successfully
 consumed Telegram answers are acknowledged without creating a chat turn.
 
+Before a native notice is sent, its reply inbox retains the serving Telegram
+ingress reader and starts verifying that original account. At the deadline it
+checks the same private session handle against the sending-bot receipt. Missing
+or pending verification, a stopped/replaced ingress, revoked credentials, or a
+retired facade fails the wait; another live session with the same bot ID cannot
+retroactively establish silence. This check performs no provider request at
+expiry. The paired Payments controls remain usable before expiry even when
+the channel source is unavailable. Shutdown drains admitted account reads.
+Live source custody does not establish missed-message coverage; durable reply
+history, downtime coverage and restart continuation remain unfinished.
+
 Telegram's retained update queue is bounded and is not a complete chat-history
 service; restart recovery must establish which replies were actually received
 before applying any silence rule. See the [Telegram Bot API update contract](https://core.telegram.org/bots/api#getting-updates).
@@ -972,7 +983,8 @@ concurrent purchases cannot overwrite the text used to interpret another
 purchase's answer. A second live wait for the same purchase is refused. A late
 reading from a closed window cannot settle a replacement window.
 
-Only a deadline with no unresolved reply reading means silence. Cancellation,
+Only a deadline with no unresolved reply reading and a current original native
+channel source can mean silence. Cancellation,
 a failed decision-model reply reading, or a reply still being read at the
 deadline fails the wait instead. This matters especially for veto windows:
 an unavailable reader must not be treated as the owner choosing not to object.

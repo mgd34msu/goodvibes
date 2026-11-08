@@ -135,10 +135,14 @@ export class DaemonSurfaceActionHelper {
 
   constructor(private readonly context: DaemonSurfaceActionContext) {
     this.paymentReplies = context.paymentReplies ?? new PaymentReplyInbox();
+    this.paymentReplies.bindTelegramSource(context.telegramSourceAccounts, this.controlAbort.signal);
   }
 
   startDelegatedTelegram(): void {
-    if (this.controlAbort.signal.aborted) this.controlAbort = new AbortController();
+    if (this.controlAbort.signal.aborted) {
+      this.controlAbort = new AbortController();
+      this.paymentReplies.bindTelegramSource(this.context.telegramSourceAccounts, this.controlAbort.signal);
+    }
     this.context.delegatedTelegram?.startLifecycle();
   }
   closeDelegatedTelegram(): void {

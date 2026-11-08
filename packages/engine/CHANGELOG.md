@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Retain the original Telegram ingress account before sending native payment
+  notices and recheck its private session handle at window expiry. A missing,
+  pending, retired or replaced source cannot become veto silence through a
+  receipt account ID. Keep paired operator answers usable and drain admitted
+  account reads during shutdown. Durable missed-reply coverage remains unfinished.
+
 - Add explicit previous-cursor migration through WebUI Settings → Surfaces and
   the shared TUI/Agent `/channels telegram-cursor` picker. Verify the selected
   bot, retain the original offset/time and exact file preparation, consume one

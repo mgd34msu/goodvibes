@@ -27,6 +27,8 @@ import type { ChannelDeliveryReceipt } from '../channels/delivery/types.js';
 import { capturePaymentNoticeReceipt } from './notice-receipt.js';
 import type { ChannelDelivery } from './windows.js';
 import type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
+import type { TelegramSourceAccountReader } from '../channels/telegram/source-account.js';
+import { PaymentReplySourceOwner, type PaymentReplySourceGuard } from './reply-source-owner.js';
 export type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
 
 interface Waiter {
@@ -42,6 +44,7 @@ interface Waiter {
   readonly receptionReady: Promise<void>;
   readonly abort: AbortController;
   readings: number;
+  source: PaymentReplySourceGuard | undefined;
   expire(): void;
   settle(answer: { readonly answer: PaymentAnswer; readonly channel: PaymentAnswerChannel } | null): void;
   cancel(error: Error): void;
@@ -101,9 +104,16 @@ export class PaymentReplyInbox implements PaymentReplySource {
   #closing: Promise<void> | null = null;
   readonly #incarnation = crypto.randomUUID();
   #windowSequence = 0;
+  readonly #sources = new PaymentReplySourceOwner();
 
   constructor(options: { readonly now?: () => number } = {}) {
     this.#now = options.now ?? Date.now;
+  }
+
+  /** Composition-only binding to the same ingress owner used for channel
+   * replies. Rebinding retires prior preparations; it does no provider I/O. */
+  bindTelegramSource(reader: TelegramSourceAccountReader | undefined, lifetime: AbortSignal): void {
+    this.#sources.bindTelegram(reader, lifetime);
   }
 
   waitForAnswer(input: Parameters<PaymentReplySource['waitForAnswer']>[0]): ReturnType<PaymentReplySource['waitForAnswer']> {
@@ -169,6 +179,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
       windowId: `payment-window:${this.#incarnation}:${++this.#windowSequence}`,
       abort: new AbortController(),
       readings: 0,
+      source: undefined,
       expire: () => {
         if (!this.current(waiter)) return;
         const deadlineMs = waiter.deadlineMs;
@@ -176,9 +187,15 @@ export class PaymentReplyInbox implements PaymentReplySource {
         const now = this.currentTime();
         if (now === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return; }
         if (now < deadlineMs) { armTimer(); return; }
-        if (waiter.requireDeliveryReceipt && waiter.armedChannels?.some(channel => !waiter.receipts.get(channel)?.accountId)) waiter.cancel(new PaymentReplyWindowError('source-unavailable'));
-        else if (waiter.readings > 0) waiter.cancel(new PaymentReplyWindowError('unsettled-reply'));
-        else waiter.settle(null);
+        if (waiter.requireDeliveryReceipt && waiter.armedChannels?.some(channel => !waiter.receipts.get(channel)?.accountId)) { waiter.cancel(new PaymentReplyWindowError('source-unavailable')); return; }
+        if (waiter.readings > 0) { waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
+        if (waiter.requireDeliveryReceipt && waiter.armedChannels?.includes('telegram')) {
+          try {
+            if (!waiter.source) throw new Error();
+            waiter.source.assertReceiptCurrent(waiter.receipts.get('telegram'));
+          } catch { waiter.cancel(new PaymentReplyWindowError('source-unavailable')); return; }
+        }
+        waiter.settle(null);
       },
       settle: (answer) => {
         if (!remove()) return;
@@ -195,6 +212,9 @@ export class PaymentReplyInbox implements PaymentReplySource {
     this.#waiting.set(purchaseId, waiter);
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
+    if (requireDeliveryReceipt && channels.includes('telegram') && this.current(waiter)) {
+      waiter.source = this.#sources.reserveTelegram(waiter.abort.signal);
+    }
     return Object.freeze({
       waitForAnswer: (armed: { readonly deadlineMs: number; readonly channels: readonly CommandAuthorityChannel[]; readonly deliveries?: readonly ChannelDelivery[] | undefined }) => {
         if (!this.current(waiter)) return waiting;
@@ -241,7 +261,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
     this.#closed = true;
     const error = new PaymentReplyInboxClosedError();
     for (const waiter of this.#waiting.values()) waiter.cancel(error);
-    void Promise.allSettled(this.#offers).then(() => finish());
+    void Promise.allSettled([...this.#offers, this.#sources.close()]).then(() => finish());
     return this.#closing;
   }
 

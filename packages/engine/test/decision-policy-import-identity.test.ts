@@ -17,6 +17,14 @@ test('source and published policy entrypoints share Classic, Preferred fallback,
       assert.equal(await built.decisionOrClassic(async () => { decisions++; return 'decision'; }, () => 'classic'), 'classic');
       source.rememberDecisionRefusal('bound-refusal');
       assert.equal(built.wasDecisionRefused('bound-refusal'), true);
+      const first = { tool: 'read', args: { path: 'source.txt' }, directory: '/workspace' };
+      const second = { tool: 'write', args: { path: 'published.txt', data: undefined }, directory: '/workspace' };
+      assert.equal(source.wasDecisionRefused(second), false);
+      source.rememberDecisionRefusal(first);
+      assert.equal(built.wasDecisionRefused({ ...first, args: { path: 'source.txt' } }), true);
+      built.rememberDecisionRefusal(second);
+      assert.equal(source.wasDecisionRefused({ ...second, args: { data: undefined, path: 'published.txt' } }), true);
+      assert.equal(source.wasDecisionRefused({ ...second, args: { path: 'published.txt' } }), false);
     });
     assert.equal(decisions, 0);
     await built.withDecisionModelPolicy(() => 'Preferred', async () => {

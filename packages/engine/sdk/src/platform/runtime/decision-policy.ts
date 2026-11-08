@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { JudgmentError } from '@goodvibes-jev/judgment';
@@ -23,6 +22,66 @@ export class DecisionModelPolicyChangedError extends Error {
 }
 
 export type RefusedDecisionAction = string | Readonly<{ tool: string; args: Readonly<Record<string, unknown>>; directory: string | null }>;
+
+interface RefusalIndex {
+  readonly keys: Set<string>;
+  readonly pending: Iterator<RefusedDecisionAction>;
+  observed: number;
+}
+// The v1 shared host keeps its original append-only Set for mixed source/dist
+// consumers. This cache dies with that operation; it retains no global history.
+const refusalIndexes = new WeakMap<Set<RefusedDecisionAction>, RefusalIndex>();
+
+/** Exact structural encoding of a captured snapshot, without a digest.
+ * JSON.stringify alone merges undefined/missing, sparse arrays and -0/0.
+ * Explicit types, lengths and sorted own keys preserve those distinctions.
+ * The iterative walk also accepts the same deep inputs as captureOwnedJson.
+ */
+function refusalKey(value: RefusedDecisionAction): string {
+  const parts: string[] = [];
+  type Work = { readonly value: unknown } | { readonly key: string };
+  const pending: Work[] = [{ value }];
+  while (pending.length > 0) {
+    const work = pending.pop();
+    if (work === undefined) break;
+    if ('key' in work) { parts.push(JSON.stringify(work.key)); continue; }
+    const entry = work.value;
+    if (entry === null) { parts.push('null;'); continue; }
+    switch (typeof entry) {
+      case 'undefined': parts.push('undefined;'); break;
+      case 'boolean': parts.push(entry ? 'true;' : 'false;'); break;
+      case 'number': parts.push(Object.is(entry, -0) ? '-0;' : `${entry};`); break;
+      case 'string': parts.push(JSON.stringify(entry)); break;
+      case 'object': {
+        // Every value came from captureOwnedJson: plain frozen data only.
+        const keys = Object.keys(entry).sort();
+        parts.push(Array.isArray(entry) ? `array:${entry.length}:` : 'object:', `${keys.length}:`);
+        const object = entry as Readonly<Record<string, unknown>>;
+        for (const key of keys.reverse()) pending.push({ value: object[key] }, { key });
+        break;
+      }
+      default: throw new Error('Decision refusal snapshot is unavailable');
+    }
+  }
+  return parts.join('');
+}
+
+function refusalIndex(refusals: Set<RefusedDecisionAction>): RefusalIndex {
+  let index = refusalIndexes.get(refusals);
+  if (index === undefined) {
+    index = { keys: new Set(), pending: refusals.values(), observed: 0 };
+    refusalIndexes.set(refusals, index);
+  }
+  // Another published/source entrypoint may have appended. Never request an
+  // iterator's done result: a completed Set iterator cannot see future adds.
+  while (index.observed < refusals.size) {
+    const next = index.pending.next();
+    if (next.done) throw new Error('Decision refusal memory is unavailable');
+    if (typeof next.value !== 'string') index.keys.add(refusalKey(next.value));
+    index.observed++;
+  }
+  return index;
+}
 
 interface PolicyScope {
   readonly policy: DecisionModelPolicy;
@@ -152,17 +211,18 @@ export function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => 
 export function rememberDecisionRefusal(action: RefusedDecisionAction): void {
   const refusals = scopes.getStore()?.state.refusals;
   if (!refusals) return;
+  if (typeof action === 'string') { refusals.add(action); return; }
   const captured = captureOwnedJson(action) as RefusedDecisionAction;
-  for (const previous of refusals) if (isDeepStrictEqual(previous, captured)) return;
+  const index = refusalIndex(refusals);
+  if (index.keys.has(refusalKey(captured))) return;
   refusals.add(captured);
 }
 export function wasDecisionRefused(action: RefusedDecisionAction): boolean {
   const refusals = scopes.getStore()?.state.refusals;
   if (!refusals) return false;
   if (typeof action === 'string') return refusals.has(action);
-  const captured = captureOwnedJson(action);
-  for (const previous of refusals) if (isDeepStrictEqual(previous, captured)) return true;
-  return false;
+  const captured = captureOwnedJson(action) as RefusedDecisionAction;
+  return refusalIndex(refusals).keys.has(refusalKey(captured));
 }
 
 /** Explicit capability report for genuinely decision-only features. */

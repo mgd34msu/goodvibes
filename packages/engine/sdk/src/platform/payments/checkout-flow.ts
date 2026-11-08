@@ -665,16 +665,19 @@ export async function runCheckout(
 
   if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before payment entry. Nothing was submitted.'); }
   await registry.advance(request.purchaseId, 'arming-payment', {}, now());
-  const fill = await fillCard(
-    {
-      sessionId: identity.sessionId,
-      pageId: identity.pageId,
-      targets: controls.cardFields,
-      expirySeparator: controls.expirySeparator,
-      twoDigitYear: controls.twoDigitYear,
-    },
-    { registry, cards: deps.cards, redactor: deps.redactor, driver },
-  );
+  let fill: Awaited<ReturnType<typeof fillCard>>;
+  try {
+    fill = await fillCard(
+      {
+        sessionId: identity.sessionId,
+        pageId: identity.pageId,
+        targets: controls.cardFields,
+        expirySeparator: controls.expirySeparator,
+        twoDigitYear: controls.twoDigitYear,
+      },
+      { registry, cards: deps.cards, redactor: deps.redactor, driver, signal, assertCurrent: addressCurrent },
+    );
+  } catch (error) { await release(); throw error; }
   if (!fill.ok) {
     await release();
     return refused(

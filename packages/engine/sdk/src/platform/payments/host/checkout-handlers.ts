@@ -650,7 +650,7 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
  * never read by a fill.
  */
 export function checkoutFillCardHandler(deps: PaymentsHandlerDeps, holder: CheckoutServiceHolder): TypedHandler<unknown, Record<string, unknown>> {
-  return async ({ body }) => {
+  return async ({ body, context }) => {
     const params = asRecord(body);
     const input = parseFillCardInput(params);
 
@@ -662,7 +662,7 @@ export function checkoutFillCardHandler(deps: PaymentsHandlerDeps, holder: Check
     const service = holder.serviceFor(seam);
 
     try {
-      const result = await service.fillCardIntoCheckout(input);
+      const result = await service.fillCardIntoCheckout(input, { signal: context.signal });
       return fillCardResultView(result);
     } catch (error) {
       // A `FillCardRefusal` is the owner's business and carries no material

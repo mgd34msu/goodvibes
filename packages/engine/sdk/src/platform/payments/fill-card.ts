@@ -58,6 +58,7 @@
  * caught here and replaced with a sentence this module wrote.
  */
 import { validateLinkTarget } from '../security/link-validation.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { cardFieldValue, type CardFieldName, type CardMaterialStore } from './card-material.js';
 import type { CardFieldKind, CardMaterialRedactor } from './card-redaction.js';
 import type { CheckoutPageDriver } from './checkout-page.js';
@@ -113,6 +114,8 @@ export interface FillCardDeps {
   readonly cards: CardMaterialStore;
   readonly redactor: CardMaterialRedactor;
   readonly driver: CheckoutPageDriver;
+  readonly signal?: AbortSignal | undefined;
+  readonly assertCurrent?: (() => void) | undefined;
 }
 
 /**
@@ -135,6 +138,22 @@ export async function fillCard(
   deps: FillCardDeps,
 ): Promise<FillCardResult> {
   const { registry, cards, redactor, driver } = deps;
+  const signal = deps.signal;
+  const assertOwner = deps.assertCurrent;
+  // Keep the originally requested page and fields through every await.
+  request = { ...request, targets: request.targets.map(target => ({ ...target })) };
+  const changed = (): FillCardRefusal => new FillCardRefusal(
+    'Refused: this purchase changed or was cancelled before card entry finished.',
+    'Inspect the original purchase before trying to fill the card again.',
+  );
+  const currentOwner = (): void => {
+    try {
+      signal?.throwIfAborted();
+      const validity: unknown = assertOwner?.();
+      if (validity !== undefined) { drainOwned(validity); throw changed(); }
+    } catch { throw changed(); }
+  };
+  currentOwner();
 
   if (request.targets.length === 0) {
     throw new FillCardRefusal(
@@ -159,10 +178,17 @@ export async function fillCard(
       'Let the purchase reach the payment stage before filling the card.',
     );
   }
+  const assertCheckout = (): void => {
+    currentOwner();
+    if (registry.current(request.sessionId, request.pageId) !== checkout) throw changed();
+  };
+  assertCheckout();
 
   // ── 2. The page must still be the merchant the purchase was decided for ──
   const pageUrl = await driver.url();
-  const validation = await validateLinkTarget(pageUrl, checkout.merchantDomain);
+  assertCheckout();
+  const validation = await validateLinkTarget(pageUrl, checkout.merchantDomain, signal);
+  assertCheckout();
   if (!validation.ok) {
     throw new FillCardRefusal(
       `Refused: this purchase was decided for "${checkout.merchantDomain}" and this page is not on it. `
@@ -185,6 +211,7 @@ export async function fillCard(
 
   // ── 4. Complete material or nothing ─────────────────────────────────────
   const material = await cards.read(checkout.cardId);
+  assertCheckout();
   if (material === null) {
     throw new FillCardRefusal(
       'Refused: that card\'s stored details are incomplete, so I would be filling part of a payment form.',
@@ -207,6 +234,7 @@ export async function fillCard(
     { kind: 'cardholder', value: material.cardholderName },
     { kind: 'expiry', value: cardFieldValue(material, 'expiry', options) },
   ]);
+  assertCheckout();
 
   // Every field's value is computed FIRST, so an incomplete stored card
   // refuses before anything is typed rather than after some fields already
@@ -237,9 +265,12 @@ export async function fillCard(
 
   let outcome: { readonly filledTargets: readonly string[]; readonly failedTarget: string | null };
   try {
+    assertCheckout();
     outcome = await driver.fillSecrets(
       request.targets.map((target, index) => ({ target: target.target, value: values[index]!, kind: kindOf(target.field) })),
+      { assertCurrent: assertCheckout, signal },
     );
+    assertCheckout();
   } catch (error) {
     // The driver's own message is discarded rather than wrapped. A fill error
     // from a browser can quote the string it was asked to type, and an error

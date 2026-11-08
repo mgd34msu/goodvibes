@@ -578,7 +578,9 @@ export class PaymentsGatewayServiceImpl {
     readonly targets: readonly { readonly field: string; readonly ref: string }[];
     readonly expirySeparator: string | undefined;
     readonly twoDigitYear: boolean | undefined;
-  }): Promise<PaymentFillCardResult> {
+  }, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<PaymentFillCardResult> {
+    const signal = options.signal;
+    signal?.throwIfAborted();
     const targets: CardFieldTarget[] = [];
     for (const entry of input.targets) {
       if (!isCardFieldName(entry.field)) {
@@ -603,6 +605,7 @@ export class PaymentsGatewayServiceImpl {
         cards: this.deps.cards,
         redactor: this.redactor,
         driver: this.deps.driverFor(input.sessionId, input.pageId),
+        signal,
       },
     );
     return {

@@ -111,7 +111,8 @@ function refuse(
  * request; a matching domain still needs the semantic checks in decision mode.
  * Classic accepts the deterministic match with explicit Classic provenance.
  */
-export async function validateLinkTarget(rawUrl: string, authorizedDomain: string): Promise<LinkValidation> {
+export async function validateLinkTarget(rawUrl: string, authorizedDomain: string, signal?: AbortSignal): Promise<LinkValidation> {
+  signal?.throwIfAborted();
   const expected = registrableDomain(normalizeHost(authorizedDomain));
   if (expected === null) {
     return refuse(
@@ -182,7 +183,8 @@ export async function validateLinkTarget(rawUrl: string, authorizedDomain: strin
   // Even an exact host match may be an owner/discovery-selected shortener or
   // lookalike. Domain equality does not settle those separate semantic checks.
   return decisionOrClassic<LinkValidation>(async () => {
-    const run = await linkHost.run(judgmentPort(LINK_HOST_SITE), linkHostView(host, actual, expected), { site: LINK_HOST_SITE });
+    const run = await linkHost.run(judgmentPort(LINK_HOST_SITE), linkHostView(host, actual, expected), { site: LINK_HOST_SITE, ...(signal === undefined ? {} : { signal }) });
+    signal?.throwIfAborted();
     const refusesOn = (reading: (typeof run.readings)['lookalike']): boolean =>
       !(reading.verdict === 'no' && reading.outcome === 'act');
 
@@ -209,7 +211,7 @@ export async function validateLinkTarget(rawUrl: string, authorizedDomain: strin
     }
     run.recordAction('accepted');
     return accepted;
-  }, () => ({ ...accepted, provenance: 'classic' }));
+  }, () => { signal?.throwIfAborted(); return { ...accepted, provenance: 'classic' }; });
 }
 
 /** A single HEAD/GET that reports only what redirect following needs. */

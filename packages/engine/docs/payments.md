@@ -825,6 +825,13 @@ page until removal finishes. Reservation IDs are unique among live holds, and
 a full reservation table refuses new work rather than evicting another
 purchase's hold.
 
+Card entry retains that exact published purchase record and rechecks it after
+page lookup, link interpretation, card lookup and browser initialization. The
+original cancellation signal and stored-address guard reach the browser batch
+writer, which checks ownership around its element waits and field actions. A
+closed, replaced or advancing purchase cannot reuse an earlier fill preparation.
+A partial or cancelled fill keeps page-lifetime card redaction armed.
+
 `ApprovalBroker` itself does now re-arm restored timers on `start()`
 (`rearmRestoredTimers()`, added to close exactly the restart gap this section
 used to describe), so a *tool-permission* approval built on the broker is

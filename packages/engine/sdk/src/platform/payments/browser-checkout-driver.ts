@@ -137,6 +137,7 @@ export interface CheckoutBrowserEngine {
   fillSecretBatch: (
     target: CheckoutEngineTarget,
     args: { readonly fills: readonly { readonly ref: string; readonly value: string }[] },
+    ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined },
   ) => Promise<Record<string, unknown>>;
   select: (target: CheckoutEngineTarget, args: { readonly ref: string; readonly values: readonly string[] }) => Promise<Record<string, unknown>>;
   click: (target: CheckoutEngineTarget, args: { readonly ref: string }, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }) => Promise<Record<string, unknown>>;
@@ -291,9 +292,15 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
 
   async fillSecrets(
     fields: readonly { readonly target: string; readonly value: string; readonly kind: CardFieldKind }[],
+    ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined },
   ): Promise<{ readonly filledTargets: readonly string[]; readonly failedTarget: string | null }> {
+    fields = fields.map(field => ({ ...field }));
+    const owner = ownership && { ...ownership };
+    const current = (): void => { owner?.signal?.throwIfAborted(); owner?.assertCurrent(); };
+    current();
     if (fields.length === 0) return { filledTargets: [], failedTarget: null };
     const engine = await this.engine();
+    current();
     // The flow arms before it fills, once, for every field in the batch. A
     // guard with nothing live for this page is therefore not the object the
     // flow armed, whichever object the engine holds, and typing now would put
@@ -307,7 +314,8 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     }
     const result = await engine.fillSecretBatch(this.target, {
       fills: fields.map((field) => ({ ref: field.target, value: field.value })),
-    });
+    }, owner);
+    current();
     const filled = result['filled'];
     const failedRef = result['failedRef'];
     return {

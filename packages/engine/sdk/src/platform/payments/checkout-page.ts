@@ -67,8 +67,12 @@ export interface CheckoutPageDriver {
    * failure the implementation could not attribute to any one target at all,
    * a caller catching one has no more specific field to report than "the card
    * fields".
+   *
+   * Ownership must be checked after resolving the driver/page and immediately
+   * before each field write, including any waits inside the browser adapter.
    */
-  fillSecrets(fields: readonly { readonly target: string; readonly value: string; readonly kind: CardFieldKind }[]): Promise<{
+  fillSecrets(fields: readonly { readonly target: string; readonly value: string; readonly kind: CardFieldKind }[],
+    ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<{
     readonly filledTargets: readonly string[];
     readonly failedTarget: string | null;
   }>;

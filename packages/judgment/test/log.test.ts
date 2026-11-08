@@ -1,5 +1,5 @@
 import { Database } from 'bun:sqlite';
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -53,6 +53,22 @@ let clock = Date.parse('2026-09-26T00:00:00Z');
 const tick = () => new Date((clock += 60_000));
 
 describe('withDecisionLog + SqliteDecisionLog', () => {
+  test('borrowed ports without lineage retain every fallback UUID bit without decimal runs on success and failure', async () => {
+    const uuid = spyOn(crypto, 'randomUUID').mockReturnValue('01234567-89ab-4cde-8f01-23456789abcd');
+    try {
+      for (const inner of [answering(0.93), failing]) {
+        using log = new SqliteDecisionLog(':memory:');
+        const port = withDecisionLog(inner, log, tick);
+        const result = await port.ask({ state: 'opaque fallback', questions: { urgent: { type: 'noul', instructions: 'Urgent?' } } }).catch((error: unknown) => error);
+        const entry = log.query()[0];
+        if (!entry) throw new Error('Missing recorded call');
+        expect(entry.status).toBe(inner === failing ? 'failed' : 'answered');
+        if (inner === failing) expect(result).toBeInstanceOf(JudgmentError);
+        expect(entry.lineage).toEqual({ logicalRequestId: 'abcdefgh-ijkl-emno-ipab-cdefghijklmn', attempts: [] });
+      }
+    } finally { uuid.mockRestore(); }
+  });
+
   test('preserves every note in recording order while latest-value helpers remain compatible', async () => {
     using log = new SqliteDecisionLog(':memory:');
     const result = await withDecisionLog(answering(0.93), log, tick).ask({ state: 'audit', questions: { urgent: { type: 'noul', instructions: 'Urgent?' } } });

@@ -7,6 +7,7 @@ import { JudgmentContextLimitError, JudgmentError } from './errors.ts';
 import { requiresLongContext, validateContextBudget, validateQuestions } from './limits.ts';
 import { withRequestId } from './request-id.ts';
 import { interruptible, retryDelay, retryPolicy } from './retry.ts';
+import { opaqueUuid } from './opaque-uuid.ts';
 import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
 
 function needsContextUpgrade(error: unknown): boolean {
@@ -49,10 +50,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
     }),
     async ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
       const started = performance.now();
-      // These locally generated opaque keys need no decimal spelling. Retain
-      // every UUID bit without accidental card-shaped runs across hyphens.
-      const logicalRequestId = crypto.randomUUID().replace(/[0-9a-f]/g,
-        nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)));
+      const logicalRequestId = opaqueUuid();
       const attempts: JudgmentAttempt[] = [];
       let attemptCount = 0;
       const lineage = () => ({ logicalRequestId, attempts: [...attempts],

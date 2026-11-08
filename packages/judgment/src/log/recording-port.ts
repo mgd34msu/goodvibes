@@ -1,4 +1,5 @@
 import { drainOwned } from '../drain-owned.ts';
+import { opaqueUuid } from '../port/opaque-uuid.ts';
 import { types as nodeTypes } from 'node:util';
 import { checkAnswers, projectAnswers } from '../port/answers.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentErrorKind } from '../port/errors.ts';
@@ -258,7 +259,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
           requestedModel: requestedModel ?? '',
           latencyMs: performance.now() - started,
           requestId: failure.requestId,
-          lineage: failure.lineage ?? { logicalRequestId: crypto.randomUUID(), attempts: [] },
+          lineage: failure.lineage ?? { logicalRequestId: opaqueUuid(), attempts: [] },
           error: { kind: failure.kind, message: failure.message },
         };
         // Failure projection can itself call borrowed getters. A refused
@@ -276,7 +277,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
         latencyMs: result.latencyMs,
         usage: result.usage,
         requestId: result.requestId,
-        lineage: result.lineage ?? { logicalRequestId: crypto.randomUUID(), attempts: [] },
+        lineage: result.lineage ?? { logicalRequestId: opaqueUuid(), attempts: [] },
       }));
       assertLogCurrent(logAssertion);
       const decisionId = recorded(() => log.record(entry));

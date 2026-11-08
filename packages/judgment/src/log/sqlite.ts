@@ -1,5 +1,6 @@
 import type { Database, Statement } from 'bun:sqlite';
 import type { JsonValue } from '../port/types.ts';
+import { opaqueUuid } from '../port/opaque-uuid.ts';
 import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionTruth, NewDecisionEntry } from './types.ts';
 import { COLUMNS, NOTES_TABLE, TABLE, openLog, rowsOf, type Params } from './sqlite-schema.ts';
 
@@ -95,10 +96,7 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   }
 
   record(entry: NewDecisionEntry): DecisionId {
-    // Preserve all UUID entropy while keeping opaque generated keys free of
-    // decimal runs that can resemble card material. Map every hex nibble,
-    // including a–f, bijectively; existing stored keys remain unchanged.
-    const id = Bun.randomUUIDv7().replace(/[0-9a-f]/g, (nibble) => String.fromCharCode(97 + Number.parseInt(nibble, 16))) as DecisionId;
+    const id = opaqueUuid(Bun.randomUUIDv7()) as DecisionId;
     this.#insert.run(toParams(id, entry));
     return id;
   }

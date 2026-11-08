@@ -83,6 +83,8 @@ export interface WorkspaceCheckpoint {
 
 /** Result of `WorkspaceCheckpointManager.diff()`. */
 export interface CheckpointDiff {
+  /** This manager's exact live diff read; stale/retired views must be refreshed before intake. */
+  readonly nativeRevision?: string;
   /** The checkpoint id (or ref) diffed from. */
   readonly from: string;
   /** The checkpoint id diffed to, or the literal string 'WORKING' when diffed against the live working tree. */
@@ -104,6 +106,8 @@ export interface CheckpointDiff {
  * an honest "this session has no workspace checkpoints", not an error.
  */
 export interface CheckpointSessionChanges {
+  /** This manager's exact live aggregate read, not an execution capability. */
+  readonly nativeRevision?: string;
   /** The session id these changes belong to. */
   readonly sessionId: string;
   /** How many of this session's checkpoints the aggregate spans. */

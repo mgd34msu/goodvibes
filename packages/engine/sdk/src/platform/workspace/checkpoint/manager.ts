@@ -48,6 +48,7 @@ import { SideGitRunner, CHECKPOINT_REF_PREFIX, EMPTY_TREE_HASH, detectGitTopleve
 import { acquireCrossProcessLock } from './cross-process-lock.js';
 import { WorkspaceCheckpointPruner } from './pruner.js';
 import { computeSessionChanges } from './session-changes.js';
+import { CheckpointDiffObservations } from './diff-observations.js';
 import {
   BROAD_ROOT_OVERRIDE,
   DEFAULT_MAX_FIRST_SNAPSHOT_FILES,
@@ -130,6 +131,7 @@ export class WorkspaceCheckpointManager {
   private rootRefusal: string | null = null;
 
   private checkpoints = new Map<string, WorkspaceCheckpoint>();
+  private readonly diffObservations = new CheckpointDiffObservations();
   private initialized = false;
   private initPromise: Promise<void> | null = null;
 
@@ -510,7 +512,7 @@ export class WorkspaceCheckpointManager {
    */
   async diff(a: string, b?: string): Promise<CheckpointDiff> {
     await this.init();
-    return this.withLock(() => this.diffInternal(a, b));
+    return this.withLock(() => this.diffObservations.read(['checkpoint', a, b ?? 'WORKING'], () => this.diffInternal(a, b)));
   }
 
   private async diffInternal(a: string, b?: string): Promise<CheckpointDiff> {
@@ -543,7 +545,7 @@ export class WorkspaceCheckpointManager {
    */
   async sessionChanges(sessionId: string): Promise<CheckpointSessionChanges> {
     await this.init();
-    return this.withLock(() => computeSessionChanges(this.checkpoints, this.sideGit, sessionId));
+    return this.withLock(() => this.diffObservations.read(['session', sessionId], () => computeSessionChanges(this.checkpoints, this.sideGit, sessionId)));
   }
 
   /**
@@ -677,6 +679,7 @@ export class WorkspaceCheckpointManager {
 
   /** Unsubscribe from the runtime bus. Does not touch anything on disk. */
   dispose(): void {
+    this.diffObservations.clear();
     for (const unsub of this.unsubscribers) {
       try {
         unsub();
@@ -694,6 +697,7 @@ export class WorkspaceCheckpointManager {
     this.dispose(); // Initialization may have subscribed after the first dispose.
     let pending: Promise<void>;
     do { pending = this.lockChain; await pending; } while (pending !== this.lockChain);
+    this.diffObservations.clear();
   }
 
   // ---------------------------------------------------------------------------

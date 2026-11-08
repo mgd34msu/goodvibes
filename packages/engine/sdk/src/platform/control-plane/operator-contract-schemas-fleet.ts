@@ -19,6 +19,7 @@ import {
   nullableSchema,
 } from './operator-contract-schemas-shared.js';
 import { SHARED_SESSION_KIND_READ_SCHEMA, SHARED_SESSION_RECORD_SCHEMA } from './operator-contract-schemas-runtime.js';
+import { CHECKPOINT_DIFF_REVISION_PATTERN } from '../workspace/checkpoint/diff-observation-contract.js';
 
 const PROCESS_KIND_SCHEMA = enumSchema([
   'agent',
@@ -273,7 +274,7 @@ export const CHECKPOINT_DIFF_SCHEMA = objectSchema({
   from: STRING_SCHEMA,
   to: STRING_SCHEMA,
   files: STRING_LIST_SCHEMA,
-  nativeRevision: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  nativeRevision: { type: 'string', maxLength: 200, pattern: CHECKPOINT_DIFF_REVISION_PATTERN },
   unifiedDiff: STRING_SCHEMA,
   stat: STRING_SCHEMA,
 }, ['from', 'to', 'files', 'unifiedDiff', 'stat']);
@@ -587,7 +588,7 @@ export const SESSIONS_CHANGES_GET_OUTPUT_SCHEMA = objectSchema({
   from: STRING_SCHEMA,
   to: STRING_SCHEMA,
   files: STRING_LIST_SCHEMA,
-  nativeRevision: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  nativeRevision: { type: 'string', maxLength: 200, pattern: CHECKPOINT_DIFF_REVISION_PATTERN },
   unifiedDiff: STRING_SCHEMA,
   stat: STRING_SCHEMA,
 }, ['sessionId', 'checkpointCount', 'checkpointIds', 'from', 'to', 'files', 'unifiedDiff', 'stat']);

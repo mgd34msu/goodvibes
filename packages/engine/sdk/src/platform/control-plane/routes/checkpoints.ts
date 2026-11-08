@@ -185,7 +185,7 @@ export function createSessionChangesHandler(manager: CheckpointsGatewayManager):
     const params = readInvocationParams(invocation);
     const sessionId = requiredString(params.sessionId, 'sessionId');
     const changes = await manager.sessionChanges(sessionId);
-    return { ...changes, nativeRevision: createHash('sha256').update(changes.unifiedDiff).digest('hex') };
+    return changes;
   };
 }
 
@@ -216,7 +216,7 @@ export function createCheckpointsDiffHandler(manager: CheckpointsGatewayManager)
     const a = requiredString(params.a, 'a');
     const b = optionalString(params.b);
     const diff = await callOrHonestNotFound(() => manager.diff(a, b));
-    return { diff: { ...diff, nativeRevision: createHash('sha256').update(diff.unifiedDiff).digest('hex') } };
+    return { diff };
   };
 }
 

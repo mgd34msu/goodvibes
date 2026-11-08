@@ -18,7 +18,7 @@ export interface SessionHunkCommentSelection {
   kind: 'session' | 'workspace';
   baselineId?: string;
   unifiedDiff: string;
-  /** Host-written digest returned by the exact diff read; available on HTTP LAN too. */
+  /** Host-owned revision returned by the exact diff read; available on HTTP LAN too. */
   revision?: string;
   fileIndex: number;
   hunkIndex: number;
@@ -53,7 +53,7 @@ function NativeHunkComment({ binding, selection, filePath, hunk, capturedLabel, 
     const controller = new AbortController();
     void Promise.resolve().then(() => {
       // Shared strict segmentation prevents a tolerant display parser from selecting a
-      // different file/hunk. The digest is only an exact-read precondition, not authority.
+      // different file/hunk. The host's label binds its exact read, not authority.
       const preview = selectNativeDiffHunk(selection.unifiedDiff, selection.fileIndex, selection.hunkIndex);
       const parsed = parseUnifiedDiff(preview);
       if (parsed.length !== 1 || parsed[0].hunks.length !== 1 || parsed[0].path !== filePath ||

@@ -1,10 +1,11 @@
 /** Browser-safe selectors and exact quoted diff evidence. Neither conveys authority. */
 import { literal, number, strictObject, string, union, type z } from 'zod/v4';
+import { CHECKPOINT_DIFF_REVISION_PATTERN, CHECKPOINT_DIFF_SOURCE_MAX_BYTES as NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES } from '../../workspace/checkpoint/diff-observation-contract.js';
+export { NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES };
 
 export const NATIVE_SELECTED_DIFF_MAX_BYTES = 65_536;
-export const NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES = 4_194_304;
 const id = string().min(1).max(200);
-const selector = { revision: string().regex(/^[a-f0-9]{64}$/), fileIndex: number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), hunkIndex: number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) };
+const selector = { revision: string().max(200).regex(new RegExp(CHECKPOINT_DIFF_REVISION_PATTERN)), fileIndex: number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), hunkIndex: number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) };
 const sessionSelector = strictObject({ kind: literal('session'), ...selector });
 const workspaceSelector = strictObject({ kind: literal('workspace'), baselineId: id, ...selector });
 export const nativeSelectedDiffSelectorSchema = union([sessionSelector, workspaceSelector]);
@@ -13,14 +14,6 @@ export class NativeSelectedDiffError extends Error {
   constructor(readonly code: 'stale' | 'missing' | 'unsupported' | 'oversize') {
     super(`Native selected diff: ${code}`); this.name = 'NativeSelectedDiffError';
   }
-}
-
-/** SHA-256 of the exact full unified diff returned by the checkpoint read. */
-export async function nativeSelectedDiffRevision(unifiedDiff: string): Promise<string> {
-  const bytes = new TextEncoder().encode(unifiedDiff);
-  if (bytes.byteLength > NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES) throw new NativeSelectedDiffError('oversize');
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 /** Select raw file headers plus one complete hunk; never slice lines or synthesize headers. */

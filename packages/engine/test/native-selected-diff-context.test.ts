@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { captureNativeSelectedDiffContext, nativeSelectedDiffRevision, selectNativeDiffHunk, NATIVE_SELECTED_DIFF_MAX_BYTES, NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES } from '../sdk/src/platform/workflow/work-ledger/native-diff-context.js';
+import { captureNativeSelectedDiffContext, nativeSelectedDiffSelectorSchema, selectNativeDiffHunk, NATIVE_SELECTED_DIFF_MAX_BYTES, NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES } from '../sdk/src/platform/workflow/work-ledger/native-diff-context.js';
 import { canonicalNativeConversationContinuation, captureNativeConversationContinuation } from '../sdk/src/platform/workflow/work-ledger/native-continuation-context.js';
 import { nativeConversationIntakeCaptureRequestSchema } from '../sdk/src/platform/workflow/work-ledger/native-intake-wire.js';
 
@@ -8,10 +8,17 @@ const headers = 'diff --git a/source.ts b/source.ts\nindex 1234567..abcdef0 1006
 const hunk = '@@ -1,2 +1,2 @@ source\n--- original header-looking body\n+++ replacement header-looking body\n context\n';
 const another = '@@ -90 +90 @@ another\n-before\n+after\n';
 
-test('native diff selector hashes exact full bytes and keeps complete raw file headers and full hunk', async () => {
+test('diff selectors retain stored digest-shaped labels but do not accept arbitrary computed source identities', () => {
+  for (const revision of ['a'.repeat(64), 'checkpoint-diff:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:1']) {
+    expect(nativeSelectedDiffSelectorSchema.parse({ kind: 'session', revision, fileIndex: 0, hunkIndex: 0 }).revision).toBe(revision);
+  }
+  for (const revision of ['', 'client-computed-revision', 'checkpoint-diff:foreign:1', 'a'.repeat(201)]) {
+    expect(nativeSelectedDiffSelectorSchema.safeParse({ kind: 'session', revision, fileIndex: 0, hunkIndex: 0 }).success).toBe(false);
+  }
+});
+
+test('native diff selection keeps complete raw file headers and full hunk', () => {
   const diff = headers + hunk + another;
-  expect(await nativeSelectedDiffRevision(diff)).toBe(createHash('sha256').update(diff).digest('hex'));
-  expect(await nativeSelectedDiffRevision(diff + '\n')).not.toBe(await nativeSelectedDiffRevision(diff));
   expect(selectNativeDiffHunk(diff, 0, 0)).toBe(headers + hunk);
   expect(selectNativeDiffHunk(diff, 0, 1)).toBe(headers + another);
   const many = '@@ -0,0 +1,80 @@\n' + Array.from({ length: 80 }, (_, i) => `+line ${i} 🌻\n`).join('');
@@ -31,8 +38,8 @@ test('native diff selection refuses stale-shape, unsupported, missing and oversi
   expect(() => selectNativeDiffHunk('x'.repeat(NATIVE_SELECTED_DIFF_SOURCE_MAX_BYTES + 1), 0, 0)).toThrow('oversize');
 });
 
-test('selected evidence is deeply frozen, strict, session-bound, and fully revision-bound', async () => {
-  const selected = { kind: 'session' as const, revision: await nativeSelectedDiffRevision(headers + hunk), fileIndex: 0, hunkIndex: 0, unifiedDiff: headers + hunk,
+test('selected evidence is deeply frozen, strict, session-bound, and retains the host revision', () => {
+  const selected = { kind: 'session' as const, revision: 'checkpoint-diff:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:1', fileIndex: 0, hunkIndex: 0, unifiedDiff: headers + hunk,
     provenance: { kind: 'session' as const, sessionId: 'hosted', baselineCheckpointId: 'EMPTY', latestCheckpointId: 'wcp_latest' } };
   const captured = captureNativeSelectedDiffContext(selected);
   selected.provenance.latestCheckpointId = 'changed';

@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { WEBUI_METHOD_ROUTES } from '@goodvibes-jev/engine/contracts/generated/webui-facade';
-import { nativeConversationIntakeLookupResultSchema, nativeSelectedDiffRevision, selectNativeDiffHunk, type NativeConversationIntakeCaptureRequest, type NativeSelectedDiffSelector } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
+import { nativeConversationIntakeLookupResultSchema, selectNativeDiffHunk, type NativeConversationIntakeCaptureRequest, type NativeSelectedDiffSelector } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
 import { nativeHostedTurnLookupSchema } from '@goodvibes-jev/engine/sdk/platform/hosted-sessions/native-turn-client';
 import { nativeWorkExecutionSnapshotSchema } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-execution-client';
 import { createNativeIntakeExecutionHttpFixture } from '../helpers/native-intake-execution-http-fixture.js';
@@ -102,10 +102,11 @@ test('selected native diff stays exact host evidence through capture, changed wo
     const stamped = body(await wire('checkpoints.create', { kind: 'manual', label: 'Session-stamped selected change', sessionId })).checkpoint;
     const sessionDiff = await wire('sessions.changes.get', { sessionId });
     const actualSession = body(sessionDiff);
-    expect(actualSession.nativeRevision).toBe(await nativeSelectedDiffRevision(actualSession.unifiedDiff));
+    expect(actualSession.nativeRevision).toStartWith('checkpoint-diff:');
+    expect(body(await wire('sessions.changes.get', { sessionId })).nativeRevision).toBe(actualSession.nativeRevision);
     const fileIndex = actualSession.unifiedDiff.split(/(?=^diff --git )/m).filter(Boolean).findIndex((part: string) => part.startsWith('diff --git a/selected-change.ts b/selected-change.ts\n'));
     expect(fileIndex).toBeGreaterThanOrEqual(0);
-    const sessionSelector: NativeSelectedDiffSelector = { kind: 'session', revision: await nativeSelectedDiffRevision(actualSession.unifiedDiff), fileIndex, hunkIndex: 0 };
+    const sessionSelector: NativeSelectedDiffSelector = { kind: 'session', revision: actualSession.nativeRevision, fileIndex, hunkIndex: 0 };
     const catalog = f.daemon.services.gatewayMethods, getScopes = catalog.getAllScopes.bind(catalog);
     const grant = spyOn(catalog, 'getAllScopes').mockImplementation(options => getScopes(options).filter(scope => scope !== 'read:sessions'));
     try { expect((await wire('workLedger.intake.capture', command('missing-session-read', COMMENT, sessionSelector))).status).toBe(403); }
@@ -146,22 +147,23 @@ test('selected native diff stays exact host evidence through capture, changed wo
     expect(missingHunk.status).toBe(409); expect(missingHunk.body).toContain('NATIVE_SELECTED_DIFF_MISSING');
     writeFileSync(file, 'x'.repeat(70_000) + '\n');
     const large = body(await wire('checkpoints.diff', { a: stamped.id })).diff;
-    const largeSelector: NativeSelectedDiffSelector = { kind: 'workspace', baselineId: stamped.id, revision: await nativeSelectedDiffRevision(large.unifiedDiff), fileIndex: 0, hunkIndex: 0 };
+    const largeSelector: NativeSelectedDiffSelector = { kind: 'workspace', baselineId: stamped.id, revision: large.nativeRevision, fileIndex: 0, hunkIndex: 0 };
     const tooLarge = await wire('workLedger.intake.capture', command('oversize', COMMENT, largeSelector));
     expect(tooLarge.status).toBe(413); expect(tooLarge.body).toContain('NATIVE_SELECTED_DIFF_OVERSIZE');
     const absentBaseline = await wire('workLedger.intake.capture', command('missing-baseline', COMMENT, { ...largeSelector, baselineId: 'missing-checkpoint' }));
     expect(absentBaseline.status).toBe(409); expect(absentBaseline.body).toContain('NATIVE_SELECTED_DIFF_MISSING');
     writeFileSync(file, Buffer.from([0, 1, 2, 3]));
     const binary = body(await wire('checkpoints.diff', { a: stamped.id })).diff;
-    const unsupported = await wire('workLedger.intake.capture', command('binary', COMMENT, { ...largeSelector, revision: await nativeSelectedDiffRevision(binary.unifiedDiff) }));
+    const unsupported = await wire('workLedger.intake.capture', command('binary', COMMENT, { ...largeSelector, revision: binary.nativeRevision }));
     expect(unsupported.status).toBe(400); expect(unsupported.body).toContain('NATIVE_SELECTED_DIFF_UNSUPPORTED');
     writeFileSync(file, Array.from({ length: 80 }, (_, index) => `workspace changed line ${index} 🌻\n`).join(''));
     const checkpoints = await wire('checkpoints.list', {}); const workspaceBaselineId = body(checkpoints).checkpoints[0].id;
     const workspaceDiff = await wire('checkpoints.diff', { a: workspaceBaselineId });
     const actualWorkspace = body(workspaceDiff).diff;
-    expect(actualWorkspace.nativeRevision).toBe(await nativeSelectedDiffRevision(actualWorkspace.unifiedDiff));
+    expect(actualWorkspace.nativeRevision).toStartWith('checkpoint-diff:');
+    expect(body(await wire('checkpoints.diff', { a: workspaceBaselineId })).diff.nativeRevision).toBe(actualWorkspace.nativeRevision);
     const workspaceIndex = actualWorkspace.unifiedDiff.split(/(?=^diff --git )/m).filter(Boolean).findIndex((part: string) => part.startsWith('diff --git a/selected-change.ts b/selected-change.ts\n'));
-    const workspaceSelector: NativeSelectedDiffSelector = { kind: 'workspace', baselineId: workspaceBaselineId, revision: await nativeSelectedDiffRevision(actualWorkspace.unifiedDiff), fileIndex: workspaceIndex, hunkIndex: 0 };
+    const workspaceSelector: NativeSelectedDiffSelector = { kind: 'workspace', baselineId: workspaceBaselineId, revision: actualWorkspace.nativeRevision, fileIndex: workspaceIndex, hunkIndex: 0 };
     const workspaceGrant = spyOn(catalog, 'getAllScopes').mockImplementation(options => getScopes(options).filter(scope => scope !== 'read:checkpoints'));
     try { expect((await wire('workLedger.intake.capture', command('missing-workspace-read', WORK, workspaceSelector))).status).toBe(403); }
     finally { workspaceGrant.mockRestore(); }

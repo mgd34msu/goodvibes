@@ -5,7 +5,6 @@ import type { NativeHostedSessionLookup } from '@goodvibes-jev/engine/sdk/platfo
 import type { ComponentProps } from 'react';
 import type { NativeIntakeForm } from '../work/NativeIntakeForm';
 import { getClientLifetime, invalidateClientLifetime } from '../../lib/client-lifetime';
-import { nativeSelectedDiffRevision } from '@goodvibes-jev/engine/sdk/platform/workflow/work-ledger/native-intake-client';
 import { parseUnifiedDiff } from '../../lib/unified-diff';
 
 let discovered: () => Promise<NativeHostedSessionLookup>;
@@ -16,7 +15,7 @@ mock.module('../work/NativeIntakeForm', () => ({ NativeIntakeForm: (props: Compo
 const { SessionHunkComment } = await import('./SessionHunkComment');
 const roots: { root: Root; container: HTMLElement }[] = [];
 const original = 'diff --git a/notes.txt b/notes.txt\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n--- old heading\n+++ new heading\n';
-const originalRevision = await nativeSelectedDiffRevision(original);
+const originalRevision = 'checkpoint-diff:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:1';
 const pending = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; };
 const tick = async () => { for (let i = 0; i < 8; i++) { await new Promise(done => setTimeout(done, 0)); flushSync(() => {}); } };
 function render(overrides: Partial<ComponentProps<typeof SessionHunkComment>> = {}) {
@@ -45,7 +44,7 @@ test('native sheet binds the exact full selection separately and never mounts th
   expect(document.querySelector('.hunk-sheet__input')).toBeNull();
   expect(document.querySelector('[aria-label="Selected change"]')?.textContent).toBe(original);
   expect(nativeForms.at(-1)).toEqual({ lifetime: getClientLifetime(), continuationSessionId: 'native-session', projectId: 'native-project', closed: false,
-    selectedDiff: { kind: 'session', revision: await nativeSelectedDiffRevision(original), fileIndex: 0, hunkIndex: 0 } });
+    selectedDiff: { kind: 'session', revision: originalRevision, fileIndex: 0, hunkIndex: 0 } });
 });
 
 test('only explicit legacy discovery mounts the unchanged trimmed comment composer', async () => {
@@ -93,7 +92,7 @@ test('native preparation refuses a mismatched display or incomplete hunk rather 
 test('complete selected native hunk remains visible beyond the legacy forty-line excerpt cap', async () => {
   const large = `diff --git a/large.txt b/large.txt\n--- a/large.txt\n+++ b/large.txt\n@@ -0,0 +1,80 @@\n${Array.from({ length: 80 }, (_, i) => `+unique line ${i + 1}`).join('\n')}\n`;
   const file = parseUnifiedDiff(large)[0];
-  render({ filePath: file.path, hunk: file.hunks[0], selection: { kind: 'session', unifiedDiff: large, revision: await nativeSelectedDiffRevision(large), fileIndex: 0, hunkIndex: 0 } }); await tick();
+  render({ filePath: file.path, hunk: file.hunks[0], selection: { kind: 'session', unifiedDiff: large, revision: 'checkpoint-diff:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:2', fileIndex: 0, hunkIndex: 0 } }); await tick();
   expect(document.querySelector('[aria-label="Selected change"]')?.textContent).toBe(large);
   expect(nativeForms).toHaveLength(1);
   expect(document.body.textContent).not.toContain('truncated');
@@ -103,7 +102,7 @@ test('selection stays exact for an early hunk after a binary file and a later hu
   const binary = 'diff --git a/picture.png b/picture.png\nBinary files a/picture.png and b/picture.png differ\n';
   const multiple = binary + original + '@@ -10 +10 @@\n-later old\n+later new\n';
   const file = parseUnifiedDiff(multiple)[1];
-  render({ filePath: file.path, hunk: file.hunks[0], selection: { kind: 'session', unifiedDiff: multiple, revision: await nativeSelectedDiffRevision(multiple), fileIndex: 1, hunkIndex: 0 } }); await tick();
+  render({ filePath: file.path, hunk: file.hunks[0], selection: { kind: 'session', unifiedDiff: multiple, revision: 'checkpoint-diff:aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa:3', fileIndex: 1, hunkIndex: 0 } }); await tick();
   expect(nativeForms.at(-1)?.selectedDiff).toMatchObject({ fileIndex: 1, hunkIndex: 0 });
   expect(document.querySelector('[aria-label="Selected change"]')?.textContent).toBe(original);
 });

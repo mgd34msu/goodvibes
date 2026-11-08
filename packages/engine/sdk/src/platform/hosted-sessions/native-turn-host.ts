@@ -1,7 +1,7 @@
 /** Current native source + strict dispatch journal + actual hosted turn ownership. */
 import { createHash } from 'node:crypto';
 import { canonicalNativeConversationContinuation, captureNativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
-import { captureNativeSelectedDiffContext, nativeSelectedDiffRevision, selectNativeDiffHunk, NativeSelectedDiffError } from '../workflow/work-ledger/native-diff-context.js';
+import { captureNativeSelectedDiffContext, selectNativeDiffHunk, NativeSelectedDiffError } from '../workflow/work-ledger/native-diff-context.js';
 import type { WorkspaceCheckpointManager } from '../workspace/checkpoint/manager.js';
 import { realpathSync } from 'node:fs';
 import type { OperatorRemoteClient } from '@goodvibes-jev/engine/operator-sdk';
@@ -106,7 +106,7 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
         if (realpathSync(checkpoints.workspaceRoot) !== projectRoot) throw new NativeHostedTurnError('stale');
         if (selection.kind === 'session' && (!('sessionId' in diff) || !('checkpointCount' in diff) || diff.sessionId !== sessionId || typeof diff.checkpointCount !== 'number' || diff.checkpointCount < 1 || diff.to === 'EMPTY')) throw new NativeSelectedDiffError('missing');
         if (selection.kind === 'workspace' && (diff.from !== selection.baselineId || diff.to !== 'WORKING')) throw new NativeSelectedDiffError('stale');
-        if (await nativeSelectedDiffRevision(diff.unifiedDiff) !== selection.revision) throw new NativeSelectedDiffError('stale');
+        if (diff.nativeRevision === undefined || diff.nativeRevision !== selection.revision) throw new NativeSelectedDiffError('stale');
         const selectedDiff = captureNativeSelectedDiffContext({ ...selection, unifiedDiff: selectNativeDiffHunk(diff.unifiedDiff, selection.fileIndex, selection.hunkIndex),
           provenance: selection.kind === 'session' ? { kind: 'session', sessionId, baselineCheckpointId: diff.from, latestCheckpointId: diff.to }
             : { kind: 'workspace', baselineId: diff.from, to: 'WORKING' } });

@@ -1,5 +1,4 @@
 /** Native source, checkpoints, and outcomes are unchanged paired-daemon wire captures. */
-import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import type { Page, Route } from "@playwright/test";
@@ -84,6 +83,10 @@ export function recordedUnifiedDiff(wire: DiffWire): string {
   if (typeof text !== "string") throw new Error("Missing genuine checkpoint diff");
   return text;
 }
+function recordedDiffRevision(wire: DiffWire): string | undefined {
+  const body = JSON.parse(wire.body) as { nativeRevision?: string; diff?: { nativeRevision?: string } };
+  return body.diff?.nativeRevision ?? body.nativeRevision;
+}
 export function selectedDiffPreview(
   capture: SelectedDiffCapture,
   name: DiffCaseName = "session"
@@ -97,6 +100,7 @@ export function selectedDiffPreview(
   return selectNativeDiffHunk(recordedUnifiedDiff(diff), selector.fileIndex, selector.hunkIndex);
 }
 export function validateSelectedDiffCapture(capture: SelectedDiffCapture): void {
+  const observedViews = new Map<string, unknown>();
   for (const wire of wires(capture)) {
     const method = operatorContract.operator.methods.find((entry) => entry.id === wire.methodId);
     if (!method) throw new Error(`Unknown captured method: ${wire.methodId}`);
@@ -127,10 +131,14 @@ export function validateSelectedDiffCapture(capture: SelectedDiffCapture): void 
     if (wire.status !== 200 || firstJsonSchemaFailure(method.outputSchema, body))
       throw new Error(`Invalid selected-diff output: ${wire.methodId}`);
     if (wire.methodId === "sessions.changes.get" || wire.methodId === "checkpoints.diff") {
-      const read = body as { nativeRevision?: string; diff?: { nativeRevision?: string } };
-      const revision = read.diff?.nativeRevision ?? read.nativeRevision;
-      if (revision !== createHash("sha256").update(recordedUnifiedDiff(wire)).digest("hex"))
+      const revision = recordedDiffRevision(wire);
+      if (!revision?.startsWith("checkpoint-diff:"))
         throw new Error(`Invalid host-written native diff revision: ${wire.methodId}`);
+      const view = { methodId: wire.methodId, request: wire.requestBody ?? null, response: body };
+      const previous = observedViews.get(revision);
+      if (previous !== undefined && !isDeepStrictEqual(previous, view))
+        throw new Error(`Changed recorded native diff view: ${wire.methodId}`);
+      observedViews.set(revision, view);
     }
     if (wire.methodId.startsWith("workLedger.intake."))
       nativeConversationIntakeLookupResultSchema.parse(body);
@@ -187,7 +195,7 @@ export function validateSelectedDiffCapture(capture: SelectedDiffCapture): void 
         (selector.kind === "workspace" ? capture.workspace.diff : capture.session.diff);
       if (
         !diff ||
-        selector.revision !== createHash("sha256").update(recordedUnifiedDiff(diff)).digest("hex")
+        selector.revision !== recordedDiffRevision(diff)
       )
         throw new Error(`Changed full-diff revision: ${name}`);
       selectedDiffPreview(capture, name);

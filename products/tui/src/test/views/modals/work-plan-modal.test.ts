@@ -35,6 +35,16 @@ describe('work-plan modal surface', () => {
     expect(view.tabs[0]!.rows).toHaveLength(0);
   });
 
+  test('preserved unassigned files are disclosed above the uninterrupted item list', () => {
+    const path = '/home/fixture/.goodvibes/tui/work-plans/old-project.json';
+    const deps = fixedDeps(), plan = deps.workPlanStore.getActivePlan();
+    const view = open(createWorkPlanModalSurface({ workPlanStore: {
+      getActivePlan: () => ({ ...plan, unassignedPlanPaths: [path] }),
+    } }));
+    expect(view.tabs[0]!.header).toContain(path);
+    expect(view.tabs[0]!.rows.map(row => row.id)).toEqual(plan.items.map(item => item.id));
+  });
+
   test('cycle/status/delete/clear/add actions route to /work-plan commands', () => {
     const surface = createWorkPlanModalSurface(fixedDeps());
     open(surface);

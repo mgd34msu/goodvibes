@@ -86,7 +86,9 @@ The command surface (aliases `/wp`, `/todo`, `/workplan`):
 | `/work-plan remove <id>` | Remove an item |
 | `/work-plan clear-done` | Clear completed (done/cancelled) items |
 
-The TUI stores work-plan state under `~/.goodvibes/tui/work-plans/<projectId>.json` and renders it in the `Work Plan` modal. Terminal items (done or cancelled) age out automatically once they pass a time and count bound; open, in-progress, blocked, and failed items are never reclaimed. Anything a sweep removes is recorded on the plan as a housekeeping note rather than deleted silently, and a plan file that is unreadable (for example torn by a crash) is quarantined alongside the original rather than overwritten, so the list can still be recovered by hand.
+The TUI stores work-plan state under `~/.goodvibes/tui/work-plans/` and renders it in the `Work Plan` modal. A persistent assignment identifies each project by its exact ID and root; different projects cannot share a plan just because their names sanitize to the same filename. Existing plans retain their files and items when their metadata identifies the project. Older files with unreadable or missing project metadata remain untouched, with their paths shown in the modal and `/work-plan show` for recovery.
+
+Terminal items (done or cancelled) age out automatically once they pass a time and count bound; open, in-progress, blocked, and failed items are never reclaimed. Anything a sweep removes is recorded on the plan as a housekeeping note rather than deleted silently, and an assigned plan file that is unreadable (for example torn by a crash) is quarantined alongside the original rather than overwritten, so the list can still be recovered by hand.
 
 The modal's keys:
 

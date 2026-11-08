@@ -196,6 +196,9 @@ function listOutput(store: WorkPlanStore): string {
     `  project ${plan.projectRoot}`,
     `  items ${plan.items.length}; pending ${counts.get('pending') ?? 0}; active ${counts.get('in_progress') ?? 0}; blocked ${counts.get('blocked') ?? 0}; done ${counts.get('done') ?? 0}`,
   ];
+  if (plan.unassignedPlanPaths?.length) {
+    lines.push('Preserved work-plan files could not be assigned to a project. Inspect these before recovering their items:', ...plan.unassignedPlanPaths);
+  }
   if (plan.items.length === 0) {
     lines.push('', 'No local work plan items.');
     return lines.join('\n');

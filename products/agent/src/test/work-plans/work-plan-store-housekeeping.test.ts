@@ -3,7 +3,7 @@
  *
  * The store is the SDK's (@goodvibes-jev/engine/sdk/platform/workflow), constructed
  * with this product's surface root so the plan file lands at
- * <home>/.goodvibes/agent/work-plans/<projectId>.json. What is pinned here is
+ * <home>/.goodvibes/agent/work-plans/. What is pinned here is
  * what the Agent depends on: /work-plan stays usable when the file on disk is
  * torn, a user's open work is never garbage-collected, and anything reclaimed
  * is disclosed on the plan rather than disappearing quietly.

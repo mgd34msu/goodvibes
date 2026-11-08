@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // work-plan-store.ts, per-project work plan persisted at
-//   <home>/.goodvibes/<surfaceRoot>/work-plans/<projectId>.json
+//   <home>/.goodvibes/<surfaceRoot>/work-plans/
 //
 // The surface root is supplied by the product that owns the plan, so two
 // products sharing a home directory keep separate plans and neither has to
@@ -31,10 +31,12 @@
 // (rename(2)), and unlink races are treated as already-done.
 // ---------------------------------------------------------------------------
 
-import { createHash, randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '../config/atomic-write.js';
+import { requireSurfaceRoot } from '../runtime/surface-root.js';
+import { resolveWorkPlanLocation } from './work-plan-location.js';
 
 export type WorkPlanEffectOptions = Pick<AtomicWriteOptions, 'assertCurrent' | 'onEffect'>;
 export interface WorkPlanReadOptions { readonly readOnly?: boolean; }
@@ -135,6 +137,8 @@ export interface WorkPlan {
   readonly updatedAt: number;
   /** Result of the most recent sweep that actually reclaimed something. */
   readonly housekeeping?: WorkPlanHousekeeping | undefined;
+  /** Preserved older files whose metadata cannot establish a project owner. */
+  readonly unassignedPlanPaths?: readonly string[] | undefined;
 }
 
 export interface WorkPlanStoreOptions {
@@ -187,14 +191,6 @@ function readString(value: unknown): string | undefined {
 
 function isWorkPlanStatus(value: unknown): value is WorkPlanItemStatus {
   return typeof value === 'string' && WORK_PLAN_STATUSES.includes(value as WorkPlanItemStatus);
-}
-
-function safeFileId(projectId: string, projectRoot: string): string {
-  const normalized = projectId.trim() || 'project';
-  const safe = normalized.replace(/[^A-Za-z0-9_.-]+/g, '-').replace(/^-+|-+$/g, '');
-  if (safe.length > 0 && safe.length <= 96) return safe;
-  const hash = createHash('sha256').update(`${projectId}\0${projectRoot}`).digest('hex').slice(0, 16);
-  return `${safe.slice(0, 80) || 'project'}-${hash}`;
 }
 
 function createItemId(): string {
@@ -336,13 +332,17 @@ export class WorkPlanStore {
 
   readonly homeDirectory: string;
   private readonly options: WorkPlanStoreOptions;
-  private readonly newPlanId = `wp-${randomUUID()}`;
+  private readonly newPlanId: string;
+  private readonly unassignedPlanPaths: readonly string[];
 
   constructor(options: WorkPlanStoreOptions) {
     this.options = Object.freeze({ ...options });
     this.homeDirectory = options.homeDirectory;
-    const fileName = `${safeFileId(options.projectId, options.projectRoot)}.json`;
-    this.filePath = join(options.homeDirectory, '.goodvibes', options.surfaceRoot, 'work-plans', fileName);
+    const directory = join(options.homeDirectory, '.goodvibes', requireSurfaceRoot(options.surfaceRoot), 'work-plans');
+    const assigned = resolveWorkPlanLocation(directory, this.options);
+    this.filePath = assigned.path;
+    this.newPlanId = assigned.planId;
+    this.unassignedPlanPaths = Object.freeze([...assigned.unassignedPaths]);
   }
 
   getActivePlan(options: WorkPlanReadOptions = {}): WorkPlan {
@@ -467,6 +467,10 @@ export class WorkPlanStore {
     // Disclosure: whatever the last sweep reclaimed is stated here, so a
     // removal can never be mistaken for silent data loss.
     if (plan.housekeeping) lines.push(formatHousekeeping(plan.housekeeping));
+    if (plan.unassignedPlanPaths?.length) {
+      lines.push('Preserved work-plan files could not be assigned to a project. Inspect these before recovering their items:');
+      for (const path of plan.unassignedPlanPaths) lines.push(`- ${path}`);
+    }
     lines.push('');
     if (plan.items.length === 0) {
       lines.push('No work plan items recorded.');
@@ -492,8 +496,10 @@ export class WorkPlanStore {
   private readPlan(effects?: WorkPlanEffectOptions, readOnly = false): WorkPlan {
     effects?.assertCurrent?.();
     const loaded = this.loadFromDisk(effects, readOnly);
-    if (readOnly) return loaded.plan;
-    const swept = this.sweep(loaded.plan, loaded.recovery, effects);
+    const unassigned = this.unassignedPlanPaths.filter(path => existsSync(path));
+    const plan = unassigned.length ? { ...loaded.plan, unassignedPlanPaths: unassigned } : loaded.plan;
+    if (readOnly) return plan;
+    const swept = this.sweep(plan, loaded.recovery, effects);
     if (swept.changed) this.writePlan(swept.plan, effects);
     return swept.plan;
   }
@@ -507,12 +513,17 @@ export class WorkPlanStore {
     let raw: string;
     try {
       raw = readFileSync(this.filePath, 'utf8');
-    } catch {
-      // No file yet (the common first-run case), or it is unreadable right now.
-      // Nothing existed to preserve, so there is nothing to disclose.
+    } catch (error) {
+      // Only absence means an empty plan. An I/O/permission failure must not
+      // turn existing work into an empty plan that the next mutation overwrites.
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       return { plan: this.createEmptyPlan(), recovery: null };
     }
     const parsed = parsePlanDocument(raw);
+    if (parsed && (('projectId' in parsed && parsed.projectId !== this.options.projectId)
+      || ('projectRoot' in parsed && parsed.projectRoot !== this.options.projectRoot))) {
+      throw new Error('Saved work plan belongs to a different project; its contents were left untouched.');
+    }
     if (parsed === null) {
       // The file EXISTED but its contents are not a usable plan: zero-byte,
       // truncated mid-write, or otherwise torn. Existence is not validity.
@@ -610,6 +621,7 @@ export class WorkPlanStore {
         // one, so it is deliberately left alone. housekeeping.at dates the sweep.
         updatedAt: plan.updatedAt,
         housekeeping,
+        ...(plan.unassignedPlanPaths ? { unassignedPlanPaths: plan.unassignedPlanPaths } : {}),
       },
       changed: true,
     };

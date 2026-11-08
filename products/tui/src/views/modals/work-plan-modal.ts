@@ -31,7 +31,7 @@ const STATUS_COMMAND: Record<WorkPlanItemStatus, string> = {
 const STATUS_ORDER: readonly WorkPlanItemStatus[] = ['pending', 'in_progress', 'blocked', 'done', 'failed', 'cancelled'];
 
 type WorkPlanItemLike = Pick<WorkPlanItem, 'id' | 'title' | 'status' | 'owner' | 'source' | 'notes' | 'linked' | 'updatedAt'>;
-type WorkPlanLike = Pick<WorkPlan, 'projectRoot'> & { readonly items: readonly WorkPlanItemLike[] };
+type WorkPlanLike = Pick<WorkPlan, 'projectRoot' | 'unassignedPlanPaths'> & { readonly items: readonly WorkPlanItemLike[] };
 
 export interface WorkPlanModalDeps {
   readonly workPlanStore: { getActivePlan(): WorkPlanLike };
@@ -58,6 +58,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
   readonly name = 'work-plan-modal';
   readonly title = 'Work Plan';
   private projectRoot = '';
+  private unassignedPlanPaths: readonly string[] = [];
   private items: WorkPlanItemLike[] = [];
 
   constructor(private readonly deps: WorkPlanModalDeps) {}
@@ -92,6 +93,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
   private refresh(): void {
     const plan = this.deps.workPlanStore.getActivePlan();
     this.projectRoot = plan.projectRoot;
+    this.unassignedPlanPaths = plan.unassignedPlanPaths ?? [];
     this.items = [...plan.items];
   }
 
@@ -109,6 +111,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
       `Project ${this.projectRoot}`,
       progressBar(pct),
       `pending ${counts.get('pending') ?? 0}  active ${counts.get('in_progress') ?? 0}  blocked ${counts.get('blocked') ?? 0}  done ${counts.get('done') ?? 0}  failed ${counts.get('failed') ?? 0}  cancelled ${counts.get('cancelled') ?? 0}`,
+      ...(this.unassignedPlanPaths.length ? ['Preserved work-plan files have no identifiable project owner. Inspect them before recovering their items:', ...this.unassignedPlanPaths] : []),
     ];
 
     const rows: ConfigModalRow[] = this.items.map((item) => {

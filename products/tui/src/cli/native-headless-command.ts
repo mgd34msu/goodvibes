@@ -1,3 +1,4 @@
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { runHeadlessCommand, type HeadlessCommandRuntime } from '@goodvibes-jev/engine/terminal-shell/headless-command';
 import { createShellPathService } from '@/runtime/index.ts';
 import { bootstrapRuntime } from '../runtime/bootstrap.ts';
@@ -10,11 +11,12 @@ import { resolveNativeHostCredential } from '../runtime/client/native-host-crede
 import { restoreHeadlessSession } from '@goodvibes-jev/engine/terminal-shell/startup-lifecycle';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit'): Promise<number> {
+  const credentialObservation = new OwnedSelectionObservation();
   const { cli, configManager, homeDirectory, workingDirectory } = runtime;
   const shellPaths = createShellPathService({ workingDirectory, homeDirectory });
   const journalPath = `${shellPaths.resolveUserPath('tui', 'native-work-submission.json')}.intake`;
   const resolveHost = (): NativeHeadlessHost => {
-    const credential = resolveNativeHostCredential({ configManager, homeDirectory });
+    const credential = resolveNativeHostCredential({ configManager, homeDirectory, observation: credentialObservation });
     return credential.available
       ? {
           baseUrl: credential.baseUrl,

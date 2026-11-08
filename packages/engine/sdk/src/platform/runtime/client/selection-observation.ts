@@ -6,11 +6,12 @@ let ownerSequence = 0;
 /** One live owner's latest exact selection. Labels reveal no selected values
  * and convey no permission. Recovery binds durable host/principal records
  * separately; these labels are not persisted revisions or cross-process IDs.
+ * An optional source owner is compared by reference, never serialized.
  */
 export class OwnedSelectionObservation {
   readonly #owner: number;
   #revision = 0;
-  #current: { readonly value: unknown; readonly identity: string } | undefined;
+  #current: { readonly value: unknown; readonly sourceOwner: object | undefined; readonly identity: string } | undefined;
 
   constructor() {
     if (!Number.isSafeInteger(++ownerSequence)) throw new Error('Selection owner identity exhausted');
@@ -18,14 +19,14 @@ export class OwnedSelectionObservation {
     Object.freeze(this);
   }
 
-  readonly observe = (value: unknown): string => {
+  readonly observe = (value: unknown, sourceOwner?: object): string => {
     let captured: unknown;
     try { captured = captureOwnedJson(value); }
     catch (error) { this.#current = undefined; throw error; }
-    if (this.#current && isDeepStrictEqual(this.#current.value, captured)) return this.#current.identity;
+    if (this.#current && this.#current.sourceOwner === sourceOwner && isDeepStrictEqual(this.#current.value, captured)) return this.#current.identity;
     if (!Number.isSafeInteger(++this.#revision)) throw new Error('Selection revision exhausted');
     const identity = `selection-${this.#owner}-${this.#revision}`;
-    this.#current = { value: captured, identity };
+    this.#current = { value: captured, sourceOwner, identity };
     return identity;
   };
 

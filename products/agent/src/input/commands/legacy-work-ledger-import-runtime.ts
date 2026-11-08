@@ -25,7 +25,7 @@ export function registerLegacyWorkLedgerImportCommands(registry: CommandRegistry
       // Passive private state only: neither an unbound environment token nor a
       // daemon-global credential can mask or replace this selected native owner.
       return { baseUrl, token: pairing.token, workspace: realpathSync(current.workingDirectory),
-        selectionIdentity: selection.observe([current.homeDirectory, baseUrl, pairing]) };
+        selectionIdentity: selection.observe([current.homeDirectory, baseUrl, pairing], config) };
     } catch (error) { selection.retire(); throw error; }
   } });
 }): void { registerLegacyImportCommands(registry, open); }

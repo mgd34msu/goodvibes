@@ -1,3 +1,4 @@
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { createOperatorSdk } from '@goodvibes-jev/engine/operator-sdk';
 import { createNativeHostFetch } from '../../runtime/client/native-host-fetch.ts';
 import { realpathSync } from 'node:fs';
@@ -7,8 +8,9 @@ import { resolveNativeHostCredential } from '../../runtime/client/native-host-cr
 import { requireShellPaths } from './runtime-services.ts';
 export type OpenTuiLegacyImportSession = (context: CommandContext, projectId: string) => Promise<LegacyImportOperatorSession>;
 export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daemonHomeDirectory?: string, open: OpenTuiLegacyImportSession = async (context, projectId) => {
+  const credentialObservation = new OwnedSelectionObservation();
   const paths = requireShellPaths(context);
-  const selected = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory });
+  const selected = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory, observation: credentialObservation });
   if (!selected.available) throw new Error(selected.reason);
   const workspace = realpathSync(paths.workingDirectory);
   const { journalPath } = resolveLegacyImportJournalLocation({ workspace, projectId, stateDirectory: paths.resolveUserPath() });
@@ -20,7 +22,7 @@ export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daem
       const client = createOperatorSdk({ baseUrl: host.baseUrl, authToken: host.token, fetchImpl: createNativeHostFetch({ current: () => {
         if (disposed) return false;
         const paths = requireShellPaths(context);
-        const credential = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory });
+        const credential = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: paths.homeDirectory, observation: credentialObservation });
         return credential.available && credential.identity === selected.identity && realpathSync(paths.workingDirectory) === workspace;
       } }) });
       return { currentAuth: signal => client.control.auth.current({}, { signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000) }),
@@ -28,7 +30,7 @@ export function registerTuiLegacyImportCommands(registry: CommandRegistry, _daem
     },
     resolve: () => {
       const current = requireShellPaths(context);
-      const credential = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: current.homeDirectory });
+      const credential = resolveNativeHostCredential({ configManager: context.platform.configManager, homeDirectory: current.homeDirectory, observation: credentialObservation });
       if (!credential.available) return { reason: credential.reason };
       if (credential.identity !== selected.identity || realpathSync(current.workingDirectory) !== workspace) return { reason: 'Selected TUI host credentials changed' };
       return { baseUrl: credential.baseUrl, token: credential.token, workspace };

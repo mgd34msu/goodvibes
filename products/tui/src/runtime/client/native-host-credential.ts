@@ -13,6 +13,8 @@ const applyObservation = Reflect.apply;
 export interface NativeHostCredentialOptions {
   readonly configManager: ConfigManager;
   readonly homeDirectory: string | (() => string);
+  /** A live operation owns its observations; passive reads share the config owner. */
+  readonly observation?: OwnedSelectionObservation;
 }
 /** Preserve explicit syntax for validation instead of silently stripping paths. */
 export function resolveTuiHostOrigin(config: ConfigManager): string | null {
@@ -30,7 +32,9 @@ export type NativeHostCredential =
  */
 export function resolveNativeHostCredential(options: NativeHostCredentialOptions): NativeHostCredential {
   let owner: ConfigManager | undefined;
+  let retained: OwnedSelectionObservation | undefined;
   try {
+    retained = options.observation;
     owner = options.configManager;
     const home = typeof options.homeDirectory === 'function' ? options.homeDirectory() : options.homeDirectory;
     const enabled = resolveDaemonEnabled(owner);
@@ -39,12 +43,13 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     const pairing = baseUrl ? readTuiHostPairing(home, baseUrl) : null;
     // Full state, not merely the bearer: replacement and indeterminate state
     // invalidate queued reads, permits and mutation preflights as well.
-    let observation = applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined;
+    let observation = retained ?? (applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined);
     if (!observation) {
       observation = new OwnedSelectionObservation();
       applyObservation(setObservation, observations, [owner, observation]);
     }
-    const identity = observation.observe([home, enabled, selected, baseUrl, pairing]);
+    retained = observation;
+    const identity = observation.observe([home, enabled, selected, baseUrl, pairing], owner);
     if (!enabled) return { available: false, identity, reason: 'Selected daemon is disabled.' };
     if (!baseUrl) return { available: false, identity, reason: 'Select an exact HTTP(S) daemon origin without a path, query, fragment or user information.' };
     if (pairing?.status === 'paired') return { available: true, baseUrl, token: pairing.token, identity };
@@ -52,7 +57,8 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     if (pairing?.status === 'unavailable') return { available: false, identity, reason: 'The TUI host credential store could not be read safely. Native work is unavailable.' };
     return { available: false, identity, reason: 'No TUI credential is bound to this exact daemon origin. Run goodvibes host pair --bootstrap-shared to review pairing, then use --apply in an owner terminal.' };
   } catch {
-    if (owner) (applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined)?.retire();
+    if (retained) retained.retire();
+    else if (owner) (applyObservation(getObservation, observations, [owner]) as OwnedSelectionObservation | undefined)?.retire();
     return { available: false, identity: 'tui-host-credential-unavailable', reason: 'The selected TUI host credential is unavailable.' };
   }
 }

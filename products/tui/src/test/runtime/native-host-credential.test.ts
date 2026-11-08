@@ -1,3 +1,4 @@
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -71,4 +72,16 @@ test('unknown, corrupt, disabled and different home all fail closed without fall
   f.enabled = false; expect(resolveNativeHostCredential(f.options).identity).not.toBe(unknown.identity); expect(readFileSync(path)).toEqual(before);
   f.enabled = true; writeFileSync(path, '{bad'); const corrupt = resolveNativeHostCredential(f.options); expect(corrupt.available).toBe(false); expect(readFileSync(path, 'utf8')).toBe('{bad');
   f.home = makeProjectTempDir('native-other-home'); expect(resolveNativeHostCredential(f.options).identity).not.toBe(corrupt.identity);
+});
+
+
+test('an operation-owned selection is independent of passive reads using another home', async () => {
+  const f = fixture(); await seed(f);
+  const owned = { ...f.options, observation: new OwnedSelectionObservation() };
+  const first = resolveNativeHostCredential(owned);
+  expect(first.available).toBe(true);
+  const passive = resolveNativeHostCredential({ ...f.options, homeDirectory: makeProjectTempDir('unrelated-native-home') });
+  expect(passive.available).toBe(false);
+  expect(resolveNativeHostCredential(owned).identity).toBe(first.identity);
+  expect(resolveNativeHostCredential(f.options).identity).not.toBe(first.identity);
 });

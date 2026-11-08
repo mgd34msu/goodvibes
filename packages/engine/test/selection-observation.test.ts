@@ -22,3 +22,12 @@ test('unadmitted selection data never runs a getter or preserves an earlier live
   expect(() => owner.observe(invalid)).toThrow(); expect(getters).toBe(0);
   expect(owner.observe({ token: 'synthetic credential' })).not.toBe(original);
 });
+
+test('an identical value cannot preserve a selection across a source owner replacement', () => {
+  const selection = new OwnedSelectionObservation(), firstOwner = {}, replacementOwner = {};
+  const first = selection.observe({ host: 'https://host.example' }, firstOwner);
+  expect(selection.observe({ host: 'https://host.example' }, firstOwner)).toBe(first);
+  const replacement = selection.observe({ host: 'https://host.example' }, replacementOwner);
+  expect(replacement).not.toBe(first);
+  expect(selection.observe({ host: 'https://host.example' }, firstOwner)).not.toBe(first);
+});

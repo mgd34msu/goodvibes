@@ -1,3 +1,4 @@
+import { OwnedSelectionObservation } from '@goodvibes-jev/engine/sdk/platform/runtime/client';
 import { handleNativeIntakeCommand, handleNativeSubmissionCommand } from '@goodvibes-jev/engine/terminal-shell/native/work-command';
 import { createNativeWorkLedgerReadBinding } from '@goodvibes-jev/engine/terminal-shell/native/work-ledger-binding';
 import { createNativeHostFetch } from './client/native-host-fetch.ts';
@@ -35,6 +36,7 @@ export function createNativeWorkLedgerHost(deps: {
   readonly journalPath?: string;
   readonly workspace: () => string;
 }) {
+  const credentialObservation = new OwnedSelectionObservation();
   const identityOwner = createNativeSubmissionIdentity();
   const nativeSubmissionIdentity = identityOwner.identify;
   let discovery: { controller: AbortController; identity: string } | undefined;
@@ -46,7 +48,7 @@ export function createNativeWorkLedgerHost(deps: {
   // a selection from one credential with a second independent token read.
   const captureConnection = () => {
     const homeDirectory = typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory;
-    const credential = resolveNativeHostCredential({ configManager: deps.configManager, homeDirectory });
+    const credential = resolveNativeHostCredential({ configManager: deps.configManager, homeDirectory, observation: credentialObservation });
     const workspace = deps.workspace();
     const location = JSON.stringify([credential.available ? credential.baseUrl : credential.identity, homeDirectory, workspace]);
     return { credential, workspace, location };

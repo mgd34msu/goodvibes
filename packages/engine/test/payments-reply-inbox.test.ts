@@ -10,10 +10,11 @@
  * one channel), and that the wait ends as silence at the deadline and only
  * then.
  */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
 import { PaymentReplyInbox, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
 import { tryResolvePaymentReplyFromChannel } from '../sdk/src/platform/daemon/payment-reply.js';
 import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-actions.ts';
+import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
 import type { ChannelPolicyDecision } from '../sdk/src/platform/channels/index.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
@@ -97,6 +98,41 @@ describe('the inbox settles a waiting window from a reply', () => {
 });
 
 describe('who may answer over a channel', () => {
+  test('the actual daemon notifier captures an owner ingress reply while sending and consumes it only after its window arms', async () => {
+    const inbox = new PaymentReplyInbox();
+    let delivered!: () => void;
+    const delivery = new Promise<void>(done => { delivered = done; });
+    const notifier = channelBackedPaymentNotifier({ get: key => key === 'payments.notifyChannels' ? 'telegram' : undefined },
+      { async deliver() { await delivery; return 'owner-notice'; } }, inbox);
+    if (!notifier.prepareWindow) throw new Error('The native daemon notifier did not reserve reply reception');
+    const reception = notifier.prepareWindow({ purchaseId: 'early-owner-ingress', kind: 'veto', notice: VETO_NOTICE });
+    const admitted = decision();
+    const helper = new DaemonSurfaceActionHelper({
+      channelPolicy: { preflightIngress: async () => admitted, evaluateIngress: async () => admitted,
+        getPolicy: () => admitted.policy, listPolicies: () => [admitted.policy] },
+      configManager: { get: () => undefined, getCategory: () => undefined },
+      routeBindings: { getBinding: () => undefined }, paymentReplies: inbox,
+    } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
+    let offered!: () => void;
+    const offeredToOriginalInbox = new Promise<void>(done => { offered = done; });
+    const offer = inbox.offer.bind(inbox);
+    const observing = spyOn(inbox, 'offer').mockImplementation((channel, text) => {
+      const pending = offer(channel, text); offered(); return pending;
+    });
+    try {
+      expect(await tryResolvePaymentReplyFromChannel({ surface: 'telegram', userId: 'stranger', text: 'stop' }, admitted, inbox))
+        .toEqual({ consumed: false, reason: 'no-window' });
+      const ingress = helper.authorizeSurfaceIngress({ surface: 'telegram', userId: OWNER, text: 'stop' });
+      await offeredToOriginalInbox;
+      delivered(); await reception.deliveries;
+      expect(inbox.inspect()).toEqual([]); expect(readings.requests).toEqual([]);
+      const waiting = reception.awaitAnswer(soon());
+      expect(await ingress).toMatchObject({ allowed: false, reason: 'payment-reply-object' });
+      expect(await waiting).toEqual({ answer: 'object', channel: 'telegram' });
+      expect(readings.requests[0]?.state).toEqual({ proposal: VETO_NOTICE, reply: 'stop' });
+    } finally { observing.mockRestore(); delivered(); reception.cancel(); await inbox.close(); }
+  });
+
   test('the owner on a command-authority channel answers', async () => {
     const inbox = new PaymentReplyInbox();
     const wait = inbox.waitForAnswer({ purchaseId: 'fixture-veto', kind: 'veto', deadlineMs: soon(), channels: ['telegram'], notice: VETO_NOTICE });

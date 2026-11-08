@@ -1,8 +1,8 @@
 /**
  * reply-inbox.ts, where the owner's answer to a purchase notice arrives.
  *
- * The notifier sends an approval or veto notice over the owner's command
- * channels and then waits (`PaymentReplySource.waitForAnswer`). The daemon's
+ * The native notifier reserves reception before sending an approval or veto
+ * notice, then arms its window after the delivery report is durable. The daemon's
  * shared channel ingress hook offers every inbound owner message on a
  * command-authority channel to this inbox (daemon/payment-reply.ts), and the
  * inbox reads it against the notice it follows (`readPaymentReply`, a Jev
@@ -19,7 +19,7 @@
  * and nothing else (payment-ports.ts). A failed reading, or an owner reply
  * still unresolved at the deadline, fails the wait; neither is silence.
  */
-import type { PaymentReplySource, PaymentAnswer } from './notice-delivery.js';
+import type { PaymentReplySource, PaymentAnswer, PreparedPaymentReply } from './notice-delivery.js';
 import { readPaymentReply } from './notice-delivery.js';
 import { parseCommandAuthorityChannel, type CommandAuthorityChannel, type PaymentAnswerChannel } from './types.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
@@ -32,7 +32,9 @@ interface Waiter {
   readonly kind: 'approval' | 'veto';
   readonly channels: readonly CommandAuthorityChannel[];
   readonly notice: string;
-  readonly deadlineMs: number;
+  deadlineMs: number | undefined;
+  armedChannels: readonly CommandAuthorityChannel[] | undefined;
+  readonly receptionReady: Promise<void>;
   readonly abort: AbortController;
   readings: number;
   expire(): void;
@@ -76,76 +78,113 @@ export class PaymentReplyInbox implements PaymentReplySource {
   }
 
   waitForAnswer(input: Parameters<PaymentReplySource['waitForAnswer']>[0]): ReturnType<PaymentReplySource['waitForAnswer']> {
-    const waiting = new Promise<Awaited<ReturnType<PaymentReplySource['waitForAnswer']>>>((resolve, reject) => {
-      if (this.#closed) { reject(new PaymentReplyInboxClosedError()); return; }
-      const purchaseId = input.purchaseId;
-      const kind = input.kind;
-      const notice = input.notice;
+    try {
       const deadlineMs = input.deadlineMs;
-      const signal = input.signal;
-      if (typeof purchaseId !== 'string' || purchaseId.trim().length === 0 || purchaseId.length > 256
-        || (kind !== 'approval' && kind !== 'veto') || typeof notice !== 'string'
-        || !Number.isFinite(deadlineMs) || !Array.isArray(input.channels)) {
-        reject(new PaymentReplyWindowError('invalid')); return;
-      }
-      const channels = Object.freeze([...input.channels]);
-      if (channels.some(channel => typeof channel !== 'string' || parseCommandAuthorityChannel(channel) !== channel)) {
-        reject(new PaymentReplyWindowError('invalid')); return;
-      }
-      if (this.#waiting.has(purchaseId)) { reject(new PaymentReplyWindowError('duplicate')); return; }
-      if (this.#windowSequence >= Number.MAX_SAFE_INTEGER) { reject(new PaymentReplyWindowError('invalid')); return; }
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const remove = (): boolean => {
-        if (!this.current(waiter)) return false;
-        this.#waiting.delete(purchaseId);
-        if (timer !== undefined) clearTimeout(timer);
-        signal?.removeEventListener('abort', onAbort);
-        return true;
-      };
-      const arm = (): void => {
-        if (timer !== undefined) clearTimeout(timer);
+      const prepared = this.prepareAnswer(input);
+      return prepared.waitForAnswer({ deadlineMs, channels: input.channels });
+    } catch (error) {
+      const rejected = Promise.reject<Awaited<ReturnType<PaymentReplySource['waitForAnswer']>>>(error);
+      void rejected.catch(() => {});
+      return rejected;
+    }
+  }
+
+  /** Reserve the exact purchase before delivery starts. Early channel offers
+   * remain owned here until the actual delivered channels/deadline are armed;
+   * an unarmed reservation is never an answerable operator window or silence. */
+  prepareAnswer(input: Omit<Parameters<PaymentReplySource['waitForAnswer']>[0], 'deadlineMs'>): PreparedPaymentReply {
+    if (this.#closed) throw new PaymentReplyInboxClosedError();
+    const purchaseId = input.purchaseId;
+    const kind = input.kind;
+    const notice = input.notice;
+    const signal = input.signal;
+    if (typeof purchaseId !== 'string' || purchaseId.trim().length === 0 || purchaseId.length > 256
+      || (kind !== 'approval' && kind !== 'veto') || typeof notice !== 'string'
+      || !Array.isArray(input.channels)) throw new PaymentReplyWindowError('invalid');
+    const channels = Object.freeze([...input.channels]);
+    if (channels.some(channel => typeof channel !== 'string' || parseCommandAuthorityChannel(channel) !== channel)) throw new PaymentReplyWindowError('invalid');
+    if (this.#waiting.has(purchaseId)) throw new PaymentReplyWindowError('duplicate');
+    if (this.#windowSequence >= Number.MAX_SAFE_INTEGER) throw new PaymentReplyWindowError('invalid');
+    let resolve!: (answer: Awaited<ReturnType<PaymentReplySource['waitForAnswer']>>) => void;
+    let reject!: (error: Error) => void;
+    const waiting = new Promise<Awaited<ReturnType<PaymentReplySource['waitForAnswer']>>>((done, failed) => { resolve = done; reject = failed; });
+    void waiting.catch(() => {});
+    let publishReception!: () => void;
+    const receptionReady = new Promise<void>(ready => { publishReception = ready; });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const remove = (): boolean => {
+      if (!this.current(waiter)) return false;
+      this.#waiting.delete(purchaseId);
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      // Unblock accepted early offers even when sending/flush/owner failed.
+      publishReception();
+      return true;
+    };
+    const armTimer = (): void => {
+      if (timer !== undefined) clearTimeout(timer);
+      const deadlineMs = waiter.deadlineMs;
+      if (deadlineMs === undefined || !this.current(waiter)) return;
+      const now = this.currentTime();
+      if (now === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return; }
+      const remaining = deadlineMs - now;
+      if (!Number.isFinite(remaining)) { waiter.cancel(new PaymentReplyWindowError('invalid')); return; }
+      // Public callers may supply a deadline beyond setTimeout's range.
+      // Recheck the actual clock rather than overflowing into early silence.
+      timer = setTimeout(() => waiter.expire(), Math.min(0x7fff_ffff, Math.max(0, remaining)));
+    };
+    const waiter: Waiter = {
+      purchaseId, kind, channels, notice, deadlineMs: undefined, armedChannels: undefined, receptionReady,
+      windowId: `payment-window:${this.#incarnation}:${++this.#windowSequence}`,
+      abort: new AbortController(),
+      readings: 0,
+      expire: () => {
+        if (!this.current(waiter)) return;
+        const deadlineMs = waiter.deadlineMs;
+        if (deadlineMs === undefined) return;
         const now = this.currentTime();
         if (now === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return; }
-        const remaining = deadlineMs - now;
-        if (!Number.isFinite(remaining)) { waiter.cancel(new PaymentReplyWindowError('invalid')); return; }
-        // Public callers may supply a deadline beyond setTimeout's range.
-        // Recheck the actual clock rather than overflowing into early silence.
-        timer = setTimeout(() => waiter.expire(), Math.min(0x7fff_ffff, Math.max(0, remaining)));
-      };
-      const waiter: Waiter = {
-        purchaseId, kind, channels, notice, deadlineMs,
-        windowId: `payment-window:${this.#incarnation}:${++this.#windowSequence}`,
-        abort: new AbortController(),
-        readings: 0,
-        expire: () => {
-          if (!this.current(waiter)) return;
-          const now = this.currentTime();
-          if (now === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return; }
-          if (now < deadlineMs) { arm(); return; }
-          if (waiter.readings > 0) waiter.cancel(new PaymentReplyWindowError('unsettled-reply'));
-          else waiter.settle(null);
-        },
-        settle: (answer) => {
-          if (!remove()) return;
-          resolve(answer);
-          waiter.abort.abort(new PaymentReplyWindowError('settled'));
-        },
-        cancel: (error) => {
-          if (!remove()) return;
-          reject(error);
-          waiter.abort.abort(error);
-        },
-      };
-      const onAbort = (): void => waiter.cancel(new PaymentReplyWindowError('cancelled'));
-      this.#waiting.set(purchaseId, waiter);
-      signal?.addEventListener('abort', onAbort, { once: true });
-      if (signal?.aborted) onAbort();
-      else arm();
+        if (now < deadlineMs) { armTimer(); return; }
+        if (waiter.readings > 0) waiter.cancel(new PaymentReplyWindowError('unsettled-reply'));
+        else waiter.settle(null);
+      },
+      settle: (answer) => {
+        if (!remove()) return;
+        resolve(answer);
+        waiter.abort.abort(new PaymentReplyWindowError('settled'));
+      },
+      cancel: (error) => {
+        if (!remove()) return;
+        reject(error);
+        waiter.abort.abort(error);
+      },
+    };
+    const onAbort = (): void => waiter.cancel(new PaymentReplyWindowError('cancelled'));
+    this.#waiting.set(purchaseId, waiter);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    return Object.freeze({
+      waitForAnswer: (armed: { readonly deadlineMs: number; readonly channels: readonly CommandAuthorityChannel[] }) => {
+        if (!this.current(waiter)) return waiting;
+        if (waiter.deadlineMs !== undefined) throw new PaymentReplyWindowError('duplicate');
+        let deadlineMs: number, deliveredChannels: readonly CommandAuthorityChannel[];
+        try {
+          deadlineMs = armed.deadlineMs;
+          const selectedChannels = armed.channels;
+          if (!Number.isFinite(deadlineMs) || !Array.isArray(selectedChannels)) throw new PaymentReplyWindowError('invalid');
+          deliveredChannels = Object.freeze([...selectedChannels]);
+          if (deliveredChannels.some(channel => !channels.includes(channel))) throw new PaymentReplyWindowError('invalid');
+        } catch {
+          waiter.cancel(new PaymentReplyWindowError('invalid')); return waiting;
+        }
+        waiter.deadlineMs = deadlineMs;
+        waiter.armedChannels = Object.freeze([...new Set(deliveredChannels)]);
+        publishReception();
+        armTimer();
+        return waiting;
+      },
+      cancel: () => { waiter.cancel(new PaymentReplyWindowError('cancelled')); },
     });
-    // A host may tear down while a caller has not attached its handler
-    // yet. Observe rejection without changing what an awaiting caller receives.
-    void waiting.catch(() => {});
-    return waiting;
   }
 
   /**
@@ -155,14 +194,17 @@ export class PaymentReplyInbox implements PaymentReplySource {
    */
   close(): Promise<void> {
     if (this.#closing) return this.#closing;
+    let finish!: () => void;
+    this.#closing = new Promise<void>(done => { finish = done; });
     this.#closed = true;
     const error = new PaymentReplyInboxClosedError();
     for (const waiter of this.#waiting.values()) waiter.cancel(error);
-    this.#closing = Promise.allSettled(this.#offers).then(() => {});
+    void Promise.allSettled(this.#offers).then(() => finish());
     return this.#closing;
   }
 
-  /** How many windows are waiting for an answer. */
+  /** Reserved receptions plus armed windows. Channel ingress must also offer
+   * replies while sending; inspect() returns only the armed operator windows. */
   get pending(): number {
     return this.#waiting.size;
   }
@@ -173,8 +215,8 @@ export class PaymentReplyInbox implements PaymentReplySource {
     this.expireWindows();
     return Object.freeze([...this.#waiting.values()]
       .filter(waiter => purchaseId === undefined || waiter.purchaseId === purchaseId)
-      .map(waiter => Object.freeze({ purchaseId: waiter.purchaseId, windowId: waiter.windowId,
-        kind: waiter.kind, notice: waiter.notice, deadlineMs: waiter.deadlineMs })));
+      .flatMap(waiter => waiter.deadlineMs === undefined ? [] : [Object.freeze({ purchaseId: waiter.purchaseId, windowId: waiter.windowId,
+        kind: waiter.kind, notice: waiter.notice, deadlineMs: waiter.deadlineMs })]));
   }
 
   /** Host-only addressed answer after current operator authority is checked.
@@ -183,7 +225,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
   answer(input: { readonly purchaseId: string; readonly windowId: string; readonly action: 'approve' | 'deny' | 'cancel' }): PaymentWindowAnswer {
     if (this.#closed) throw new PaymentReplyInboxClosedError();
     const waiter = this.#waiting.get(input.purchaseId);
-    if (!waiter || waiter.windowId !== input.windowId) throw new PaymentReplyWindowError('stale');
+    if (!waiter || waiter.deadlineMs === undefined || waiter.windowId !== input.windowId) throw new PaymentReplyWindowError('stale');
     this.expireWindows();
     if (!this.current(waiter)) throw new PaymentReplyWindowError('stale');
     if (input.action !== 'approve' && input.action !== 'deny' && input.action !== 'cancel') throw new PaymentReplyWindowError('invalid');
@@ -200,21 +242,34 @@ export class PaymentReplyInbox implements PaymentReplySource {
    */
   offer(channel: CommandAuthorityChannel, text: string): Promise<PaymentReplyOffer> {
     if (this.#closed) return Promise.resolve({ consumed: false, reason: 'no-window' });
+    this.expireWindows();
+    if (this.#closed) return Promise.resolve({ consumed: false, reason: 'no-window' });
+    const waiting = [...this.#waiting.values()].filter(waiter => (waiter.armedChannels ?? waiter.channels).includes(channel));
+    if (waiting.length === 0) return Promise.resolve({ consumed: false, reason: 'no-window' });
+    if (waiting.length > 1) return Promise.resolve({ consumed: false, reason: 'several-windows' });
+    const waiter = waiting[0];
+    if (!waiter) return Promise.resolve({ consumed: false, reason: 'no-window' });
+    // Bind receipt to the original window before yielding. Replacing that
+    // purchase/window in the next microtask cannot adopt an earlier reply.
+    // Count admission now too: a reentrant expiry cannot call this silence.
+    waiter.readings++;
     // Track admission before the judgment port can synchronously request close.
-    const work = Promise.resolve().then(() => this.readOffer(channel, text));
+    const work = Promise.resolve().then(() => this.readOffer(waiter, channel, text));
     this.#offers.add(work);
     void work.then(() => this.#offers.delete(work), () => this.#offers.delete(work));
     return work;
   }
 
-  private async readOffer(channel: CommandAuthorityChannel, text: string): Promise<PaymentReplyOffer> {
-    this.expireWindows();
-    const waiting = [...this.#waiting.values()].filter((waiter) => waiter.channels.includes(channel));
-    if (waiting.length === 0) return { consumed: false, reason: 'no-window' };
-    if (waiting.length > 1) return { consumed: false, reason: 'several-windows' };
-    const [waiter] = waiting as [Waiter];
-    waiter.readings++;
+  private async readOffer(waiter: Waiter, channel: CommandAuthorityChannel, text: string): Promise<PaymentReplyOffer> {
     try {
+      this.expireWindows();
+      if (!this.current(waiter)) return { consumed: false, reason: 'no-window' };
+      if (waiter.deadlineMs === undefined) await waiter.receptionReady;
+      if (!this.current(waiter) || !waiter.armedChannels?.includes(channel)) return { consumed: false, reason: 'no-window' };
+      if (waiter.deadlineMs === undefined) throw new PaymentReplyWindowError('invalid');
+      const arrivedAt = this.currentTime();
+      if (arrivedAt === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return { consumed: false, reason: 'no-window' }; }
+      if (arrivedAt >= waiter.deadlineMs) { waiter.expire(); return { consumed: false, reason: 'no-window' }; }
       const answer = await readPaymentReply(text, waiter.kind, waiter.notice, waiter.abort.signal);
       // A late result cannot revive this window, nor a later wait reusing its ID.
       if (!this.current(waiter)) return { consumed: false, reason: 'no-window' };
@@ -240,7 +295,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
     const now = this.currentTime();
     for (const waiter of [...this.#waiting.values()]) {
       if (now === undefined) waiter.cancel(new PaymentReplyWindowError('clock-unavailable'));
-      else if (now >= waiter.deadlineMs) waiter.expire();
+      else if (waiter.deadlineMs !== undefined && now >= waiter.deadlineMs) waiter.expire();
     }
   }
 

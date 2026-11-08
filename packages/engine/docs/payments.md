@@ -753,6 +753,14 @@ where the total it is asking about is still valid. **Undeliverable means every
 configured command-authority channel's single attempt failed**, and that is
 the condition step 4a's window branches on.
 
+The native daemon reserves reception for the exact purchase before it starts
+sending. An owner reply received during delivery or the delivery-report journal
+write stays with that purchase. After the report and deadline are durable, the
+window accepts channel replies only from channels where that notice was
+delivered. Operator controls become available when the window is armed. A
+cancelled send or failed journal write retires its queued replies; an unresolved
+reply at the deadline fails the window instead of counting as silence.
+
 One nuance that matters for a headless daemon: **the TUI is not a delivery
 strategy.** It renders in-process; there is no routed channel for it. So a daemon
 running with no surface attached and only Telegram configured is undeliverable

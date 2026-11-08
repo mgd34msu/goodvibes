@@ -9,6 +9,8 @@ import { CheckoutRegistry, MemoryCheckoutJournal } from '../sdk/src/platform/pay
 import { CheckoutOwnershipError } from '../sdk/src/platform/payments/checkout-ownership.js';
 import { runCheckout, type CheckoutFlowDeps, type CheckoutControls, type PurchaseRequest } from '../sdk/src/platform/payments/checkout-flow.js';
 import { CheckoutSubmitRefused } from '../sdk/src/platform/payments/checkout-page.js';
+import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
+import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
 import type { RawCheckoutReading } from '../sdk/src/platform/payments/checkout-extraction.js';
 import type { PurchaseRecord } from '../sdk/src/platform/payments/purchase-record.js';
 import { PaymentsGatewayServiceImpl } from '../sdk/src/platform/payments/payments-gateway-service.js';
@@ -107,6 +109,67 @@ test('metadata failure after reservation releases the known pre-submit hold and 
   await expect(f.run()).rejects.toThrow('Private store diagnostic');
   expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
   expect(f.effects).toEqual(['metadata']); expect(f.notices).toEqual([]);
+});
+
+test.each([
+  ['approval', 'yes', 'approve', 'purchased'],
+  ['approval', 'no', 'deny', 'refused'],
+  ['veto', 'yes', 'acknowledge', 'purchased'],
+  ['veto', 'stop', 'object', 'cancelled'],
+] as const)('actual %s checkout owns an early %s reply until its window flush completes', async (kind, reply, answer, outcome) => {
+  const f = fixture(), sending = barrier(), delivered = barrier(), flushing = barrier(), durable = barrier();
+  const replies = new PaymentReplyInbox({ now: () => f.deps.now?.() ?? Date.now() });
+  Reflect.set(f.deps, 'merchantJudge', { async judge() { return { qualifies: kind === 'veto', confident: true, recourse: 'Fixture recourse' }; } });
+  Reflect.set(f.deps, 'notifier', createChannelPaymentNotifier({ replies,
+    targets: [{ channel: 'telegram', request: {}, backfillable: false }],
+    router: { async deliver() { sending.release(); await delivered.wait; return 'actual-notice'; } },
+  }));
+  const put = f.journal.put.bind(f.journal);
+  f.journal.put = async record => {
+    if (record.windowDeliveries) { flushing.release(); await durable.wait; }
+    await put(record);
+  };
+  const purchase = f.run();
+  try {
+    await sending.wait;
+    expect(replies.pending).toBe(1); expect(replies.inspect()).toEqual([]);
+    let consumed = false;
+    const offer = replies.offer('telegram', reply);
+    void offer.then(() => { consumed = true; });
+    await Promise.resolve(); delivered.release(); await flushing.wait;
+    expect(consumed).toBe(false); expect(replies.inspect()).toEqual([]);
+    expect(readings.requests.filter(request => request.context?.site === 'payments.reply')).toEqual([]);
+    expect(f.effects).toEqual(['metadata']); expect(f.records).toEqual([]);
+    durable.release();
+    expect(await offer).toEqual({ consumed: true, answer });
+    expect((await purchase).kind).toBe(outcome);
+    if (outcome === 'purchased') { expect(f.records).toHaveLength(1); expect(f.effects).toContain('submit:submit-original'); }
+    else { expect(f.effects).toEqual(['metadata']); expect(f.records).toEqual([]); }
+    expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+    expect(replies.pending).toBe(0);
+  } finally { delivered.release(); durable.release(); await replies.close(); }
+});
+
+test('an actual window flush failure retires its queued reply without interpreting or submitting it', async () => {
+  const f = fixture(), sending = barrier(), delivered = barrier();
+  const replies = new PaymentReplyInbox({ now: () => f.deps.now?.() ?? Date.now() });
+  Reflect.set(f.deps, 'notifier', createChannelPaymentNotifier({ replies,
+    targets: [{ channel: 'telegram', request: {}, backfillable: false }],
+    router: { async deliver() { sending.release(); await delivered.wait; return 'actual-notice'; } },
+  }));
+  const put = f.journal.put.bind(f.journal);
+  f.journal.put = async record => { if (record.windowDeliveries) throw new Error('Window flush failed'); await put(record); };
+  const purchase = f.run();
+  try {
+    await sending.wait;
+    const offer = replies.offer('telegram', 'stop'); await Promise.resolve(); delivered.release();
+    await expect(purchase).rejects.toThrow('Window flush failed');
+    expect(await offer).toEqual({ consumed: false, reason: 'no-window' });
+    expect(readings.requests.filter(request => request.context?.site === 'payments.reply')).toEqual([]);
+    expect(f.effects).toEqual(['metadata']); expect(f.records).toEqual([]);
+    expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+    expect(replies.pending).toBe(0);
+  } finally { delivered.release(); await replies.close(); }
 });
 
 test('retirement during a shipping action cannot enter card material or submit', async () => {

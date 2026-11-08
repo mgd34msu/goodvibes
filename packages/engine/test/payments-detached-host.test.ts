@@ -75,7 +75,7 @@ test('the actual paired dispatcher acknowledges before its window, survives sock
   const acknowledged = await call('payments.checkout.begin', body, request.signal);
   expect(acknowledged.status).toBe(200); expect(acknowledged.body).toMatchObject({ outcome: 'accepted', purchaseId: body.requestId });
   request.abort(); body.item = 'altered after acknowledgement';
-  await until(() => f.replies.pending === 1);
+  await until(() => f.replies.inspect().length === 1);
   const status = readPaymentWindowStatus((await call('payments.purchase.status')).body);
   expect(status.operations[0]).toMatchObject({ purchaseId: body.requestId, state: 'running', phase: 'awaiting-window' });
   const window = status.windows[0]; if (!window) throw new Error('Expected the real reply window');

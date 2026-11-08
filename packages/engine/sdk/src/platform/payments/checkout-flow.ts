@@ -160,8 +160,8 @@ export interface PurchaseRequest {
 
 export type { PurchaseRecord } from './purchase-record.js';
 
-export type { PurchaseLedger, PaymentNotifier } from './payment-ports.js';
-import type { PurchaseLedger, PaymentNotifier } from './payment-ports.js';
+export type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './payment-ports.js';
+import type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './payment-ports.js';
 
 export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
   readonly registry: CheckoutRegistry;
@@ -583,32 +583,41 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       merchantReason: merchantVerdict.reason,
     });
     if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
-    let deliveries: readonly ChannelDelivery[];
-    try { deliveries = await notifier.deliver({ kind: 'approval', message, assertCurrent: addressCurrent, signal }); addressCurrent(); }
-    catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
-    const deadlineMs = windowDeadlineMs(now(), deps.approvalMinutes);
-    // Persisted so a restart can apply the delivery-keyed recovery rules.
-    await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
-    addressCurrent();
-    let state: ApprovalState = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
-    if (state === 'awaiting-approval') {
-      let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
+    let reception: PaymentNoticeWindow | undefined;
+    let state: ApprovalState;
+    try {
+      let deliveries: readonly ChannelDelivery[];
       try {
-        answer = await notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'approval', notice: message, deadlineMs, signal });
+        reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind: 'approval', notice: message, assertCurrent: addressCurrent, signal });
+        deliveries = await (reception?.deliveries ?? notifier.deliver({ kind: 'approval', message, assertCurrent: addressCurrent, signal }));
         addressCurrent();
-      } catch (error) { await release(); throw error; }
-      if (answer === null) {
-        state = advanceApproval(state, { kind: 'deadline' });
-      } else {
-        answeredBy = answer.channel;
-        state = advanceApproval(
-          state,
-          answer.answer === 'approve'
-            ? { kind: 'approve', channel: answer.channel }
-            : { kind: 'deny', channel: answer.channel },
-        );
       }
-    }
+      catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
+      const deadlineMs = windowDeadlineMs(now(), deps.approvalMinutes);
+      // Persisted so a restart can apply the delivery-keyed recovery rules.
+      await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
+      addressCurrent();
+      state = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
+      if (state === 'awaiting-approval') {
+        let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
+        try {
+          answer = await (reception ? reception.awaitAnswer(deadlineMs)
+            : notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'approval', notice: message, deadlineMs, signal }));
+          addressCurrent();
+        } catch (error) { await release(); throw error; }
+        if (answer === null) {
+          state = advanceApproval(state, { kind: 'deadline' });
+        } else {
+          answeredBy = answer.channel;
+          state = advanceApproval(
+            state,
+            answer.answer === 'approve'
+              ? { kind: 'approve', channel: answer.channel }
+              : { kind: 'deny', channel: answer.channel },
+          );
+        }
+      }
+    } finally { reception?.cancel(); }
     windowOutcome = state;
     if (state !== 'approved') {
       await release();
@@ -654,32 +663,41 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       merchantReason: merchantVerdict.reason,
     });
     if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
-    let deliveries: readonly ChannelDelivery[];
-    try { deliveries = await notifier.deliver({ kind: 'veto', message, assertCurrent: addressCurrent, signal }); addressCurrent(); }
-    catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
-    const deadlineMs = windowDeadlineMs(now(), deps.vetoMinutes);
-    // Persisted so a restart can apply the delivery-keyed recovery rules.
-    await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
-    addressCurrent();
-    let state: VetoState = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
-    if (state === 'open') {
-      let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
+    let reception: PaymentNoticeWindow | undefined;
+    let state: VetoState;
+    try {
+      let deliveries: readonly ChannelDelivery[];
       try {
-        answer = await notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'veto', notice: message, deadlineMs, signal });
+        reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind: 'veto', notice: message, assertCurrent: addressCurrent, signal });
+        deliveries = await (reception?.deliveries ?? notifier.deliver({ kind: 'veto', message, assertCurrent: addressCurrent, signal }));
         addressCurrent();
-      } catch (error) { await release(); throw error; }
-      if (answer === null) {
-        state = advanceVeto(state, { kind: 'deadline' });
-      } else {
-        answeredBy = answer.channel;
-        state = advanceVeto(
-          state,
-          answer.answer === 'object'
-            ? { kind: 'object', channel: answer.channel }
-            : { kind: 'acknowledge', channel: answer.channel },
-        );
       }
-    }
+      catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
+      const deadlineMs = windowDeadlineMs(now(), deps.vetoMinutes);
+      // Persisted so a restart can apply the delivery-keyed recovery rules.
+      await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
+      addressCurrent();
+      state = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
+      if (state === 'open') {
+        let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
+        try {
+          answer = await (reception ? reception.awaitAnswer(deadlineMs)
+            : notifier.awaitAnswer({ purchaseId: request.purchaseId, kind: 'veto', notice: message, deadlineMs, signal }));
+          addressCurrent();
+        } catch (error) { await release(); throw error; }
+        if (answer === null) {
+          state = advanceVeto(state, { kind: 'deadline' });
+        } else {
+          answeredBy = answer.channel;
+          state = advanceVeto(
+            state,
+            answer.answer === 'object'
+              ? { kind: 'object', channel: answer.channel }
+              : { kind: 'acknowledge', channel: answer.channel },
+          );
+        }
+      }
+    } finally { reception?.cancel(); }
     windowOutcome = state;
     if (state === 'cancelled') {
       await release();

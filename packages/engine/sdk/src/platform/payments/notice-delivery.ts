@@ -82,6 +82,9 @@ export interface PaymentNoticeRouter {
  * testable without standing up an inbound pipeline.
  */
 export interface PaymentReplySource {
+  /** Reserve reception before a send. Arming supplies only the channels whose
+   * delivery actually succeeded and happens after the window journal flush. */
+  prepareAnswer?(input: Omit<Parameters<PaymentReplySource['waitForAnswer']>[0], 'deadlineMs'>): PreparedPaymentReply;
   /**
    * Resolve with the first answer that arrives before the deadline, or null.
    *
@@ -104,6 +107,11 @@ export interface PaymentReplySource {
     readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object';
     readonly channel: PaymentAnswerChannel;
   } | null>;
+}
+
+export interface PreparedPaymentReply {
+  waitForAnswer(input: { readonly deadlineMs: number; readonly channels: readonly CommandAuthorityChannel[] }): ReturnType<PaymentReplySource['waitForAnswer']>;
+  cancel(): void;
 }
 
 export interface ChannelPaymentNotifierDeps {
@@ -167,7 +175,8 @@ export async function readPaymentReply(
  * would push the decision past the point where the total is still valid.
  */
 export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): PaymentNotifier {
-  return {
+  const prepareReply = deps.replies.prepareAnswer?.bind(deps.replies);
+  const notifier: PaymentNotifier = {
     async deliver(input): Promise<readonly ChannelDelivery[]> {
       const current = () => { input.signal?.throwIfAborted(); input.assertCurrent?.(); };
       current();
@@ -215,4 +224,30 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
       });
     },
   };
+  const deliver = notifier.deliver.bind(notifier);
+  if (prepareReply) notifier.prepareWindow = input => {
+    const purchaseId = input.purchaseId, kind = input.kind, notice = input.notice;
+    const signal = input.signal, assertCurrent = input.assertCurrent;
+    signal?.throwIfAborted(); assertCurrent?.();
+    const channels = Object.freeze(deps.targets.map(target => target.channel));
+    const prepared = prepareReply({ purchaseId, kind, channels, notice, signal });
+    let active = true;
+    let report: readonly ChannelDelivery[] | undefined;
+    const cancel = () => { if (active) { active = false; prepared.cancel(); } };
+    const deliveries = deliver({ kind, message: notice, signal, assertCurrent }).then(result => {
+      signal?.throwIfAborted(); assertCurrent?.();
+      if (!active) throw new Error('Payment notice reception was retired');
+      // Retain the actual completed deliveries privately. A later caller
+      // cannot turn a failed delivery into a channel eligible to answer.
+      report = Object.freeze(result.map(delivery => Object.freeze({ ...delivery })));
+      return report;
+    }).catch(error => { cancel(); throw error; });
+    void deliveries.catch(() => {});
+    return Object.freeze({ deliveries, cancel, awaitAnswer(deadlineMs: number) {
+      signal?.throwIfAborted(); assertCurrent?.();
+      if (!active || report === undefined) throw new Error('Payment notice delivery has not completed');
+      return prepared.waitForAnswer({ deadlineMs, channels: report.filter(delivery => delivery.delivered).map(delivery => delivery.channel) });
+    } });
+  };
+  return notifier;
 }

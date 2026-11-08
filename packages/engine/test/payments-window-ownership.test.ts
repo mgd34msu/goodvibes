@@ -43,6 +43,95 @@ test('interleaved notices of the same kind retain the exact purchase notice used
   ]);
 });
 
+test('native reception queues an early reply but only delivered channels can answer after arming', async () => {
+  const replies = inbox();
+  const notifier = createChannelPaymentNotifier({ replies,
+    targets: [
+      { channel: 'telegram', request: { channel: 'telegram' }, backfillable: false },
+      { channel: 'agent-terminal', request: { channel: 'agent-terminal' }, backfillable: false },
+    ],
+    router: { async deliver(request) {
+      if ((request as { channel: string }).channel === 'agent-terminal') throw new Error('Channel did not receive this notice');
+      return 'delivered-notice';
+    } },
+  });
+  if (!notifier.prepareWindow) throw new Error('Native reception was not wired');
+  const original = input('partial-delivery'), reception = notifier.prepareWindow(original);
+  const early = replies.offer('agent-terminal', 'yes');
+  expect(replies.inspect()).toEqual([]); expect(replies.pending).toBe(1);
+  expect(await reception.deliveries).toEqual([
+    { channel: 'telegram', delivered: true, backfillable: false },
+    { channel: 'agent-terminal', delivered: false, backfillable: false },
+  ]);
+  expect(readings.requests).toEqual([]);
+  const waiting = reception.awaitAnswer(original.deadlineMs);
+  expect(await early).toEqual({ consumed: false, reason: 'no-window' });
+  expect(await replies.offer('agent-terminal', 'yes')).toEqual({ consumed: false, reason: 'no-window' });
+  expect(readings.requests).toEqual([]);
+  expect(await replies.offer('telegram', 'no')).toEqual({ consumed: true, answer: 'deny' });
+  expect(await waiting).toEqual({ answer: 'deny', channel: 'telegram' });
+  expect(readings.requests[0]?.state).toEqual({ proposal: original.notice, reply: 'no' });
+  reception.cancel(); expect(replies.pending).toBe(0);
+});
+
+test('a pending native notice cannot be replaced or sent twice for the same purchase', async () => {
+  const replies = inbox(), sending = deferred(), release = deferred();
+  let deliveries = 0;
+  const notifier = createChannelPaymentNotifier({ replies,
+    targets: [{ channel: 'telegram', request: {}, backfillable: false }],
+    router: { async deliver() { deliveries++; sending.resolve(); await release.promise; return 'notice'; } },
+  });
+  if (!notifier.prepareWindow) throw new Error('Native reception was not wired');
+  const original = input('pending-notice'), reception = notifier.prepareWindow(original);
+  try {
+    await sending.promise;
+    expect(() => notifier.prepareWindow?.({ ...original, notice: 'Replacement notice' })).toThrow(PaymentReplyWindowError);
+    expect(deliveries).toBe(1);
+    const offering = replies.offer('telegram', 'yes'); await Promise.resolve();
+    const closing = replies.close(); expect(replies.close()).toBe(closing);
+    expect(await offering).toEqual({ consumed: false, reason: 'no-window' });
+    await closing; expect(readings.requests).toEqual([]);
+    release.resolve(); await reception.deliveries;
+    await expect(reception.awaitAnswer(original.deadlineMs)).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
+  } finally { release.resolve(); reception.cancel(); }
+});
+
+test('retiring an unarmed native notice drains queued replies and cannot create deadline silence', async () => {
+  const replies = inbox(), release = deferred();
+  const notifier = createChannelPaymentNotifier({ replies,
+    targets: [{ channel: 'telegram', request: {}, backfillable: false }],
+    router: { async deliver() { await release.promise; return 'notice'; } },
+  });
+  if (!notifier.prepareWindow) throw new Error('Native reception was not wired');
+  const original = input('retired-notice'), reception = notifier.prepareWindow(original);
+  try {
+    const offering = replies.offer('telegram', 'yes'); await Promise.resolve();
+    reception.cancel();
+    expect(await offering).toEqual({ consumed: false, reason: 'no-window' });
+    expect(replies.pending).toBe(0); expect(replies.inspect()).toEqual([]);
+    release.resolve(); await expect(reception.deliveries).rejects.toThrow('retired');
+    expect(readings.requests).toEqual([]);
+  } finally { release.resolve(); reception.cancel(); }
+});
+
+test('an early unresolved veto at an expired armed deadline fails instead of becoming silence', async () => {
+  let clock = 100;
+  const replies = inbox(() => clock);
+  const notifier = createChannelPaymentNotifier({ replies,
+    targets: [{ channel: 'telegram', request: {}, backfillable: false }],
+    router: { async deliver() { return 'notice'; } },
+  });
+  if (!notifier.prepareWindow) throw new Error('Native reception was not wired');
+  const original = { ...input('late-flush'), kind: 'veto' as const };
+  const reception = notifier.prepareWindow(original), offering = replies.offer('telegram', 'stop');
+  await reception.deliveries;
+  clock = 201;
+  const waiting = reception.awaitAnswer(200);
+  expect(await offering).toEqual({ consumed: false, reason: 'no-window' });
+  await expect(waiting).rejects.toMatchObject({ kind: 'unsettled-reply' });
+  expect(readings.requests).toEqual([]); expect(replies.pending).toBe(0);
+});
+
 test('one purchase cannot silently replace its live window', async () => {
   const replies = inbox();
   const original = input('same-purchase');
@@ -52,6 +141,19 @@ test('one purchase cannot silently replace its live window', async () => {
   expect(await replies.offer('telegram', 'yes')).toEqual({ consumed: true, answer: 'approve' });
   expect((await first)?.answer).toBe('approve');
   expect(readings.requests[0]!.state).toEqual({ proposal: original.notice, reply: 'yes' });
+});
+
+test('an offer binds its original window before the first microtask and cannot answer a replacement purchase', async () => {
+  const replies = inbox(), first = input('receipt-before-yield');
+  const original = replies.prepareAnswer(first);
+  const offering = replies.offer('telegram', 'yes');
+  original.cancel();
+  const replacement = replies.waitForAnswer({ ...first, notice: 'A different owner purchase' });
+  expect(await offering).toEqual({ consumed: false, reason: 'no-window' });
+  expect(readings.requests).toEqual([]); expect(replies.pending).toBe(1);
+  expect(await replies.offer('telegram', 'no')).toEqual({ consumed: true, answer: 'deny' });
+  expect((await replacement)?.answer).toBe('deny');
+  expect(readings.requests[0]?.state).toEqual({ proposal: 'A different owner purchase', reply: 'no' });
 });
 
 test('a wait snapshots its purchase, notice, channels, kind and deadline before later caller edits', async () => {

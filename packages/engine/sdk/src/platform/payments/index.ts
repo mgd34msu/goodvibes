@@ -203,6 +203,7 @@ export type {
   PurchaseRecord,
   PurchaseLedger,
   PaymentNotifier,
+  PaymentNoticeWindow,
   CheckoutFlowDeps,
   CheckoutControls,
   CheckoutOutcome,
@@ -214,6 +215,7 @@ export type {
   PaymentNoticeTarget,
   PaymentNoticeRouter,
   PaymentReplySource,
+  PreparedPaymentReply,
   ChannelPaymentNotifierDeps,
 } from './notice-delivery.js';
 

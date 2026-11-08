@@ -21,11 +21,14 @@
  */
 import type { PaymentReplySource, PaymentAnswer } from './notice-delivery.js';
 import { readPaymentReply } from './notice-delivery.js';
-import { parseCommandAuthorityChannel, type CommandAuthorityChannel } from './types.js';
+import { parseCommandAuthorityChannel, type CommandAuthorityChannel, type PaymentAnswerChannel } from './types.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
+import type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
+export type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
 
 interface Waiter {
   readonly purchaseId: string;
+  readonly windowId: string;
   readonly kind: 'approval' | 'veto';
   readonly channels: readonly CommandAuthorityChannel[];
   readonly notice: string;
@@ -33,14 +36,14 @@ interface Waiter {
   readonly abort: AbortController;
   readings: number;
   expire(): void;
-  settle(answer: { readonly answer: PaymentAnswer; readonly channel: CommandAuthorityChannel } | null): void;
+  settle(answer: { readonly answer: PaymentAnswer; readonly channel: PaymentAnswerChannel } | null): void;
   cancel(error: Error): void;
 }
 
 /** Value-free window failures; failure/cancellation can never mean silence. */
 export class PaymentReplyWindowError extends Error {
   readonly code = 'PAYMENT_REPLY_WINDOW_UNAVAILABLE';
-  constructor(readonly kind: 'invalid' | 'duplicate' | 'cancelled' | 'settled' | 'unsettled-reply' | 'reading-failed' | 'clock-unavailable') {
+  constructor(readonly kind: 'invalid' | 'duplicate' | 'cancelled' | 'settled' | 'unsettled-reply' | 'reading-failed' | 'clock-unavailable' | 'stale') {
     super(`The payment reply window is unavailable: ${kind}.`);
     this.name = 'PaymentReplyWindowError';
   }
@@ -65,6 +68,8 @@ export class PaymentReplyInbox implements PaymentReplySource {
   readonly #offers = new Set<Promise<PaymentReplyOffer>>();
   #closed = false;
   #closing: Promise<void> | null = null;
+  readonly #incarnation = crypto.randomUUID();
+  #windowSequence = 0;
 
   constructor(options: { readonly now?: () => number } = {}) {
     this.#now = options.now ?? Date.now;
@@ -88,6 +93,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
         reject(new PaymentReplyWindowError('invalid')); return;
       }
       if (this.#waiting.has(purchaseId)) { reject(new PaymentReplyWindowError('duplicate')); return; }
+      if (this.#windowSequence >= Number.MAX_SAFE_INTEGER) { reject(new PaymentReplyWindowError('invalid')); return; }
       let timer: ReturnType<typeof setTimeout> | undefined;
       const remove = (): boolean => {
         if (!this.current(waiter)) return false;
@@ -108,6 +114,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
       };
       const waiter: Waiter = {
         purchaseId, kind, channels, notice, deadlineMs,
+        windowId: `payment-window:${this.#incarnation}:${++this.#windowSequence}`,
         abort: new AbortController(),
         readings: 0,
         expire: () => {
@@ -160,6 +167,33 @@ export class PaymentReplyInbox implements PaymentReplySource {
     return this.#waiting.size;
   }
 
+  /** A snapshot of the actual live windows. Polling never creates a delivery
+   * report and does not change either window's silence/undeliverable rule. */
+  inspect(purchaseId?: string): readonly PaymentWindowView[] {
+    this.expireWindows();
+    return Object.freeze([...this.#waiting.values()]
+      .filter(waiter => purchaseId === undefined || waiter.purchaseId === purchaseId)
+      .map(waiter => Object.freeze({ purchaseId: waiter.purchaseId, windowId: waiter.windowId,
+        kind: waiter.kind, notice: waiter.notice, deadlineMs: waiter.deadlineMs })));
+  }
+
+  /** Host-only addressed answer after current operator authority is checked.
+   * The exact window ID is mandatory: an old view cannot answer a new wait.
+   * Channel ingress still uses offer() and its separate semantic reading. */
+  answer(input: { readonly purchaseId: string; readonly windowId: string; readonly action: 'approve' | 'deny' | 'cancel' }): PaymentWindowAnswer {
+    if (this.#closed) throw new PaymentReplyInboxClosedError();
+    const waiter = this.#waiting.get(input.purchaseId);
+    if (!waiter || waiter.windowId !== input.windowId) throw new PaymentReplyWindowError('stale');
+    this.expireWindows();
+    if (!this.current(waiter)) throw new PaymentReplyWindowError('stale');
+    if (input.action !== 'approve' && input.action !== 'deny' && input.action !== 'cancel') throw new PaymentReplyWindowError('invalid');
+    const answer: PaymentAnswer = input.action === 'approve'
+      ? waiter.kind === 'approval' ? 'approve' : 'acknowledge'
+      : waiter.kind === 'approval' ? 'deny' : 'object';
+    waiter.settle({ answer, channel: 'operator' });
+    return Object.freeze({ purchaseId: waiter.purchaseId, windowId: waiter.windowId, accepted: true, answer });
+  }
+
   /**
    * Offer an inbound owner message that arrived on `channel`. The caller has
    * already established that the sender is the owner.
@@ -174,11 +208,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
   }
 
   private async readOffer(channel: CommandAuthorityChannel, text: string): Promise<PaymentReplyOffer> {
-    const now = this.currentTime();
-    for (const waiter of [...this.#waiting.values()]) {
-      if (now === undefined) waiter.cancel(new PaymentReplyWindowError('clock-unavailable'));
-      else if (now >= waiter.deadlineMs) waiter.expire();
-    }
+    this.expireWindows();
     const waiting = [...this.#waiting.values()].filter((waiter) => waiter.channels.includes(channel));
     if (waiting.length === 0) return { consumed: false, reason: 'no-window' };
     if (waiting.length > 1) return { consumed: false, reason: 'several-windows' };
@@ -205,6 +235,14 @@ export class PaymentReplyInbox implements PaymentReplySource {
   }
 
   private current(waiter: Waiter): boolean { return this.#waiting.get(waiter.purchaseId) === waiter; }
+
+  private expireWindows(): void {
+    const now = this.currentTime();
+    for (const waiter of [...this.#waiting.values()]) {
+      if (now === undefined) waiter.cancel(new PaymentReplyWindowError('clock-unavailable'));
+      else if (now >= waiter.deadlineMs) waiter.expire();
+    }
+  }
 
   private currentTime(): number | undefined {
     try { const now = this.#now(); return Number.isFinite(now) ? now : undefined; }

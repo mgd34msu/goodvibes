@@ -281,6 +281,10 @@ export const GATEWAY_REST_ROUTES: readonly GatewayRestRoute[] = [
   route('POST', '/api/payments/checkout/begin', 'payments.checkout.begin'),
   route('POST', '/api/payments/checkout/fill-card', 'payments.checkout.fillCard'),
   route('GET', '/api/payments/purchases', 'payments.purchases.list'),
+  route('GET', '/api/payments/purchase/status', 'payments.purchase.status'),
+  route('POST', '/api/payments/purchase/approve', 'payments.purchase.approve'),
+  route('POST', '/api/payments/purchase/deny', 'payments.purchase.deny'),
+  route('POST', '/api/payments/purchase/cancel', 'payments.purchase.cancel'),
   // browser.*, real browser control over the platform engine. The engine was
   // hoisted into the SDK and the daemon could link it, but no verb and no path
   // existed, so a daemon-only caller had nothing to invoke: with no surface

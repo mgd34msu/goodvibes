@@ -123,6 +123,22 @@ export const PAYMENTS_CARDS_DELETE_OUTPUT_SCHEMA = objectSchema(
   ['id', 'deleted', 'secretsCleared'],
 );
 
+/** Only a live purchase notice. A window reference never grants authority. */
+const PAYMENT_WINDOW_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, kind: enumSchema(['approval', 'veto']),
+  notice: STRING_SCHEMA, deadlineMs: NUMBER_SCHEMA,
+}, ['purchaseId', 'windowId', 'kind', 'notice', 'deadlineMs']);
+
+export const PAYMENTS_PURCHASE_STATUS_INPUT_SCHEMA = objectSchema({ purchaseId: STRING_SCHEMA });
+export const PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA = objectSchema({ windows: arraySchema(PAYMENT_WINDOW_SCHEMA) }, ['windows']);
+export const PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, confirm: BOOLEAN_SCHEMA,
+}, ['purchaseId', 'windowId', 'confirm']);
+export const PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA = objectSchema({
+  purchaseId: STRING_SCHEMA, windowId: STRING_SCHEMA, accepted: BOOLEAN_SCHEMA,
+  answer: enumSchema(['approve', 'deny', 'acknowledge', 'object']),
+}, ['purchaseId', 'windowId', 'accepted', 'answer']);
+
 /** One purchase, as the audit ledger recorded it. */
 const PURCHASE_RECORD_SCHEMA = objectSchema(
   {

@@ -52,7 +52,7 @@ import { sanitizeNoticeField } from '../security/notice-text.js';
 import { approvalReply, vetoReply } from './batteries/payment-reply.js';
 import type { ChannelDelivery } from './windows.js';
 import type { PaymentNotifier } from './checkout-flow.js';
-import type { CommandAuthorityChannel } from './types.js';
+import type { CommandAuthorityChannel, PaymentAnswerChannel } from './types.js';
 
 /**
  * One place a payment notice can be sent, already resolved to a routable target.
@@ -102,7 +102,7 @@ export interface PaymentReplySource {
     readonly signal?: AbortSignal | undefined;
   }): Promise<{
     readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object';
-    readonly channel: CommandAuthorityChannel;
+    readonly channel: PaymentAnswerChannel;
   } | null>;
 }
 
@@ -120,7 +120,8 @@ export interface ChannelPaymentNotifierDeps {
 /** The decision site the reply readings are logged under. */
 export const PAYMENT_REPLY_SITE = 'payments.reply';
 
-export type PaymentAnswer = 'approve' | 'deny' | 'acknowledge' | 'object';
+import type { PaymentAnswer } from './window-view.js';
+export type { PaymentAnswer } from './window-view.js';
 
 /**
  * Read an inbound reply as an answer to the notice it follows, or as nothing.

@@ -12,6 +12,8 @@ import { routedFetch } from './relay-connection';
 import { resolveDaemonRefusal } from './daemon-refusal';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
+import type { PaymentWindowView, PaymentWindowAnswer } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { readPaymentWindowStatus, readPaymentWindowAnswer } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
 import { readClientCompatibilityFloor, recordObservedClientCompatibilityFloor } from './client-compatibility';
 // The union profile.forget accepts as a target (a field id OR a raw line index), named in
 // lib/owner-profile.ts beside the readers for the same verbs' output. The generated
@@ -192,6 +194,10 @@ interface RouteDefinition {
 }
 
 interface RequestOptions {
+  /** Set only by a handler for an explicit owner gesture. */
+  readonly explicitUserRequest?: boolean;
+  /** Structured purchase-window failures already have a fixed host diagnostic. */
+  readonly interpretRefusal?: boolean;
   method?: HttpMethod;
   body?: unknown;
   query?: JsonRecord;
@@ -318,6 +324,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
   const headers: HeadersInit = {
     ...(options.authenticated === false ? {} : await authHeaders()),
     ...(method === 'GET' || options.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+    ...(options.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
   };
   const url = buildUrl(path, options.query);
   check();
@@ -349,7 +356,7 @@ async function requestJson<T = unknown>(path: string, options: RequestOptions = 
       body,
       category: response.status === 401 ? 'authentication' : 'service',
     });
-    if (path !== WEBUI_METHOD_ROUTES['judgment.battery.run'].path && path !== WEBUI_METHOD_ROUTES['control.status'].path) await resolveDaemonRefusal(error, runBrowserJudgment, {
+    if (options.interpretRefusal !== false && path !== WEBUI_METHOD_ROUTES['judgment.battery.run'].path && path !== WEBUI_METHOD_ROUTES['control.status'].path) await resolveDaemonRefusal(error, runBrowserJudgment, {
       signal: options.signal, isCurrent: () => isClientLifetimeCurrent(failureLifetime),
     });
     // Interpretation never replaces the original HTTP failure, even if its
@@ -524,6 +531,27 @@ async function invokeOperator(methodId: string, input?: unknown, signal?: AbortS
   if (route.method === 'GET') return requestJson(path, { method: route.method, query: rest, signal });
   if (route.method === 'DELETE' && !Object.keys(rest).length) return requestJson(path, { method: route.method, signal });
   return requestJson(path, { method: route.method, body: rest, signal });
+}
+
+/** Routes remain derived from the canonical catalog/facade, never a second
+ * hand-written URL table. Explicit-user metadata belongs only to answer clicks. */
+function purchaseWindowRoute(action: 'status' | 'approve' | 'deny' | 'cancel'): RouteDefinition {
+  const route = EXTRA_METHOD_ROUTES[`payments.purchase.${action}`];
+  if (!route || route.method !== (action === 'status' ? 'GET' : 'POST')) {
+    throw new Error('The connected client does not provide the purchase-window route.');
+  }
+  return route;
+}
+async function readPurchaseWindows(signal?: AbortSignal): Promise<{ readonly windows: readonly PaymentWindowView[] }> {
+  const route = purchaseWindowRoute('status');
+  return readPaymentWindowStatus(await requestJson(route.path, { method: 'GET', interpretRefusal: false, signal }));
+}
+async function answerPurchaseWindow(action: 'approve' | 'deny' | 'cancel', input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal): Promise<PaymentWindowAnswer> {
+  const route = purchaseWindowRoute(action);
+  const purchaseId = input.purchaseId, windowId = input.windowId;
+  const result = readPaymentWindowAnswer(await requestJson(route.path, { method: 'POST', body: { purchaseId, windowId, confirm: true }, explicitUserRequest: true, interpretRefusal: false, signal }));
+  if (result.purchaseId !== purchaseId || result.windowId !== windowId) throw new Error('The purchase answer did not match the selected window. Refresh its status.');
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -1856,6 +1884,12 @@ export const sdk = {
     // response is that same metadata, it never echoes what was submitted,
     // because an echo would be a read path and no read path exists.
     payments: {
+      purchase: {
+        status: readPurchaseWindows,
+        approve: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('approve', input, signal),
+        deny: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('deny', input, signal),
+        cancel: (input: Pick<PaymentWindowView, 'purchaseId' | 'windowId'>, signal?: AbortSignal) => answerPurchaseWindow('cancel', input, signal),
+      },
       cards: {
         // No hand-supplied TInput/TOutput on any of the three: invokeOperator no
         // longer takes a TInput type argument at all (it types `input` as

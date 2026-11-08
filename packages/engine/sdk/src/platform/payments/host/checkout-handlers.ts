@@ -28,6 +28,7 @@ import { CheckoutRegistryError } from '../checkout-registry.js';
 import type { CheckoutJournal } from '../checkout-registry.js';
 import type { MerchantJudgePort } from '../merchant-recourse.js';
 import type { PaymentNotifier } from '../payment-ports.js';
+import type { PaymentReplyInbox } from '../reply-inbox.js';
 import { PaymentsGatewayServiceImpl } from '../payments-gateway-service.js';
 import { readPaymentsEnabled, readPaymentsServiceConfig } from '../payments-config.js';
 import { SHIPPING_TIERS } from '../types.js';
@@ -64,6 +65,8 @@ export interface CheckoutComposition {
   readonly seam: () => BrowserCheckoutSeam | undefined;
   readonly addresses: AddressStore;
   readonly notifier: PaymentNotifier;
+  /** The exact daemon-owned inbox also borrowed by channel reply ingress. */
+  readonly replies?: PaymentReplyInbox | undefined;
   readonly merchantJudge: MerchantJudgePort;
   /** The process-wide ledger; see routes/browser-composition.ts's header for why it must be shared, not private. */
   readonly untrusted: UntrustedContentLedger;

@@ -42,7 +42,7 @@
  *
  * Only an explicit acknowledgement short-circuits it.
  */
-import type { CommandAuthorityChannel } from './types.js';
+import type { CommandAuthorityChannel, PaymentAnswerChannel } from './types.js';
 
 /**
  * What happens when a window closes with no answer.
@@ -137,16 +137,16 @@ export function windowDeadlineMs(startedAtMs: number, minutes: number): number {
 export type ApprovalEvent =
   | { readonly kind: 'dispatched'; readonly deliveries: readonly ChannelDelivery[] }
   | { readonly kind: 'undeliverable' }
-  | { readonly kind: 'approve'; readonly channel: CommandAuthorityChannel }
-  | { readonly kind: 'deny'; readonly channel: CommandAuthorityChannel }
+  | { readonly kind: 'approve'; readonly channel: PaymentAnswerChannel }
+  | { readonly kind: 'deny'; readonly channel: PaymentAnswerChannel }
   | { readonly kind: 'deadline' }
   | { readonly kind: 'total-changed' };
 
 export type VetoEvent =
   | { readonly kind: 'dispatched'; readonly deliveries: readonly ChannelDelivery[] }
   | { readonly kind: 'undeliverable' }
-  | { readonly kind: 'acknowledge'; readonly channel: CommandAuthorityChannel }
-  | { readonly kind: 'object'; readonly channel: CommandAuthorityChannel }
+  | { readonly kind: 'acknowledge'; readonly channel: PaymentAnswerChannel }
+  | { readonly kind: 'object'; readonly channel: PaymentAnswerChannel }
   | { readonly kind: 'deadline' }
   | { readonly kind: 'total-changed' };
 

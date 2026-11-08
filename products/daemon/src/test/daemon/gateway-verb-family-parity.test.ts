@@ -409,6 +409,7 @@ const VERB_FAMILIES: readonly VerbFamily[] = [
       'payments.cards.list', 'payments.cards.create', 'payments.cards.delete',
       'payments.purchases.list',
       'payments.checkout.approve', 'payments.checkout.begin', 'payments.checkout.fillCard',
+      'payments.purchase.status', 'payments.purchase.approve', 'payments.purchase.deny', 'payments.purchase.cancel',
     ],
   },
 ];

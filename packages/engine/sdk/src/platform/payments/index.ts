@@ -23,6 +23,7 @@ export type {
   CurrencyCode,
   OwnerSuppliedText,
   CommandAuthorityChannel,
+  PaymentAnswerChannel,
   ShippingTier,
   ShippingOption,
   ShippingStepDown,
@@ -246,7 +247,7 @@ export type { PaymentsConfigReader } from './payments-config.js';
 export { createJevMerchantJudge, judgeMerchant } from './merchant-judge-model.js';
 
 export { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from './reply-inbox.js';
-export type { PaymentReplyOffer } from './reply-inbox.js';
+export type { PaymentReplyOffer, PaymentWindowView, PaymentWindowAnswer } from './reply-inbox.js';
 
 export { registry as paymentsJudgmentRegistry } from './judgment-registry.js';
 

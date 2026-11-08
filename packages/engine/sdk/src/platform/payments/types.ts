@@ -73,6 +73,10 @@ export function unsafeOwnerSuppliedTextForTests(value: string): OwnerSuppliedTex
  */
 export type CommandAuthorityChannel = 'tui' | 'agent-terminal' | 'telegram';
 
+/** Authenticated operator buttons/commands are answers, not notification routes.
+ * This deliberately does not add email or an operator destination to delivery. */
+export type PaymentAnswerChannel = CommandAuthorityChannel | 'operator';
+
 const COMMAND_AUTHORITY_CHANNELS: readonly string[] = ['tui', 'agent-terminal', 'telegram'];
 
 /**

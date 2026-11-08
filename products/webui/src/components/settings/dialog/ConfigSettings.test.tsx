@@ -48,6 +48,7 @@ mock.module("../../../lib/goodvibes", () => ({
   sdk: {
     operator: {
       payments: {
+        purchase: { status: () => Promise.resolve({ windows: [] }) },
         cards: {
           list: () => {
             cardsListCalls.push("list");

@@ -8,6 +8,8 @@ export {
   mayOfferCardEntryFlow,
   describeCardEntryRefusal,
 } from './entry-policy.js';
+export { readPaymentWindowStatus, readPaymentWindowAnswer } from './window-view.js';
+export type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
 
 /**
  * What every surface must show at the moment someone selects

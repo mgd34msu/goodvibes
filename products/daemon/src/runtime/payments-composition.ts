@@ -127,6 +127,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     seam: options.checkoutSeam,
     addresses: configBackedAddressStore(config, options.configManager.preparePostalAddress?.bind(options.configManager)),
     notifier: channelBackedPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies),
+    replies: paymentReplies,
     merchantJudge: createJevMerchantJudge(),
     untrusted: getProcessUntrustedContentLedger(),
     // The persisted owner approvals `payments.checkout.approve` mints and

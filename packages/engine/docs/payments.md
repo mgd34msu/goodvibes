@@ -797,7 +797,9 @@ two still is.
 Both windows run through the same port, `PaymentNotifier.awaitAnswer()`
 (`platform/payments/notice-delivery.ts`), called inline from `runCheckout()`
 while the `payments.checkout.begin` call that started the purchase is still
-open. There is no separate use of `ApprovalBroker`
+open. A second call can answer its live `PaymentReplyInbox` window by exact
+purchase and window reference, but begin still does not acknowledge a detached
+operation. There is no separate use of `ApprovalBroker`
 (`platform/control-plane/approval-broker.ts`) anywhere in the payments module,
 and no use of `AutomationManager.createJob()` or `AutomationAtSchedule` either.
 The wait for an answer lives on the stack of that one call, not in a persisted
@@ -1572,44 +1574,43 @@ verb.
 | `payments.purchases.list` | `read:payments` | Audit records. | yes |
 | `payments.checkout.begin` | command-authority principal | Runs the whole flow, §6 steps 0 through 8, in one call, including waiting out the window; returns the final `PurchaseRecord` outcome, a refusal, a cancellation or a challenge. | yes |
 | `payments.checkout.fillCard` | command-authority principal | Types the stored card into an already-open checkout page. | yes |
-| `payments.purchase.approve` / `.deny` | command-authority principal | Answers an above-budget gate. | not yet |
-| `payments.purchase.cancel` | command-authority principal | Vetoes an in-budget purchase. | not yet |
-| `payments.purchase.status` | `read:payments` | Live state machine position. | not yet |
+| `payments.purchase.approve` / `.deny` | paired admin owner, `write:payments`, explicit confirmation | Answers the exact live window; approve acknowledges an in-budget veto too. | live windows |
+| `payments.purchase.cancel` | paired admin owner, `write:payments`, explicit confirmation | Objects to an in-budget veto or denies an approval. | live windows |
+| `payments.purchase.status` | `read:payments` | Live windows: exact notice, deadline, purchase ID and window reference. | live windows |
 
-Seven verbs are built and published (`./platform/payments`, since 1.19.0):
-the five above plus the two checkout verbs. `payments.checkout.begin` is
-long-running by construction, it does not return until the window it opens
-resolves or the whole purchase is decided, because the window itself is
-awaited inline inside `runCheckout()` rather than parked in a broker a
-separate call could later answer (§8.6). That is also the practical reason the
-next three rows are not yet built: there is no operator-method surface today
-for a second call to answer a window that the first call is still holding
-open on its own stack.
+The original seven SDK verbs, the pre-checkout `payments.checkout.approve`,
+and the four live-window methods are attached by the daemon payment composition.
+`payments.checkout.begin` still runs the checkout inline, including its wait.
+The new methods address that same live inbox independently, so a second
+connection can inspect and answer a pending window while begin is waiting.
+Detached operation acknowledgement, retained terminal operation status and
+restart-resumable windows are still unfinished (§8.6).
 
 Settings are not in this list on purpose: they are ordinary daemon-owned config
 and travel the existing `config.get`/`config.set` path, which is what makes a
 value entered in any surface apply to the daemon (§10.1).
 
-The approve/deny/cancel/status verbs are the remaining wire work, and they are
-not a thin layer over what already exists. Today, the only way an open window
-resolves before its deadline is a reply arriving over a configured channel and
-being matched to the pending purchase by `PaymentReplySource.waitForAnswer()`
-(`platform/payments/notice-delivery.ts`), the same port `payments.checkout.begin`
-is blocked on.
+`payments.purchase.status` accepts an optional `purchaseId` and returns
+`{ windows: [...] }`. Every window contains `purchaseId`, `windowId`, `kind`,
+`notice` and `deadlineMs`. This is the actual pending-window list, not a report
+of every checkout phase or its final result. Completed purchases remain in
+`payments.purchases.list`.
 
-Building these verbs means giving the TUI and the agent terminal a way to
-answer that does not depend on being the same connection that opened the
-checkout, which in turn means the window can no longer simply live on one
-call's stack. That is a real design change, not just new routes, and it is the
-same change that would make §8.6's restart recovery reachable.
+Answer methods take `{ purchaseId, windowId, confirm: true }` and require the
+explicit-user-request transport flag plus current paired admin authority and
+`write:payments`. The daemon rechecks that authority under its native pairing
+lock before settling the window. A stale view, expired window, revoked pairing,
+missing scope or second answer refuses. An explicit answer does not ask a model
+to interpret the click. Operator answers are recorded as `operator`; that is an
+answer source, not an additional notification channel, and email remains excluded.
 
-A `payments.purchase_update` gateway event, so surfaces render a live window
-rather than polling, would need the same change and does not exist yet either.
-
-`approve`/`deny`/`cancel` additionally require that the calling principal arrived
-over a command-authority surface, an authenticated operator session from the TUI
-or agent, or a channel binding whose chat identity is the owner's. Email
-principals do not exist for these methods.
+Channel replies and operator answers settle one shared window. A successful
+answer confirms the choice was accepted; all later checkout/page/address/budget
+checks still precede submission. No answer request is automatically retried.
+Reading status does not mark a notification delivered or change its deadline.
+A live-window answer is distinct from the pre-checkout purchase authorization:
+`payments.checkout.approve` authorizes the initial merchant/item/amount request;
+the final-price window asks about the decision reached for that checkout.
 
 **Surface work is UI only:** a payments settings section (budgets, toggles,
 timezone picker, shipping preference, channel order), a card entry form that
@@ -1662,22 +1663,18 @@ reference plus a secret-store write is
 `SECRET_CONFIG_KEYS`) and `input/settings-modal-secrets.ts`. The card keys are
 added to `SECRET_CONFIG_KEYS`.
 
-### 10.3 Neither the TUI nor the agent terminal has a payment-specific answer path yet
+### 10.3 Purchase windows in the product UI
 
-Approval and veto are meant to arrive over the TUI, the agent terminal, or a
-channel like Telegram (§8.2). The TUI's `ApprovalBroker` prompt card
-(`goodvibes-tui/src/permissions/broker-approval-card.ts`) exists, but it
-answers ordinary tool-permission asks; nothing in it or in the agent's
-`PermissionPromptUI` (`goodvibes-agent/src/permissions/prompt.ts`) is wired to
-a payment window, because payments does not route through `ApprovalBroker` at
-all (§8.6). A reply arriving today only resolves a window over a channel
-`PaymentReplySource` reads, in practice Telegram; there is no TUI or
-agent-terminal affordance yet that calls anything, because there is no
-operator method for it to call (§10).
+WebUI exposes **Settings → Payments → Purchase windows** beside card setup.
+It shows the daemon's exact notice and deadline, with approve/deny controls
+for an approval and proceed-now/cancel controls for a veto. The view refreshes
+the actual windows and drops stale account/connection data when the client
+identity changes. Answer requests require a paired owner connection.
 
-So the remaining work is not porting a broker card, it is building the
-`payments.purchase.approve`/`.deny`/`.cancel` verbs themselves and a TUI/agent
-surface that calls them, which is the same gap §10 and §8.6 already name.
+TUI and Agent terminal window controls remain unfinished. Their existing
+ordinary tool-permission cards answer a different broker; they do not answer
+payment windows. Full operation status across disconnect/restart and a detached
+checkout start also remain unfinished (§8.6).
 
 ### 10.4 The master switch is a plain config key, not the SDK's flag registry
 

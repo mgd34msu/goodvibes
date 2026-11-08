@@ -8,7 +8,7 @@
  */
 import type { PurchaseRecord } from './purchase-record.js';
 import type { ChannelDelivery } from './windows.js';
-import type { CommandAuthorityChannel } from './types.js';
+import type { PaymentAnswerChannel } from './types.js';
 
 export interface PurchaseLedger {
   record(entry: PurchaseRecord): Promise<void>;
@@ -48,7 +48,7 @@ export interface PaymentNotifier {
     readonly signal?: AbortSignal | undefined;
   }): Promise<{
     readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object';
-    readonly channel: CommandAuthorityChannel;
+    readonly channel: PaymentAnswerChannel;
   } | null>;
 }
 

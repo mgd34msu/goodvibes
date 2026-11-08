@@ -42,9 +42,26 @@ import {
   PAYMENTS_CHECKOUT_FILL_CARD_OUTPUT_SCHEMA,
   PAYMENTS_PURCHASES_LIST_INPUT_SCHEMA,
   PAYMENTS_PURCHASES_LIST_OUTPUT_SCHEMA,
+  PAYMENTS_PURCHASE_STATUS_INPUT_SCHEMA,
+  PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA,
+  PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA,
+  PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA,
 } from './operator-contract-schemas-payments.js';
 
 export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDescriptor[] = [
+  methodDescriptor({
+    id: 'payments.purchase.status', title: 'Pending Purchase Windows', category: 'payments', scopes: ['read:payments'],
+    description: 'Read the actual live purchase approval and veto windows, including the exact notice, deadline and window reference. Optionally select one purchase. This read does not mark a notification delivered, extend a deadline or resume an interrupted purchase. Completed purchase records are available through payments.purchases.list.',
+    http: { method: 'GET', path: '/api/payments/purchase/status' },
+    inputSchema: PAYMENTS_PURCHASE_STATUS_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_STATUS_OUTPUT_SCHEMA,
+  }),
+  ...(['approve', 'deny', 'cancel'] as const).map(action => methodDescriptor({
+    id: `payments.purchase.${action}`, title: action === 'approve' ? 'Approve This Purchase' : action === 'deny' ? 'Deny This Purchase' : 'Cancel This Purchase Window',
+    category: 'payments', scopes: ['write:payments'], access: 'admin', dangerous: true,
+    description: `${action === 'approve' ? 'Approve an above-budget purchase or explicitly acknowledge an in-budget purchase' : 'Refuse the pending purchase'} using the exact live purchase and window references. Requires an explicit owner action, confirm: true and current paired admin authority with write:payments. The same inbox also consumes authenticated channel replies. A stale, answered or expired window refuses; this never submits directly or overrides budget, merchant, page or address checks.`,
+    http: { method: 'POST', path: `/api/payments/purchase/${action}` },
+    inputSchema: PAYMENTS_PURCHASE_ANSWER_INPUT_SCHEMA, outputSchema: PAYMENTS_PURCHASE_ANSWER_OUTPUT_SCHEMA,
+  })),
   methodDescriptor({
     id: 'payments.budget.status',
     title: 'Payment Budget Status',

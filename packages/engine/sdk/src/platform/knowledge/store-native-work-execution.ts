@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { knowledgeSchemaColumns, executionAttemptColumns } from './store-schema-validation-data.js';
 import { createNativeCiContinuationStorage } from './store-native-ci-continuation.js';
 import { nativeSettlementDigest, nativeWorkAttestationSchema, nativeWorkSettlementSchema, type NativeWorkSettlementReceipt } from '../workflow/work-ledger/native-settlement-types.js';
@@ -24,7 +25,7 @@ export function validateNativeWorkSettlementTable(db: SqlReader): void {
     const receipt = nativeWorkSettlementSchema.parse(JSON.parse(String(row[3])));
     if (row[0] !== receipt.projectId || row[1] !== receipt.keyHash || row[2] !== 1) throw new NativeWorkExecutionError('invalid');
     const current = read(db, receipt.projectId, { attemptId: receipt.target.attemptId });
-    if (!current.settlement || nativeSettlementDigest(current.settlement) !== nativeSettlementDigest(receipt)) throw new NativeWorkExecutionError('invalid');
+    if (!current.settlement || !isDeepStrictEqual(current.settlement, receipt)) throw new NativeWorkExecutionError('invalid');
   }
 }
 /** Validate every existing authority row before admitting the additive schema. */
@@ -88,13 +89,13 @@ function read(db: SqlReader, projectId: string, key: Lookup): NativeWorkExecutio
   if (settlement) {
     if (!record?.receipt || settlementRow?.[0] !== 1 || settlement.projectId !== projectId || settlement.keyHash !== durableKeyHash(record.request.key)
       || settlement.receiptDigest !== nativeSettlementDigest(record.receipt) || settlement.payloadRevision !== durablePayloadRevision(record.request)
-      || nativeSettlementDigest(settlement.target) !== nativeSettlementDigest(record.target) || settlement.contractId !== record.receipt.contractId
+      || !isDeepStrictEqual(settlement.target, record.target) || settlement.contractId !== record.receipt.contractId
       || settlement.evidenceSequence !== settlement.reportSequence + 1) throw new NativeWorkExecutionError('invalid');
     const report = ledger.history[settlement.reportSequence - 1]; const evidence = ledger.history[settlement.evidenceSequence - 1];
     if (!report || report.type !== 'report' || report.requestId !== settlement.reportRequestId || report.workId !== record.target.workId
       || !evidence || evidence.type !== 'record_evidence' || evidence.requestId !== settlement.evidenceRequestId || evidence.evidence?.id !== settlement.evidenceId
-      || nativeSettlementDigest(evidence.evidence.target) !== nativeSettlementDigest(settlement.targetAfterReport)
-      || nativeSettlementDigest({ outcome: evidence.evidence.outcome, reason: evidence.evidence.reason, references: evidence.evidence.references, source: evidence.evidence.source, criteriaResults: evidence.evidence.criteriaResults }) !== nativeSettlementDigest(settlement.attestation)
+      || !isDeepStrictEqual(evidence.evidence.target, settlement.targetAfterReport)
+      || !isDeepStrictEqual({ outcome: evidence.evidence.outcome, reason: evidence.evidence.reason, references: evidence.evidence.references, source: evidence.evidence.source, criteriaResults: evidence.evidence.criteriaResults }, settlement.attestation)
       || settlement.targetAfterReport.workRevision !== record.target.workRevision + 1 || settlement.targetAfterReport.attemptRevision !== record.target.attemptRevision + 1
       || settlement.targetAfterReport.criteriaRevision !== record.target.criteriaRevision || settlement.targetAfterReport.workId !== record.target.workId || settlement.targetAfterReport.attemptId !== record.target.attemptId
       || report.actorId !== evidence.actorId || report.requestId !== `native-report:${settlement.keyHash}` || evidence.requestId !== `native-evidence:${settlement.keyHash}`

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import type { CiWatchSubscription } from '../../ci-watch/types.js';
 import type { ExternalOperationSource } from '../../permissions/external-request.js';
@@ -338,10 +339,10 @@ export function createNativeWorkExecutionHost(deps: {
     // This verification owner is explicitly captured even after restart. It grants no execution continuation.
     const owner: ActiveOwner = { authority, expected: ownerFacts.current, scope: ownerFacts.currentScope, claimed: false };
     const controller = new AbortController(); const signal = AbortSignal.any([lifetime.signal, controller.signal, ...(options.signal ? [options.signal] : [])]);
-    const recordDigest = nativeSettlementDigest(record);
+    const expectedRecord = structuredClone(record);
     const assertCurrent = () => {
       signal.throwIfAborted(); const latest = deps.storage.current(key);
-      if (!latest.record || nativeSettlementDigest(latest.record) !== recordDigest) throw new NativeWorkExecutionError('stale');
+      if (!latest.record || !isDeepStrictEqual(latest.record, expectedRecord)) throw new NativeWorkExecutionError('stale');
       assertRecord(latest, record, owner); signal.throwIfAborted();
     };
     const promise = track(async () => {

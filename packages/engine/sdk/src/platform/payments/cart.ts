@@ -41,6 +41,7 @@ import { cartLine, requestedLineId } from './batteries/cart-line.js';
 import { orderSummaryView, recurringCharge } from './batteries/recurring-charge.js';
 import type { MinorUnits } from './types.js';
 import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
+import { captureOwnedJson } from '../gate/judgment-input.js';
 
 /** The decision sites the cart readings are logged under. */
 export const CART_LINE_SITE = 'payments.cart-line';
@@ -100,24 +101,32 @@ export async function assertCartMatchesRequest(
 ): Promise<CartCheck> {
   requireDecisionFeature('automated checkout cart comparison');
   const owner = captureCheckoutOwnership(options);
+  const captured = captureOwnedJson({ cart, requested }) as unknown as { cart: readonly CartLine[]; requested: readonly RequestedLine[] };
+  cart = captured.cart; requested = captured.requested;
+  if (requested.some(line => !Number.isSafeInteger(line.quantity) || line.quantity <= 0)
+    || cart.some(line => !Number.isSafeInteger(line.quantity) || line.quantity <= 0)) {
+    return { ok: false, unexpected: [...cart], missing: [...requested], reason: 'Refused: cart and requested quantities must be positive whole counts.' };
+  }
   const matches = requested.length === 0
     ? cart.map(() => null)
     : await mapLimit(cart, CART_LINE_CONCURRENCY, (line) => requestedIndexOf(line, requested, owner));
   owner.assertCurrent();
 
   const unexpected: CartLine[] = [];
-  const seen = new Set<number>();
+  const quantities = new Map<number, number>();
   cart.forEach((line, position) => {
     const index = matches[position] ?? null;
     const match = index === null ? undefined : requested[index];
-    if (index === null || match === undefined || line.quantity > match.quantity) {
+    if (index === null || match === undefined) {
       unexpected.push(line);
       return;
     }
-    seen.add(index);
+    const total = (quantities.get(index) ?? 0) + line.quantity;
+    if (!Number.isSafeInteger(total) || total > match.quantity) unexpected.push(line);
+    quantities.set(index, total);
   });
 
-  const missing = requested.filter((_, index) => !seen.has(index));
+  const missing = requested.filter((line, index) => quantities.get(index) !== line.quantity);
 
   if (unexpected.length === 0 && missing.length === 0) {
     return { ok: true, unexpected: [], missing: [], reason: null };
@@ -136,7 +145,7 @@ export async function assertCartMatchesRequest(
     // These are the OWNER's labels, but they are sanitized too: a guarantee
     // that holds only while every call site threads provenance correctly is not
     // a guarantee.
-    parts.push(`it is missing ${missing.map((line) => sanitizeNoticeField(line.label, 60)).join(', ')}`);
+    parts.push(`it does not have the requested quantity of ${missing.map((line) => sanitizeNoticeField(line.label, 60)).join(', ')}`);
   }
   return {
     ok: false,

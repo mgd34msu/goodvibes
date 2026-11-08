@@ -703,6 +703,19 @@ export class BrowserSessionManager {
     return this.require(sessionId).context;
   }
 
+  /** Host-only reads keep the exact selected page owned until native I/O settles. */
+  async withPage<T>(sessionId: string, pageId: string, read: (page: Page, assertCurrent: () => void) => Promise<T>): Promise<T> {
+    const session = this.require(sessionId), tracked = session.pages.get(pageId);
+    if (!tracked) throw new BrowserSessionError('The selected browser page is no longer available.', 'Read a live page before retrying.');
+    return this.#operations.run(async () => {
+      const current = (): void => {
+        this.assertSessionCurrent(session);
+        if (session.pages.get(pageId) !== tracked) throw new BrowserSessionError('The selected browser page was closed.', 'Read a live page before retrying.');
+      };
+      current(); const result = await read(tracked.page, current); current(); return result;
+    });
+  }
+
   private assertSessionCurrent(session: TrackedSession): void {
     this.#assertOpen();
     if (this.sessions.get(session.sessionId) !== session) throw new BrowserSessionError(

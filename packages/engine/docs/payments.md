@@ -1,6 +1,10 @@
 # Payments: design
 
-**Status:** implemented. This document is the design of record.
+**Status:** partially implemented. This document is the design of record.
+Current checkout checks the live quote before card entry and submission. A changed
+or unestablished quote currently stops the operation; automatic re-decision for
+the new price (§8.4), browser continuation after restart and notification backfill
+remain unfinished. The retained requirements below are not completion claims.
 **The behaviors recorded here are contractual. Do not revise them silently.**
 Choices made under zero-deferrals where no owner ruling existed are listed in
 §12.1 as rulings taken, with their reasoning, so they can be overturned
@@ -792,6 +796,27 @@ that is charged.
 If the merchant re-prices between the answer and the charge, the answer is void:
 the reservation is released and the purchase re-enters the decision order from
 step 4a with the new total. An approval is for an amount, not for a cart.
+
+**Current implementation:** after applying shipping and the stored address,
+checkout reads the complete current page and checks its items, quantities,
+currency, tax, fees, selected shipping and payable total against the exact parsed
+quote in the notice, including the selected order control's meaning. It checks
+again after card entry. The browser adapter retains
+that observation and rechecks it immediately before the submit click, after the
+journal flush and other asynchronous browser checks. A changed, incomplete or
+unresolved quote releases the known pre-submit reservation and reports
+`total-changed`. No submission is attempted, and any card material already entered
+keeps its page redaction. Automatic re-entry with newly read prices is still
+unfinished; the earlier answer is never reused to approve another amount.
+
+Custom automated-checkout adapters must implement `CheckoutPageDriver.verifyTerms`.
+Fill-only adapters may omit it. A driver without fresh verification cannot run an
+automated purchase; it is not treated as an unchanged quote. Native evidence reads
+preserve the existing snapshot refs, cover all readable frames and open shadow
+roots, redact live card material, and reject incomplete or oversized evidence
+rather than accept a truncated order summary. This checks the displayed checkout;
+it cannot prove what a merchant will charge on its server.
+The verified quote can be consumed only by its original submit target, once.
 
 ### 8.5 An objection stops and reports
 

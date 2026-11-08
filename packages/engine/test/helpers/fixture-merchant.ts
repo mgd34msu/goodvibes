@@ -53,6 +53,10 @@ export interface FixtureMerchant {
   readonly submissions: RecordedSubmission[];
   /** The checkout page's markup, as a browser would receive it. */
   checkoutHtml(): Promise<string>;
+  /** Update the selected delivery and payable total on the actual fixture page. */
+  selectShipping(label: string): Promise<void>;
+  /** Change merchant markup during a pending approval, without changing the caller's reading. */
+  rewriteCheckout(transform: (html: string) => string): void;
   /** Submit an order, exactly as a form post would. */
   submit(fields: Record<string, string>): Promise<{ orderId: string; url: string }>;
   close(): Promise<void>;
@@ -69,6 +73,7 @@ const ALPHA_CHECKOUT = `<!doctype html>
   <tr><td>Sales tax</td><td class="price">$10.97</td></tr>
   <tr><td>Handling fee</td><td class="price">$1.50</td></tr>
 </table>
+<output id="order-total">{{TOTAL}}</output>
 <fieldset id="delivery">
   <label><input type="radio" name="ship" value="standard"> Standard <span class="price">$4.99</span></label>
   <label><input type="radio" name="ship" value="two-day"> Two-day <span class="price">$12.99</span></label>
@@ -98,6 +103,7 @@ const BETA_CHECKOUT = `<!doctype html>
   <div><span>Zwischensumme</span><span data-amount="subtotal">1.299,00 &euro;</span></div>
   <div><span>Umsatzsteuer</span><span data-amount="tax">246,81 &euro;</span></div>
 </div>
+<output data-amount="grand-total">{{TOTAL}}</output>
 <div id="versand">
   <div class="option" data-ship="post"><span>Post</span><span data-amount="ship">6,90 &euro;</span></div>
   <div class="option" data-ship="express"><span>Express</span><span data-amount="ship">19,90 &euro;</span></div>
@@ -121,9 +127,33 @@ const BETA_CHECKOUT = `<!doctype html>
 export async function startFixtureMerchant(shape: FixtureShape): Promise<FixtureMerchant> {
   const submissions: RecordedSubmission[] = [];
   let counter = 0;
+  const shipping = shape === 'alpha'
+    ? [{ key: 'standard', label: 'Standard', cost: 499 }, { key: 'two-day', label: 'Two-day', cost: 1_299 }, { key: 'overnight', label: 'Overnight', cost: 2_999 }]
+    : [{ key: 'post', label: 'Post', cost: 690 }, { key: 'express', label: 'Express', cost: 1_990 }];
+  let selected = 0, rewrite = (html: string): string => html;
+  const render = (): string => {
+    const chosen = shipping[selected]; if (!chosen) throw new Error('Fixture delivery selection vanished');
+    const total = (shape === 'alpha' ? 12_900 + 1_097 + 150 : 129_900 + 24_681) + chosen.cost;
+    const major = String(Math.floor(total / 100)), minor = String(total % 100).padStart(2, '0');
+    let html = (shape === 'alpha' ? ALPHA_CHECKOUT : BETA_CHECKOUT)
+      .replace('{{TOTAL}}', shape === 'alpha' ? `$${major}.${minor}` : `${major},${minor} &euro;`);
+    html = shape === 'alpha' ? html.replace(`name="ship" value="${chosen.key}"`, `name="ship" value="${chosen.key}" checked`)
+      : html.replace(`class="option" data-ship="${chosen.key}"`, `class="option" data-ship="${chosen.key}" aria-selected="true"`);
+    return rewrite(html);
+  };
 
   const server: Server = createServer((request, response) => {
     const url = request.url ?? '/';
+    if (request.method === 'POST' && url === '/shipping') {
+      let body = '';
+      request.on('data', chunk => { body += String(chunk); });
+      request.on('end', () => {
+        const index = shipping.findIndex(option => option.label === new URLSearchParams(body).get('label'));
+        if (index < 0) { response.writeHead(400); response.end('Unknown fixture delivery'); return; }
+        selected = index; response.writeHead(204); response.end();
+      });
+      return;
+    }
     if (request.method === 'POST' && url.startsWith('/submit')) {
       let body = '';
       request.on('data', (chunk) => {
@@ -143,7 +173,7 @@ export async function startFixtureMerchant(shape: FixtureShape): Promise<Fixture
       return;
     }
     response.writeHead(200, { 'content-type': 'text/html' });
-    response.end(shape === 'alpha' ? ALPHA_CHECKOUT : BETA_CHECKOUT);
+    response.end(render());
   });
 
   await new Promise<void>((resolve) => {
@@ -163,6 +193,11 @@ export async function startFixtureMerchant(shape: FixtureShape): Promise<Fixture
       const response = await fetch(`${origin}/checkout`);
       return response.text();
     },
+    async selectShipping(label: string): Promise<void> {
+      const response = await fetch(`${origin}/shipping`, { method: 'POST', body: new URLSearchParams({ label }) });
+      if (!response.ok) throw new Error('Fixture merchant refused delivery selection');
+    },
+    rewriteCheckout(transform): void { rewrite = transform; },
     async submit(fields: Record<string, string>): Promise<{ orderId: string; url: string }> {
       const response = await fetch(`${origin}/submit`, {
         method: 'POST',

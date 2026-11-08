@@ -528,6 +528,7 @@ describe('the checkout registry is shared across begin and fillCard, not rebuilt
   function stubDriverFor(sessionId: string, pageId: string): CheckoutPageDriver {
     return {
       identity: () => ({ sessionId, pageId }),
+      async verifyTerms() { throw new Error('This fixture must stop in its pending window'); },
       url: async () => 'https://example.invalid/checkout',
       fill: async () => {},
       fillSecrets: async () => ({ filledTargets: [], failedTarget: null }),

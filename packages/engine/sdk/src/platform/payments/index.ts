@@ -152,6 +152,7 @@ export { parseMinorUnits, parseQuantity, minorUnitExponent, MAX_PARSEABLE_MINOR_
 
 export { extractCheckout } from './checkout-extraction.js';
 export type { RawCheckoutReading, ExtractedCheckout, ExtractionResult } from './checkout-extraction.js';
+export type { CheckoutTerms } from './checkout-page.js';
 
 export { readCheckoutReadingInput } from './checkout-reading-input.js';
 export type { ReadingInputResult } from './checkout-reading-input.js';

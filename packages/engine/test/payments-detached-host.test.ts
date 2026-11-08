@@ -54,6 +54,7 @@ test('the actual paired dispatcher acknowledges before its window, survives sock
         seam: (() => {
           const seam = { cardFieldGuard: new CardMaterialRedactor(), armSubmitApproval: async () => {}, driverFor: () => ({
             identity: () => ({ sessionId: 'session', pageId: 'page' }), async url() { return 'https://www.bestbuy.com/checkout'; },
+            async verifyTerms() { throw new Error('This detached fixture is cancelled at its window'); },
             async fill() { effects.push('fill'); }, async choose() { effects.push('choose'); },
             async fillSecrets() { effects.push('card'); return { filledTargets: [], failedTarget: null }; },
             async submitOrder() { effects.push('submit'); return { url: 'https://www.bestbuy.com/done', orderId: null, verified: false }; },

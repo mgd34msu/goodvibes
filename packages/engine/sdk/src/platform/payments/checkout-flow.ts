@@ -61,7 +61,7 @@
  *
  * No selector, no host, no page shape, no label vocabulary. The reading arrives
  * as structured values from whoever read the page, and every page operation
- * goes through six port methods whose arguments are opaque targets the caller
+ * goes through narrow port methods whose arguments are opaque targets the caller
  * supplied. A merchant this has never seen works or nothing does.
  */
 import { assertCartMatchesRequest, detectRecurringCharge, type RequestedLine } from './cart.js';
@@ -103,7 +103,7 @@ import {
 } from './address.js';
 import type { CardMaterialStore } from './card-material.js';
 import type { CardMaterialRedactor } from './card-redaction.js';
-import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver } from './checkout-page.js';
+import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms } from './checkout-page.js';
 import type { PurchaseRecord } from './purchase-record.js';
 import type { CheckoutRegistry } from './checkout-registry.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
@@ -294,8 +294,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   const signal = deps.signal;
   let originalPage: ReturnType<CheckoutPageDriver['identity']> | undefined;
   let identityReader: CheckoutPageDriver['identity'] | undefined;
+  let termsReader: CheckoutPageDriver['verifyTerms'];
   const current = (): void => {
     lifecycle.current();
+    if (termsReader && driver.verifyTerms !== termsReader) throw new CheckoutOwnershipError();
     if (originalPage && identityReader) {
       if (driver.identity !== identityReader) throw new CheckoutOwnershipError();
       const page = identityReader.call(driver);
@@ -308,6 +310,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // ── 0. Terminal gates ───────────────────────────────────────────────────
   const gateRefusal = checkPaymentGates(deps.gates);
   if (gateRefusal !== null) return refused(gateRefusal.code, gateRefusal.reason);
+  const verifyTerms = driver.verifyTerms;
+  if (typeof verifyTerms !== 'function') return refused('total-changed', 'Refused: this checkout driver cannot verify the current cart and payable total. Nothing was submitted.');
+  termsReader = verifyTerms;
   // Capture the original financial reader before any asynchronous work. Other
   // purchases may append legitimately; availability, rather than unchanged
   // whole-ledger content, is the restriction on this purchase's next submit.
@@ -419,6 +424,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   const draw: BudgetDraw = decision.draw;
   const shipping = decision.shipping;
   const stepDown: ShippingStepDown | null = shipping.stepDown;
+  const expectedTerms = captureOwnedJson({
+    submitTarget: controls.placeOrderTarget,
+    merchantDomain, currency: checkout.currency, lines: checkout.lines,
+    taxMinorUnits: checkout.taxMinorUnits, feesMinorUnits: checkout.feesMinorUnits, feeLabels: checkout.feeLabels,
+    shippingLabel: shipping.option.rawLabel, shippingMinorUnits: shipping.costMinorUnits, totalMinorUnits: draw.totalMinorUnits,
+  }) as unknown as CheckoutTerms;
 
   // ── 5. Hold the money before any window opens ───────────────────────────
   //
@@ -490,10 +501,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
    * submit refusal) are exactly the ones where card digits may still be sitting
    * in the page's DOM with no click having dispatched them anywhere. Disarming
    * there would stop redacting a page that still holds the card. Material
-   * lifetime is bound to the PAGE instead: the browser engine disarms on
-   * navigate, on a navigating click, and on close (browser-engine.ts), so a
-   * guard that is never told the digits are gone stays armed, which is the
-   * safe default, until the page itself proves they are.
+   * lifetime is bound to the PAGE instead: only actual page or owned-browser
+   * closure disarms it. Navigation and URL changes alone do not establish
+   * that card material is gone.
    */
   const release = async (): Promise<void> => {
     await registry.close(request.purchaseId);
@@ -751,6 +761,14 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   }
 
   if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before payment entry. Nothing was submitted.'); }
+  // Shipping selection and address entry can change tax, fees and the cart.
+  // The notice approves exactly its earlier parsed quote, never a larger limit.
+  const beforeCard = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
+  addressCurrent();
+  if (beforeCard !== true) {
+    await release();
+    return refused('total-changed', 'Refused: the current cart, delivery choice or payable total no longer confirms the exact purchase shown in your notice. No card was entered.');
+  }
   purchaseEvidence.assertCurrent();
   addressCurrent();
   await registry.advance(request.purchaseId, 'arming-payment', {}, now());
@@ -776,6 +794,16 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       `Refused: the payment form could not be completed (${fill.reason ?? 'the card fields did not accept input'}). `
       + 'Nothing was submitted.',
     );
+  }
+
+  // Card entry may itself refresh the checkout. Re-read before journalling a
+  // possible submission; the driver's retained observation also guards the
+  // actual click after journal flush and all other asynchronous browser checks.
+  const beforeSubmit = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
+  addressCurrent();
+  if (beforeSubmit !== true) {
+    await release();
+    return refused('total-changed', 'Refused: the current checkout no longer confirms the exact purchase shown in your notice. Nothing was submitted; card redaction remains active on this page.');
   }
 
   // ── 9. Journal BEFORE the submit, then submit exactly once ──────────────
@@ -813,8 +841,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     // merchant. STAYS submit-pending, budget STAYS reserved, never retried.
     // Not disarmed: whether the click reached the merchant is exactly what is
     // unknown here, so whether the page still shows the card is unknown too.
-    // The engine disarms on its own once the page actually navigates or closes
-    // (browser-engine.ts); nothing here claims to know that already happened.
+    // Only actual page or owned-browser closure disarms the page; nothing here
+    // claims to know that already happened.
     return refused(
       'challenge-abandoned',
       'The order was submitted but I did not see a response, so I cannot tell whether it went through. '

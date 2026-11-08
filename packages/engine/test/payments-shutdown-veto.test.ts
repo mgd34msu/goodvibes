@@ -35,6 +35,7 @@ function checkoutFixture(signal?: AbortSignal, journal: CheckoutJournal = new Me
     purchases: { async record() { outward.push('purchase-record'); } },
     driver: {
       identity: () => ({ sessionId: 'fixture-session', pageId: 'fixture-page' }),
+      async verifyTerms() { throw new Error('Window teardown must stop before quote verification'); },
       async url() { return 'https://www.bestbuy.com/checkout'; },
       async fill() { outward.push('fill'); },
       async fillSecrets() { outward.push('fill-secrets'); return { filledTargets: [], failedTarget: null }; },

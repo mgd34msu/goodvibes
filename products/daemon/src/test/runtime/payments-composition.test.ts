@@ -101,6 +101,7 @@ test('the composed notifier waits on the returned ingress inbox and owner veto s
   const outward: string[] = [];
   const driver: CheckoutPageDriver = {
     identity: () => ({ sessionId: 'fixture-session', pageId: 'fixture-page' }),
+    async verifyTerms() { throw new Error('Owner veto must stop this fixture before quote verification'); },
     async url() { return 'https://www.bestbuy.com/checkout'; },
     async fill() { outward.push('fill'); }, async choose() { outward.push('choose'); },
     async fillSecrets() { outward.push('fill-secrets'); return { filledTargets: [], failedTarget: null }; },
@@ -227,6 +228,12 @@ test.each(['preflight', 'submit'] as const)('actual product close retains an adm
   const previous = installJudgmentPort(fixturePort()), effects: string[] = [];
   const driver: CheckoutPageDriver = {
     identity: () => ({ sessionId: 'fixture-session', pageId: 'fixture-page' }),
+    async verifyTerms(expected, owner) {
+      owner.assertCurrent();
+      return expected.currency === 'USD' && expected.totalMinorUnits === 1_000 && expected.taxMinorUnits === 0
+        && expected.feesMinorUnits === 0 && expected.shippingMinorUnits === 0 && expected.lines.length === 1
+        && expected.lines[0]?.label === 'Fixture item' && expected.lines[0]?.quantity === 1;
+    },
     async url() { return 'https://www.bestbuy.com/checkout'; }, async fill() { effects.push('fill'); }, async choose() {},
     async fillSecrets(fields) { effects.push('fill-secrets'); return { filledTargets: fields.map(field => field.target), failedTarget: null }; },
     async submitOrder() { effects.push('submit'); entered.release(); await gate.pending; throw new Error('Unknown merchant outcome'); },

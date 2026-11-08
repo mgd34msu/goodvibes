@@ -24,6 +24,22 @@
  * the daemon does the typing.
  */
 import type { CardFieldKind } from './card-redaction.js';
+import type { CartLine } from './cart.js';
+import type { CurrencyCode, MinorUnits } from './types.js';
+
+/** The exact parsed purchase shown to the owner, never an expandable allowance. */
+export interface CheckoutTerms {
+  readonly submitTarget: string;
+  readonly merchantDomain: string;
+  readonly currency: CurrencyCode;
+  readonly lines: readonly CartLine[];
+  readonly taxMinorUnits: MinorUnits;
+  readonly feesMinorUnits: MinorUnits;
+  readonly feeLabels: readonly string[];
+  readonly shippingLabel: string;
+  readonly shippingMinorUnits: MinorUnits;
+  readonly totalMinorUnits: MinorUnits;
+}
 
 /** Which page a driver is bound to, so the redactor can be keyed to it. */
 export interface PageIdentity {
@@ -33,6 +49,9 @@ export interface PageIdentity {
 
 export interface CheckoutPageDriver {
   identity(): PageIdentity;
+
+  /** Automated checkout requires a fresh full-page quote check. Fill-only ports may omit it. */
+  verifyTerms?(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean>;
 
   /** The page's current url, for the merchant-origin check. */
   url(ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<string>;

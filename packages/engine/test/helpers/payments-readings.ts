@@ -22,6 +22,8 @@ type Candidate = { readonly id: string; readonly content: Record<string, unknown
 export interface PaymentsAnswers extends SecurityAnswers {
   readonly merchant?: (domain: string) => { readonly qualifies: FakeVerdict; readonly recourse: RecourseKind; readonly unsure?: boolean };
   readonly recurring?: (orderSummary: string) => FakeVerdict;
+  /** Synthetic answer to current-page quote verification; not a semantic certificate. */
+  readonly currentTerms?: (expected: unknown, current: unknown) => FakeVerdict;
   /** Which requested item (by index) a cart line is, or null. */
   readonly cartLine?: (cartLabel: string, requested: readonly string[]) => number | null;
   /** Which option (by index into what was offered) is the tier, null for none, or 'unsure' for a reading that does not act. */
@@ -55,6 +57,7 @@ export const DEFAULT_PAYMENTS_ANSWERS: Required<Omit<PaymentsAnswers, keyof Secu
     return kind === undefined ? { qualifies: false, recourse: 'none' } : { qualifies: true, recourse: kind };
   },
   recurring: (summary) => /subscri|recurring|auto-?renew|renews|per (month|year)|monthly|free trial|for future/i.test(summary),
+  currentTerms: () => true,
   cartLine: (cart, requested) => {
     const index = requested.findIndex((entry) => label(entry) === label(cart));
     return index === -1 ? null : index;
@@ -130,6 +133,8 @@ export function paymentsPort(overrides: PaymentsAnswers = {}): { port: JudgmentP
       }
       case 'engine.payments.recurring-charge':
         return noulAnswer(probability(answers.recurring(String(s['order_summary']))));
+      case 'engine.payments.current-checkout-terms':
+        return noulAnswer(probability(answers.currentTerms(s['expected'], s['current'])));
       case 'engine.payments.cart-line': {
         const requested = candidates.map((candidate) => String(candidate.content['requested_item']));
         const index = answers.cartLine(String(context['cart_line']), requested);

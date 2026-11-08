@@ -401,6 +401,41 @@ function shapes(): { name: string; get: () => FixtureMerchant }[] {
   ];
 }
 
+for (const shape of shapes()) for (const phase of ['before-card', 'before-submit'] as const)
+  test(`a changed live ${shape.name} total ${phase} never reaches the merchant submit endpoint`, async () => {
+    const merchant = shape.get(), harness = buildHarness({ merchant });
+    let changed = false;
+    const changeTotal = (): void => {
+      merchant.rewriteCheckout(html => {
+        const updated = html.replace(/(<output\b[^>]*>)[^<]+(<\/output>)/, (_all: string, open: string, close: string) =>
+          `${open}${merchant.shape === 'alpha' ? '$999.99' : '9999,99 &euro;'}${close}`);
+        changed ||= updated !== html; return updated;
+      });
+    };
+    if (phase === 'before-card') harness.deps.notifier.awaitAnswer = async () => { changeTotal(); return null; };
+    else {
+      const fill = harness.driver.fillSecrets.bind(harness.driver);
+      harness.driver.fillSecrets = async fields => { const result = await fill(fields); changeTotal(); return result; };
+    }
+    const result = await runOn(harness, merchant);
+    expect(changed).toBe(true); expect(result).toMatchObject({ kind: 'refused', code: 'total-changed' });
+    expect(merchant.submissions).toEqual([]); expect(harness.recorded).toEqual([]);
+    expect(harness.ledger.state().reservations).toEqual([]); expect(await harness.journal.list()).toEqual([]);
+    if (phase === 'before-card') expect(harness.driver.fillLog).toEqual([]);
+    else expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(true);
+  });
+
+for (const shape of shapes()) test(`new recurring terms in the live ${shape.name} page cannot reuse an earlier one-off notice`, async () => {
+  const merchant = shape.get(), harness = buildHarness({ merchant });
+  harness.deps.notifier.awaitAnswer = async () => {
+    merchant.rewriteCheckout(html => html.replace('</body>', '<p>Your card will be charged monthly for future replenishments.</p></body>'));
+    return null;
+  };
+  expect(await runOn(harness, merchant)).toMatchObject({ kind: 'refused', code: 'total-changed' });
+  expect(harness.driver.fillLog).toEqual([]); expect(merchant.submissions).toEqual([]);
+  expect(harness.ledger.state().reservations).toEqual([]); expect(await harness.journal.list()).toEqual([]);
+});
+
 // ═══ 1. The card is absent from every response, log, trace and error ════════
 
 describe('the card never comes back', () => {

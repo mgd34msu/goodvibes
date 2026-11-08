@@ -29,8 +29,10 @@
  * for real against real domains, and no test needs an exemption.
  */
 import type { CardFieldKind } from '../../sdk/src/platform/payments/card-redaction.js';
-import type { RawCheckoutReading } from '../../sdk/src/platform/payments/checkout-extraction.js';
-import type { CheckoutChallenge, CheckoutPageDriver, PageIdentity } from '../../sdk/src/platform/payments/checkout-page.js';
+import { extractCheckout, type RawCheckoutReading } from '../../sdk/src/platform/payments/checkout-extraction.js';
+import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms, type PageIdentity } from '../../sdk/src/platform/payments/checkout-page.js';
+import { parseMinorUnits } from '../../sdk/src/platform/payments/money-parsing.js';
+import { detectRecurringCharge } from '../../sdk/src/platform/payments/cart.js';
 import type { FixtureMerchant } from './fixture-merchant.js';
 
 /**
@@ -93,10 +95,13 @@ async function attributesOf(html: string, selector: string, name: string): Promi
  * and then the next one.
  */
 export async function readFixtureCheckout(merchant: FixtureMerchant): Promise<RawCheckoutReading> {
-  const html = await merchant.checkoutHtml();
+  return readFixtureCheckoutHtml(merchant.shape, await merchant.checkoutHtml());
+}
+
+async function readFixtureCheckoutHtml(shape: FixtureMerchant['shape'], html: string): Promise<RawCheckoutReading> {
   const summary = (await textsOf(html, 'body')).join(' ');
 
-  if (merchant.shape === 'alpha') {
+  if (shape === 'alpha') {
     const names = await textsOf(html, 'tr.line td.name');
     const quantities = await textsOf(html, 'tr.line td.qty');
     const linePrices = await textsOf(html, 'tr.line td.price');
@@ -124,7 +129,7 @@ export async function readFixtureCheckout(merchant: FixtureMerchant): Promise<Ra
         label: (shipLabels[index] ?? '').replace(cost, '').trim(),
         cost,
       })),
-      statedTotal: null,
+      statedTotal: (await textsOf(html, '#order-total'))[0] ?? null,
       currency: 'USD',
       orderSummaryText: summary,
     };
@@ -151,7 +156,7 @@ export async function readFixtureCheckout(merchant: FixtureMerchant): Promise<Ra
       label: shipLabels[index] ?? `option ${String(index)}`,
       cost,
     })),
-    statedTotal: null,
+    statedTotal: byKind('grand-total')[0] ?? null,
     currency: 'EUR',
     orderSummaryText: summary,
   };
@@ -199,6 +204,7 @@ export interface FixtureDriverOptions {
  * reached nothing else.
  */
 export class FixtureCheckoutDriver implements CheckoutPageDriver {
+  private verifiedTerms: CheckoutTerms | null = null;
   /** What has been typed into the page, by target. Card material included. */
   readonly formState = new Map<string, string>();
 
@@ -218,7 +224,37 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
     return this.options.pageUrl;
   }
 
+  /** This test adapter reads the live fixture's rendered total and selected delivery. */
+  async verifyTerms(expected: CheckoutTerms, owner?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
+    this.verifiedTerms = null;
+    const current = (): void => { owner?.signal?.throwIfAborted(); owner?.assertCurrent(); };
+    current(); const html = await this.options.merchant.checkoutHtml(); current();
+    const reading = await readFixtureCheckoutHtml(this.options.merchant.shape, html); current();
+    const extracted = extractCheckout(reading, expected.currency);
+    if (!extracted.ok || reading.statedTotal === null) return false;
+    const checkout = extracted.checkout;
+    const recurring = await detectRecurringCharge(checkout.orderSummaryText, owner); current();
+    if (recurring.recurring) return false;
+    const selected = this.options.merchant.shape === 'alpha'
+      ? (await attributesOf(html, '#delivery input[checked]', 'value'))[0]
+      : (await attributesOf(html, '#versand .option[aria-selected="true"]', 'data-ship'))[0];
+    current();
+    const index = (this.options.merchant.shape === 'alpha' ? ['standard', 'two-day', 'overnight'] : ['post', 'express']).indexOf(selected ?? '');
+    const shipping = checkout.shippingOptions[index];
+    const same = expected.submitTarget === (this.options.merchant.shape === 'alpha' ? 'place' : 'kaufen')
+      && checkout.currency === expected.currency && checkout.lines.length === expected.lines.length
+      && checkout.lines.every((line, position) => line.label === expected.lines[position]?.label
+        && line.quantity === expected.lines[position]?.quantity && line.unitMinorUnits === expected.lines[position]?.unitMinorUnits)
+      && checkout.taxMinorUnits === expected.taxMinorUnits && checkout.feesMinorUnits === expected.feesMinorUnits
+      && JSON.stringify(checkout.feeLabels) === JSON.stringify(expected.feeLabels)
+      && shipping?.rawLabel === expected.shippingLabel && shipping.costMinorUnits === expected.shippingMinorUnits
+      && parseMinorUnits(reading.statedTotal, checkout.currency) === expected.totalMinorUnits;
+    if (same) this.verifiedTerms = expected;
+    return same;
+  }
+
   async fill(target: string, value: string): Promise<void> {
+    this.verifiedTerms = null;
     if (this.options.rejectField === target) throw new Error(`field ${target} rejected input`);
     this.formState.set(target, value);
     this.fillLog.push({ target, kind: 'plain' });
@@ -227,6 +263,7 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
   async fillSecrets(
     fields: readonly { readonly target: string; readonly value: string; readonly kind: CardFieldKind }[],
   ): Promise<{ readonly filledTargets: readonly string[]; readonly failedTarget: string | null }> {
+    this.verifiedTerms = null;
     const filledTargets: string[] = [];
     for (const field of fields) {
       if (this.options.throwOnField === field.target) {
@@ -253,6 +290,8 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
   }
 
   async choose(target: string, value: string): Promise<void> {
+    this.verifiedTerms = null;
+    await this.options.merchant.selectShipping(value);
     this.formState.set(target, value);
   }
 
@@ -262,6 +301,9 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
     readonly challenge?: CheckoutChallenge | null | undefined;
     readonly verified: boolean;
   }> {
+    const expected = this.verifiedTerms;
+    if (!expected || target !== expected.submitTarget || !await this.verifyTerms(expected)) throw new CheckoutSubmitRefused('The fixture checkout no longer matches its current quote.');
+    this.verifiedTerms = null;
     if (this.options.failSubmit === true) {
       throw new Error('the connection dropped while submitting');
     }

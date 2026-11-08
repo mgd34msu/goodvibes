@@ -32,7 +32,7 @@ export type {
 } from './browser-types.js';
 
 export { BrowserEngine, UntrustedEffectError } from './browser-engine.js';
-export type { BrowserEngineOptions, BrowserExtractField, BrowserTarget } from './browser-engine.js';
+export type { BrowserActionLifetime, BrowserEngineOptions, BrowserExtractField, BrowserTarget } from './browser-engine.js';
 export { looksLikeCredentialPage } from './browser-engine-contract.js';
 
 export {

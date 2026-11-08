@@ -46,13 +46,14 @@ import {
   type CheckoutSubmission,
   type CheckoutSubmissionDescription,
 } from '../sdk/src/platform/payments/browser-checkout-driver.js';
-import { CheckoutSubmitRefused } from '../sdk/src/platform/payments/checkout-page.js';
+import { CheckoutSubmitRefused, type CheckoutPageDriver, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
 import { CardMaterialRedactor, REDACTED_MARKER } from '../sdk/src/platform/payments/card-redaction.js';
 import { PaymentsGatewayServiceImpl } from '../sdk/src/platform/payments/payments-gateway-service.js';
 import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
 import { MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
 import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
 import type { CurrencyCode, PostalAddress } from '../sdk/src/platform/payments/types.js';
+import { parseCurrencyCode } from '../sdk/src/platform/payments/types.js';
 import type { PurchaseRecord } from '../sdk/src/platform/payments/checkout-flow.js';
 import { UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
 import { grantOwnerApproval } from '../sdk/src/platform/security/owner-approval.js';
@@ -144,11 +145,27 @@ class ScriptedEngine implements CheckoutBrowserEngine {
   readonly calls: EngineCall[] = [];
   readonly typed = new Map<string, string>();
   protected snapshotCleared = false;
+  private selectedShipping = 'Standard (4-6 days)';
 
   constructor(protected readonly options: ScriptedEngineOptions) {}
 
   cardFieldGuard(): CheckoutGuardHandle | null {
     return this.options.guard;
+  }
+
+  async observeCheckoutTerms(target: CheckoutEngineTarget, owner: { readonly assertCurrent: () => void }, submitTarget?: string) {
+    owner.assertCurrent();
+    if (target.pageId !== (this.options.pageId ?? 'page-1')) throw new Error('Wrong scripted page');
+    const revision = this.calls.length, url = this.options.pageUrl ?? CHECKOUT_URL;
+    const cost = this.selectedShipping === 'Overnight' ? 2_499 : this.selectedShipping === 'Two-day' ? 1_299 : 499;
+    const total = ((12_900 + 1_097 + cost) / 100).toFixed(2);
+    return { state: { url, submitControl: { ref: submitTarget, selector: '#place', frameChain: [], name: 'Place your order', role: 'button', submits: true }, documents: [{ checkout: {
+      text: `Mechanical keyboard, tenkeyless x1, USD 129.00. Tax USD 10.97. ${this.selectedShipping} selected. One-off total USD ${total}.`,
+      selections: [{ selector: '#shipping', labels: [this.selectedShipping] }], quantities: [],
+    } }] }, assertCurrent: async () => {
+      owner.assertCurrent();
+      if (this.calls.length !== revision || (this.options.pageUrl ?? CHECKOUT_URL) !== url) throw new Error('Scripted checkout changed');
+    } };
   }
 
   protected record(method: string, target: CheckoutEngineTarget, ref: string, value: string): void {
@@ -224,12 +241,15 @@ class ScriptedEngine implements CheckoutBrowserEngine {
   async select(target: CheckoutEngineTarget, args: { readonly ref: string; readonly values: readonly string[] }): Promise<Record<string, unknown>> {
     this.requireLiveRef(args.ref);
     this.record('select', target, args.ref, args.values.join(','));
+    this.selectedShipping = args.values[0] ?? this.selectedShipping;
     return { selectedIn: { ref: args.ref }, selected: [...args.values] };
   }
 
-  async click(target: CheckoutEngineTarget, args: { readonly ref: string }): Promise<Record<string, unknown>> {
+  async click(target: CheckoutEngineTarget, args: { readonly ref: string }, owner?: Parameters<CheckoutBrowserEngine['click']>[2]): Promise<Record<string, unknown>> {
+    owner?.assertCurrent();
     this.requireLiveRef(args.ref);
     if (this.options.clickThrows) throw this.options.clickThrows;
+    await owner?.beforeDispatch?.(); owner?.assertCurrent();
     this.record('click', target, args.ref, '');
     // Every click clears the modelled snapshot, exactly as the real engine's
     // click does for ordinary browsing.
@@ -282,6 +302,16 @@ function driverOver(
     engineFor: async () => engine,
     cardFieldGuard,
   })(sessionId, pageId);
+}
+
+async function verifyForSubmission(driver: CheckoutPageDriver): Promise<void> {
+  const currency = parseCurrencyCode('USD'); if (!currency) throw new Error('Invalid fixture currency');
+  const terms: CheckoutTerms = { submitTarget: 'place', merchantDomain: 'bestbuy.com', currency,
+    lines: [{ label: 'Mechanical keyboard, tenkeyless', quantity: 1, unitMinorUnits: 12_900 }],
+    taxMinorUnits: 1_097, feesMinorUnits: 0, feeLabels: [], shippingLabel: 'Standard (4-6 days)',
+    shippingMinorUnits: 499, totalMinorUnits: 14_496 };
+  if (!driver.verifyTerms) throw new Error('The actual browser checkout adapter has no fresh quote reader');
+  expect(await driver.verifyTerms(terms, { assertCurrent() {} })).toBe(true);
 }
 
 /** The material fill-card.ts arms before its first keystroke. */
@@ -364,6 +394,7 @@ describe('the driver over a browser engine', () => {
 
     // The place-order ref, from a snapshot taken before any of the above, is
     // still resolvable: the batch left the modelled snapshot in place.
+    await verifyForSubmission(driver);
     const submission = await driver.submitOrder('place');
     expect(submission.url).toBe(CONFIRMATION_URL);
   });
@@ -408,7 +439,9 @@ describe('the driver over a browser engine', () => {
   test('submitting clicks once and reports the landing url with no order id it did not read', async () => {
     const guard = new CardMaterialRedactor();
     const engine = new ScriptedEngine({ guard });
-    const submission = await driverOver(engine, guard).submitOrder('place');
+    const driver = driverOver(engine, guard);
+    await verifyForSubmission(driver);
+    const submission = await driver.submitOrder('place');
 
     expect(engine.calls.filter((call) => call.method === 'click').length).toBe(1);
     expect(submission.url).toBe(CONFIRMATION_URL);
@@ -435,6 +468,7 @@ describe('the driver over a browser engine', () => {
       },
     })('session-1', 'page-1');
 
+    await verifyForSubmission(driver);
     const submission = await driver.submitOrder('place');
     expect(submission.orderId).toBe('BBY-01-556677');
     expect(submission.challenge).toBeNull();
@@ -471,6 +505,7 @@ describe('the driver refuses rather than degrading when the guard is wrong', () 
     await expect(driver.url()).rejects.toThrow(CheckoutDriverRefusal);
     await expect(driver.fill('ship-city', 'Detroit')).rejects.toThrow(CheckoutDriverRefusal);
     await expect(driver.choose('ship-standard', 'Standard')).rejects.toThrow(CheckoutDriverRefusal);
+    await expect(verifyForSubmission(driver)).rejects.toThrow(CheckoutDriverRefusal);
     // submitOrder reclassifies its own guard refusal as CheckoutSubmitRefused
     // : a refusal from this accessor always fires before any
     // click, so checkout-flow.ts must be able to tell it apart from a genuine
@@ -546,6 +581,7 @@ describe('submitOrder tells a pre-click refusal apart from post-click ambiguity'
     staleError.name = 'StaleElementError';
     const engine = new ScriptedEngine({ guard, clickThrows: staleError });
     const driver = driverOver(engine, guard);
+    await verifyForSubmission(driver);
 
     await expect(driver.submitOrder('place')).rejects.toThrow(CheckoutSubmitRefused);
     // Nothing was clicked: the engine's click() throws before it records or
@@ -559,6 +595,7 @@ describe('submitOrder tells a pre-click refusal apart from post-click ambiguity'
     untrustedError.name = 'UntrustedEffectError';
     const engine = new ScriptedEngine({ guard, clickThrows: untrustedError });
     const driver = driverOver(engine, guard);
+    await verifyForSubmission(driver);
 
     await expect(driver.submitOrder('place')).rejects.toThrow(CheckoutSubmitRefused);
   });
@@ -570,6 +607,7 @@ describe('submitOrder tells a pre-click refusal apart from post-click ambiguity'
     const driver = driverOver(engine, guard);
 
     let thrown: unknown = null;
+    await verifyForSubmission(driver);
     try {
       await driver.submitOrder('place');
       throw new Error('expected submitOrder to throw');
@@ -604,6 +642,7 @@ describe('a pre-click refusal never forwards the engine\'s own message text', ()
     const engine = new ScriptedEngine({ guard, clickThrows: untrustedError });
     const driver = driverOver(engine, guard);
 
+    await verifyForSubmission(driver);
     try {
       await driver.submitOrder('place');
       throw new Error('expected a refusal');
@@ -625,6 +664,7 @@ describe('a pre-click refusal never forwards the engine\'s own message text', ()
     const engine = new ScriptedEngine({ guard, clickThrows: staleError });
     const driver = driverOver(engine, guard);
 
+    await verifyForSubmission(driver);
     try {
       await driver.submitOrder('place');
       throw new Error('expected a refusal');

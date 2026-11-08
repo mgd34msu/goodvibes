@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Check the complete current checkout against the exact notified quote before
+  card entry and again before submission. Retain that observation through the
+  final click boundary. Changed or unestablished terms stop with no submit;
+  automatic re-decision at the new price remains unfinished. Count split cart
+  rows together and require the exact owner-requested quantity.
+
 - Retain the original gateway credential, principal, scope ceiling and catalog
   owner independently of a request's mutable fields or payload. Replacing a
   handler or authentication owner retires that authorization. Native execution
@@ -109,6 +115,11 @@
   not require a new reading for otherwise unchanged knowledge content.
 
 ### SDK changes
+
+- Automated checkout adapters must implement `CheckoutPageDriver.verifyTerms`;
+  fill-only adapters may omit it. The browser seam supplies the current-page
+  implementation. `BrowserActionLifetime.beforeDispatch` is a host-only final
+  asynchronous guard, invoked by the click actuator before native dispatch.
 
 - `getNextAutomationOccurrence` reads an optional persisted `staggerPhase` from
   cron schedules; it no longer takes a job-ID argument. Use

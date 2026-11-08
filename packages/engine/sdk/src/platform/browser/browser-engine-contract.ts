@@ -202,4 +202,6 @@ export interface BrowserActionLifetime {
   readonly assertCurrent: () => void;
   readonly signal?: AbortSignal | undefined;
   readonly snapshotId?: string | undefined;
+  /** Host-owned final observation, after other asynchronous checks, before dispatch. */
+  readonly beforeDispatch?: (() => Promise<void>) | undefined;
 }

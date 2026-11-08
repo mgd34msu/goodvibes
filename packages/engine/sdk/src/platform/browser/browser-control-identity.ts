@@ -43,7 +43,9 @@ export class BrowserControlIdentityWork {
   private readonly owner: JudgmentPortCapture | undefined;
   private readonly signal: AbortSignal | undefined;
   private readonly callerCurrent: (() => void) | undefined;
-  constructor(options: JudgmentReadingOptions = {}) {
+  private readonly drainReads: boolean;
+  constructor(options: JudgmentReadingOptions = {}, lifetime: { readonly drainReads?: boolean } = {}) {
+    this.drainReads = lifetime.drainReads === true;
     this.signal = options.signal; this.callerCurrent = options.assertCurrent;
     this.assertCurrent();
     if (!isClassicOperation()) try { this.owner = captureJudgmentPort('browser.control.identity', { signal: this.signal, assertCurrent: this.callerCurrent }); }
@@ -59,6 +61,12 @@ export class BrowserControlIdentityWork {
   };
   async wait<T>(work: () => Promise<T>): Promise<T> {
     this.assertCurrent();
+    if (this.drainReads) {
+      // The caller owns this read in its shutdown barrier. Returning an abort
+      // race early would drop the underlying browser/model work from that drain.
+      try { const value = await work(); this.assertCurrent(); return value; }
+      catch (error) { this.assertCurrent(); throw error; }
+    }
     const value = await awaitPermission(work, this.owner?.signal ?? this.signal);
     this.assertCurrent(); return value;
   }

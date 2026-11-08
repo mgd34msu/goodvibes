@@ -565,6 +565,28 @@ describe('which offered option is each tier is read, not taken from the price or
 });
 
 describe('no filler item is ever added', () => {
+  test.each([1, 3])('split rows cannot turn an owner quantity of %s into two items', async quantity => {
+    const check = await assertCartMatchesRequest([
+      { label: 'Cable', quantity: 1, unitMinorUnits: 1_000 },
+      { label: 'Cable', quantity: 1, unitMinorUnits: 1_000 },
+    ], [{ label: 'Cable', quantity }]);
+    expect(check.ok).toBe(false);
+    expect(check.missing).toHaveLength(1);
+  });
+
+  test('split rows pass only when their summed quantity equals the owner request', async () => {
+    const check = await assertCartMatchesRequest([
+      { label: 'Cable', quantity: 1, unitMinorUnits: 1_000 },
+      { label: 'Cable', quantity: 1, unitMinorUnits: 1_000 },
+    ], [{ label: 'Cable', quantity: 2 }]);
+    expect(check.ok).toBe(true); expect(check.unexpected).toEqual([]); expect(check.missing).toEqual([]);
+  });
+
+  test.each([0, -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1])('invalid quantity %s is refused before a cart reading', async quantity => {
+    const before = readings.requests.length;
+    const check = await assertCartMatchesRequest([{ label: 'Cable', quantity, unitMinorUnits: 1_000 }], [{ label: 'Cable', quantity: 1 }]);
+    expect(check.ok).toBe(false); expect(readings.requests).toHaveLength(before);
+  });
   test('an extra line the owner did not ask for aborts the purchase', async () => {
     const check = await assertCartMatchesRequest(
       [

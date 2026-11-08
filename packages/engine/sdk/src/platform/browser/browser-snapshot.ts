@@ -59,7 +59,10 @@ interface RawElement {
  * scope. It reads the DOM and never mutates it: no injected attributes, no
  * markers left behind in the user's real, logged-in page.
  */
-function collectElements(options: number | { readonly limit: number; readonly identityOnly: true }): RawElement[] | { readonly url: string; readonly title: string; readonly elements: RawElement[] } {
+function collectElements(options: number | { readonly limit: number; readonly identityOnly: true; readonly checkout?: true }): RawElement[] | {
+  readonly url: string; readonly title: string; readonly elements: RawElement[];
+  readonly checkout?: { readonly text: string | null; readonly selections: readonly { selector: string; labels: string[] }[]; readonly quantities: readonly { selector: string; value: string }[] };
+} {
   const identityOnly = typeof options !== 'number';
   const limit = typeof options === 'number' ? options : options.limit;
   const INTERACTIVE_SELECTOR = [
@@ -214,7 +217,8 @@ function collectElements(options: number | { readonly limit: number; readonly id
   };
 
   const candidates: Element[] = [];
-  for (const root of collectRoots()) {
+  const roots = collectRoots();
+  for (const root of roots) {
     candidates.push(...Array.from(root.querySelectorAll(INTERACTIVE_SELECTOR)));
   }
 
@@ -252,7 +256,30 @@ function collectElements(options: number | { readonly limit: number; readonly id
       },
     });
   }
-  return identityOnly ? { url: document.URL, title: document.title, elements: results } : results;
+  if (!identityOnly) return results;
+  if (typeof options === 'number' || options.checkout !== true) return { url: document.URL, title: document.title, elements: results };
+  const text = [document.body?.innerText ?? '', ...roots.flatMap(root => root instanceof ShadowRoot && isVisible(root.host)
+    ? Array.from(root.children).filter(isVisible).map(child => (child as HTMLElement).innerText ?? '') : [])].join('\n');
+  const selections: { selector: string; labels: string[] }[] = [];
+  const quantities: { selector: string; value: string }[] = [];
+  for (const element of seen) {
+    if (!isVisible(element)) continue;
+    if (element.tagName.toLowerCase() === 'select') selections.push({ selector: selectorFor(element),
+      labels: Array.from((element as HTMLSelectElement).selectedOptions).map(option => option.text) });
+    // No passwords, hidden fields or arbitrary typed text. Number controls
+    // supply quantities that need not be rendered in body text. The host
+    // redacts live card material before this evidence can reach a reader.
+    if (element.tagName.toLowerCase() === 'input' && (element as HTMLInputElement).type === 'number') {
+      quantities.push({ selector: selectorFor(element), value: (element as HTMLInputElement).value });
+    }
+  }
+  // Custom delivery controls expose selection through standard ARIA state.
+  // Collect the state and label; interpretation remains with the reader.
+  for (const root of roots) for (const element of Array.from(root.querySelectorAll('[aria-selected="true"], [aria-checked="true"], [aria-pressed="true"]'))) {
+    if (isVisible(element)) selections.push({ selector: selectorFor(element), labels: [nameFor(element)] });
+  }
+  return { url: document.URL, title: document.title, elements: results,
+    checkout: { text: text.length <= 20_000 ? text : null, selections, quantities } };
 }
 
 
@@ -294,7 +321,29 @@ function plainRecord(value: unknown): value is Record<string, unknown> {
 function ownEvidenceFields(value: Record<string, unknown>, fields: readonly string[]): boolean {
   return Object.keys(value).length === fields.length && fields.every(key => Object.hasOwn(value, key));
 }
-function credentialDocument(value: unknown) {
+function checkoutDocument(value: unknown, scrub: (text: string) => string) {
+  if (!plainRecord(value) || !ownEvidenceFields(value, ['text', 'selections', 'quantities'])
+    || !Array.isArray(value.selections) || !Array.isArray(value.quantities)
+    || value.selections.length > 20_000 || value.quantities.length > 20_000) throw new Error('Complete checkout evidence is unavailable.');
+  const text = (input: unknown, limit = 20_000): string => {
+    if (typeof input !== 'string' || input.length > limit) throw new Error('Complete checkout evidence exceeds its reading budget.');
+    return scrub(input);
+  };
+  return {
+    text: text(value.text),
+    selections: value.selections.map((entry: unknown) => {
+      if (!plainRecord(entry) || !ownEvidenceFields(entry, ['selector', 'labels']) || !Array.isArray(entry.labels)
+        || entry.labels.length > 100) throw new Error('Complete checkout selections are unavailable.');
+      return { selector: text(entry.selector), labels: entry.labels.map((label: unknown) => text(label)) };
+    }),
+    quantities: value.quantities.map((entry: unknown) => {
+      if (!plainRecord(entry) || !ownEvidenceFields(entry, ['selector', 'value'])) throw new Error('Complete checkout quantities are unavailable.');
+      return { selector: text(entry.selector), value: text(entry.value) };
+    }),
+  };
+}
+
+function credentialDocument(value: unknown, checkout?: { readonly scrub: (text: string) => string }) {
   // Native evaluation admits no hidden side channel, accessors, proxies or unknown fields.
   const layouts = new WeakSet<object>();
   const inspectLayout = (entry: unknown): void => {
@@ -310,7 +359,7 @@ function credentialDocument(value: unknown) {
   };
   const detached = captureOwnedJson(value, nodeTypes.isProxy);
   inspectLayout(value);
-  if (!plainRecord(detached) || !ownEvidenceFields(detached, ['url', 'title', 'elements'])
+  if (!plainRecord(detached) || !ownEvidenceFields(detached, checkout ? ['url', 'title', 'elements', 'checkout'] : ['url', 'title', 'elements'])
     || typeof detached.url !== 'string' || typeof detached.title !== 'string' || !Array.isArray(detached.elements)) throw new Error('Browser page evidence is incomplete.');
   let password = false;
   const controls = detached.elements.map((element: unknown) => {
@@ -327,11 +376,13 @@ function credentialDocument(value: unknown) {
     return { documentUrl: element.documentUrl, tag: element.tag, role: element.role, name: element.name, selector: element.selector,
       disabled: element.disabled, checked: element.checked, depth: element.depth, submits: element.submits, control: element.control };
   });
-  return { document: { url: detached.url, title: detached.title, controls }, password };
+  return { document: { url: detached.url, title: detached.title, controls,
+    ...(checkout ? { checkout: checkoutDocument(detached.checkout, checkout.scrub) } : {}) }, password };
 }
 
+type BrowserPageReadWork = Pick<BrowserControlIdentityWork, 'wait' | 'assertCurrent'>;
 
-async function credentialFrameChain(frame: Frame, work: BrowserControlIdentityWork, assertSource: () => void): Promise<{ readonly chain: readonly string[]; readonly assertCurrent: () => void }> {
+async function credentialFrameChain(frame: Frame, work: BrowserPageReadWork, assertSource: () => void): Promise<{ readonly chain: readonly string[]; readonly assertCurrent: () => void }> {
   const retained: (() => void)[] = [];
   const assertMethods = () => { for (const guard of retained) guard(); };
   const current = () => { assertMethods(); assertSource(); assertMethods(); };
@@ -384,7 +435,8 @@ function credentialFrameVector(frames: readonly Frame[]): readonly Frame[] {
 
 /** Complete current native metadata only. No stored snapshot grants page purpose. */
 export async function captureCredentialPage(
-  page: Page, work: BrowserControlIdentityWork, assertSource: () => void, assertMetadata: (text: string) => void,
+  page: Page, work: BrowserPageReadWork, assertSource: () => void, assertMetadata: (text: string) => void,
+  checkout?: { readonly scrub: (text: string) => string },
 ) {
   const pageMethods = retainBrowserMethods(page, ['url', 'frames', 'mainFrame', 'refreshFrames']);
   const frameOwners = new Map<Frame, ReturnType<typeof retainBrowserMethods>>();
@@ -415,8 +467,10 @@ export async function captureCredentialPage(
       frameCurrent();
       const chainOwner = await credentialFrameChain(frame, work, frameCurrent); chainGuards.push(chainOwner.assertCurrent); frameCurrent();
       const chain = chainOwner.chain;
-      const result = await work.wait(() => { frameCurrent(); return frame.evaluate(collectElements, { limit: Number.MAX_SAFE_INTEGER, identityOnly: true } satisfies Parameters<typeof collectElements>[0]); }); frameCurrent();
-      const captured = credentialDocument(result); frameCurrent();
+      const result = await work.wait(() => { frameCurrent(); return frame.evaluate(collectElements, {
+        limit: Number.MAX_SAFE_INTEGER, identityOnly: true, ...(checkout ? { checkout: true as const } : {}),
+      } satisfies Parameters<typeof collectElements>[0]); }); frameCurrent();
+      const captured = credentialDocument(result, checkout); frameCurrent();
       password ||= captured.password;
       documents.push({ frameChain: chain, ...captured.document });
     }
@@ -442,6 +496,7 @@ export async function captureCredentialPage(
     if (documents.filter(document => document.frameChain.length === 0).length !== 1 || !main || main.url !== page.url()) throw new StaleElementError('Browser document changed.', 'Read the page again.');
     const state = { url: main.url, documents };
     const encoded = JSON.stringify(state);
+    if (checkout && encoded.length > 80_000) throw new Error('Complete checkout evidence exceeds its reading budget.');
     // Exact live material in metadata cannot be made safe by a display marker.
     const inspectMetadata = (entry: unknown): void => {
       if (typeof entry === 'string') assertMetadata(entry);
@@ -721,6 +776,7 @@ export async function resolveRef(
   work = new BrowserControlIdentityWork(),
   assertSnapshotCurrent: () => void = () => {},
   assertReadingAllowed: () => void = () => {},
+  observation: { readonly observationOnly?: boolean } = {},
 ): Promise<{ readonly locator: Locator; readonly element: BrowserElementRef; readonly revalidate: () => Promise<void>; readonly assertCurrent: () => void }> {
   work.assertCurrent();
   if (!snapshot) {
@@ -767,10 +823,12 @@ export async function resolveRef(
   }
   const actual = admitLiveDescriptor(await work.wait(() => locator.evaluate(describeElement)));
   current();
+  // Reading a quote must work before card entry enables the order button.
+  // Effect consumers use the default mode and still refuse disabled controls.
   let agrees = false;
   if (actual.tag === recorded.tag && actual.submits === recorded.submits
     && (actual.role === null || actual.role === recorded.role)
-    && (actual.type !== 'password' || hasAdmittedBrowserWork(work)) && actual.disabled !== true
+    && (actual.type !== 'password' || hasAdmittedBrowserWork(work)) && (observation.observationOnly === true || actual.disabled !== true)
     && (metadata?.documentUrl === undefined || actual.documentUrl === metadata.documentUrl)) {
     const left = (metadata?.name ?? recorded.name).trim().toLowerCase(), right = actual.name.trim().toLowerCase();
     agrees = left.length > 0 && right.length > 0 && left === right;

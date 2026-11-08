@@ -36,6 +36,10 @@ import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { gateReadingsPort } from './_helpers/gate-readings.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
 import type { CardFieldGuard } from '../sdk/src/platform/browser/browser-types.js';
+import { createBrowserCheckoutDriverFactory } from '../sdk/src/platform/payments/browser-checkout-driver.js';
+import { CheckoutSubmitRefused, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
+import { parseCurrencyCode } from '../sdk/src/platform/payments/types.js';
+import { checkoutTerms } from '../sdk/src/platform/payments/batteries/checkout-terms.js';
 
 let previous: ReturnType<typeof installJudgmentPort>;
 let pages: ReturnType<typeof fakePort>;
@@ -138,6 +142,8 @@ interface PageFixtureOptions {
   readonly preparePage?: (page: object) => void;
   readonly arm?: (sessionId: string, pageId: string) => void;
   readonly onAction?: (method: string, signal: AbortSignal | undefined) => Promise<void>;
+  readonly checkout?: () => unknown;
+  readonly untrusted?: UntrustedContentPort;
 }
 function pageState(url: string, title: string, elements: readonly RawElement[]) {
   return { url, documents: [{ frameChain: [], url, title, controls: elements.map(element => ({ documentUrl: url,
@@ -160,7 +166,7 @@ function fakePage(url: string, elements: readonly RawElement[], options: PageFix
       count: async () => (matches ? 1 : 0),
       nth: () => locator,
       first: () => locator,
-      evaluate: async () => ({ ...liveControlDescriptor({ tag: element?.tag ?? '', name: element?.name ?? '', submits: element?.submits ?? false }, url), type: element?.control?.type ?? '' }),
+      evaluate: async () => ({ ...liveControlDescriptor({ tag: element?.tag ?? '', name: element?.name ?? '', submits: element?.submits ?? false, disabled: element?.disabled ?? false }, url), type: element?.control?.type ?? '' }),
       click: async (actionOptions: { readonly signal?: AbortSignal | undefined } = {}) => action('click', actionOptions, () => { options.effects?.push('click'); }),
       fill: async (text: string, actionOptions: { readonly signal?: AbortSignal | undefined } = {}) => action('fill', actionOptions, () => { entered.set(selector, text); options.effects?.push('fill'); }),
       press: async (_key: string, actionOptions: { readonly signal?: AbortSignal | undefined } = {}) => action('press', actionOptions, () => { options.effects?.push('press'); }),
@@ -176,7 +182,7 @@ function fakePage(url: string, elements: readonly RawElement[], options: PageFix
     evaluate: async (_fn: unknown, arg?: unknown) => {
       options.onCollect?.();
       return arg && typeof arg === 'object' && 'identityOnly' in arg && arg.identityOnly === true
-        ? { url, title: title(), elements: raw(true) } : raw();
+        ? { url, title: title(), elements: raw(true), ...('checkout' in arg && arg.checkout === true ? { checkout: options.checkout?.() } : {}) } : raw();
     },
   };
   return {
@@ -229,7 +235,7 @@ async function buildEngine(url: string, elements: readonly RawElement[], options
       },
     })) as unknown as NonNullable<ConstructorParameters<typeof BrowserSessionManager>[0]['loadDriver']>,
   });
-  const engine = new BrowserEngine(sessions, { screenshotDirectory: SCREENSHOT_DIRECTORY, untrusted: new NoopUntrustedContentPort(), ...(options.guard ? { cardFieldGuard: options.guard } : {}) });
+  const engine = new BrowserEngine(sessions, { screenshotDirectory: SCREENSHOT_DIRECTORY, untrusted: options.untrusted ?? new NoopUntrustedContentPort(), ...(options.guard ? { cardFieldGuard: options.guard } : {}) });
   engines.add(engine);
   await engine.launch({ headless: true });
   if (options.arm) {
@@ -977,3 +983,122 @@ for (const retirement of ['caller', 'reader'] as const)
       expect(JSON.stringify(outcome)).not.toContain('4242424242424242'); expect(JSON.stringify(pages.requests)).not.toContain('4242424242424242');
     } finally { controller.abort(); await pending.drain(); await handled; }
   });
+
+test('native checkout observation redacts live card echoes without replacing snapshot refs and refuses a changed quote', async () => {
+  const guard = new CardMaterialRedactor(), number = '4242424242424242';
+  let body = `Cable x1 USD 10.00. Total USD 11.00. Card ${number}`;
+  const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, { guard,
+    checkout: () => ({ text: body, selections: [], quantities: [{ selector: '#quantity', value: number }] }),
+    arm: (sessionId, pageId) => guard.arm(sessionId, pageId, [{ kind: 'number', value: number }]),
+  });
+  const snapshot = await engine.snapshot({});
+  const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original browser session');
+  const { pageId } = await engine.sessionManager().page(sessionId);
+  const snapshotId = snapshot.snapshotId;
+  if (typeof snapshotId !== 'string') throw new Error('Missing original snapshot reference');
+  const observation = await engine.observeCheckoutTerms({ sessionId, pageId }, { assertCurrent() {} });
+  expect(JSON.stringify(observation.state)).not.toContain(number);
+  expect(() => engine.assertSnapshotCurrent(sessionId, pageId, snapshotId)).not.toThrow();
+  await observation.assertCurrent();
+  body = 'Cable x1 USD 20.00. Total USD 21.00';
+  await expect(observation.assertCurrent()).rejects.toThrow('changed');
+});
+
+test.each(['oversized', 'accessor'] as const)('native checkout evidence refuses %s content before model transmission', async kind => {
+  let getterCalls = 0;
+  const checkout = kind === 'oversized' ? { text: 'x'.repeat(20_001), selections: [], quantities: [] }
+    : Object.defineProperty({ selections: [], quantities: [] }, 'text', { enumerable: true, get() { getterCalls++; return 'Untrusted late value'; } });
+  const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, { guard: new CardMaterialRedactor(), checkout: () => checkout });
+  const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original browser session');
+  const { pageId } = await engine.sessionManager().page(sessionId);
+  await expect(engine.observeCheckoutTerms({ sessionId, pageId }, { assertCurrent() {} })).rejects.toBeInstanceOf(Error);
+  expect(getterCalls).toBe(0); expect(pages.requests).toEqual([]);
+});
+
+test('native checkout read failures never expose a page-authored message, including retained rechecks', async () => {
+  let fail = false;
+  const secret = 'private page-authored sentinel';
+  const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, { guard: new CardMaterialRedactor(),
+    checkout: () => ({ text: 'One-off order USD 11.00', selections: [], quantities: [] }),
+    onCollect: () => { if (fail) throw new Error(secret); },
+  });
+  const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original browser session');
+  const { pageId } = await engine.sessionManager().page(sessionId);
+  const observation = await engine.observeCheckoutTerms({ sessionId, pageId }, { assertCurrent() {} });
+  fail = true;
+  for (const read of [() => observation.assertCurrent(), () => engine.observeCheckoutTerms({ sessionId, pageId }, { assertCurrent() {} })]) {
+    const error: unknown = await read().catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(BrowserSessionError); expect(String(error)).not.toContain(secret);
+  }
+});
+
+test('checkout can inspect a disabled order button but cannot click it until enabled and freshly verified', async () => {
+  const effects: string[] = [], guard = new CardMaterialRedactor(), prior = installed;
+  const quotes = fakePort(() => noulAnswer(0.99));
+  installJudgmentPort({ ...prior, ask: request => request.context?.battery === checkoutTerms.name ? quotes.port.ask(request) : prior.ask(request) });
+  const row = { ...fixtureRow(ORDINARY_ELEMENTS, 0), name: 'Place order', submits: true, disabled: true };
+  const rows = [row];
+  const engine = await buildEngine(ORDINARY_URL, rows, { effects, guard,
+    checkout: () => ({ text: 'Cable x1 USD 10.00. Tax USD 1.00. Standard free. One-off total USD 11.00.', selections: [], quantities: [] }),
+  });
+  await engine.snapshot({});
+  const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original browser session');
+  const { pageId } = await engine.sessionManager().page(sessionId);
+  const currency = parseCurrencyCode('USD'); if (!currency) throw new Error('Invalid fixture currency');
+  const expected: CheckoutTerms = { submitTarget: 'e1', merchantDomain: 'example.com', currency,
+    lines: [{ label: 'Cable', quantity: 1, unitMinorUnits: 1_000 }], taxMinorUnits: 100, feesMinorUnits: 0, feeLabels: [],
+    shippingLabel: 'Standard', shippingMinorUnits: 0, totalMinorUnits: 1_100 };
+  const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => engine, cardFieldGuard: guard })(sessionId, pageId);
+  if (!driver.verifyTerms) throw new Error('Actual checkout driver has no fresh terms capability');
+  expect(await driver.verifyTerms(expected, { assertCurrent() {} })).toBe(true);
+  await expect(driver.submitOrder('e1')).rejects.toBeInstanceOf(CheckoutSubmitRefused);
+  expect(effects).not.toContain('click');
+  // The same DOM control becomes enabled after form completion. An earlier
+  // observation is spent; submission needs a new complete live quote.
+  row.disabled = false;
+  expectedPages.set(JSON.stringify(pageState(ORDINARY_URL, 'Dashboard', rows)), 0.01);
+  await expect(driver.submitOrder('e1')).rejects.toBeInstanceOf(CheckoutSubmitRefused);
+  expect(effects).not.toContain('click');
+  expect(await driver.verifyTerms(expected, { assertCurrent() {} })).toBe(true);
+  await driver.submitOrder('e1');
+  expect(effects.filter(effect => effect === 'click')).toHaveLength(1);
+  expect(quotes.requests).toHaveLength(2);
+});
+
+test('actual checkout driver catches a changed quote after the engine waits for its outward-effect check', async () => {
+  const gate = pendingNativeAction(), effects: string[] = [], guard = new CardMaterialRedactor();
+  let body = 'Cable x1 USD 10.00. Standard free. Tax USD 1.00. One-off total USD 11.00.';
+  class WaitingOutwardPort extends NoopUntrustedContentPort {
+    override async evaluateOutwardEffect(input: Parameters<NoopUntrustedContentPort['evaluateOutwardEffect']>[0]): Promise<OutwardEffectDecision> {
+      await gate.wait(undefined); return super.evaluateOutwardEffect(input);
+    }
+  }
+  const prior = installed;
+  const quotes = fakePort((name, question) => {
+    expect(name).toBe('unchanged'); expect<unknown>(question).toEqual(checkoutTerms.items.unchanged.question);
+    return noulAnswer(0.99);
+  });
+  installJudgmentPort({ ...prior, ask: request => request.context?.battery === checkoutTerms.name ? quotes.port.ask(request) : prior.ask(request) });
+  const rows = [{ ...fixtureRow(ORDINARY_ELEMENTS, 0), name: 'Place order', submits: true }];
+  const engine = await buildEngine(ORDINARY_URL, rows, { effects, guard, untrusted: new WaitingOutwardPort(),
+    checkout: () => ({ text: body, selections: [], quantities: [] }),
+  });
+  await engine.snapshot({});
+  const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original browser session');
+  const { pageId } = await engine.sessionManager().page(sessionId);
+  const currency = parseCurrencyCode('USD'); if (!currency) throw new Error('Invalid fixture currency');
+  const expected: CheckoutTerms = { submitTarget: 'e1', merchantDomain: 'example.com', currency,
+    lines: [{ label: 'Cable', quantity: 1, unitMinorUnits: 1_000 }], taxMinorUnits: 100, feesMinorUnits: 0, feeLabels: [],
+    shippingLabel: 'Standard', shippingMinorUnits: 0, totalMinorUnits: 1_100 };
+  const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => engine, cardFieldGuard: guard })(sessionId, pageId);
+  if (!driver.verifyTerms) throw new Error('Actual checkout driver has no fresh terms capability');
+  expect(await driver.verifyTerms(expected, { assertCurrent() {} })).toBe(true);
+  const result = driver.submitOrder('e1').catch((error: unknown) => error);
+  try {
+    await gate.started;
+    body = 'Cable x1 USD 100.00. Standard free. Tax USD 10.00. Total USD 110.00.';
+    gate.release(); expect(await result).toBeInstanceOf(CheckoutSubmitRefused);
+    expect(effects).not.toContain('click');
+    expect(quotes.requests).toHaveLength(1);
+  } finally { await gate.drain(); await result; }
+});

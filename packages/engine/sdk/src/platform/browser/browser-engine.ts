@@ -1,4 +1,5 @@
 import { isAdmittedBrowserAction, retainAdmittedBrowserAction, retainAdmittedBrowserWork } from './browser-action-admission.js';
+import { captureOwnedJson } from '../gate/judgment-input.js';
 import { isYoloExecution } from '../gate/execution-context.js';
 import type { ToolExecuteOptions } from '../types/tools.js';
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
@@ -41,7 +42,7 @@ import type {
 } from './browser-engine-contract.js';
 
 export { UntrustedEffectError };
-export type { BrowserEngineOptions, BrowserExtractField, BrowserTarget };
+export type { BrowserActionLifetime, BrowserEngineOptions, BrowserExtractField, BrowserTarget };
 
 
 /** A native click entered the actuator. Later cancellation/validation failures
@@ -393,6 +394,65 @@ export class BrowserEngine {
     }
   }
 
+  /** Complete checkout evidence without replacing snapshot refs or exporting field secrets. */
+  async observeCheckoutTerms(target: BrowserTarget, ownership: BrowserActionLifetime, submitTarget?: string): Promise<{
+    readonly state: object; readonly assertCurrent: () => Promise<void>;
+  }> {
+    const sessionId = target.sessionId, pageId = target.pageId;
+    if (!sessionId || !pageId) throw new BrowserSessionError('Checkout terms require an explicit session and page.');
+    const work = new BrowserControlIdentityWork({ ...ownership }, { drainReads: true });
+    const guard = this.cardGuard;
+    if (!guard) throw new BrowserSessionError('Checkout evidence requires the payment redactor.');
+    const methods = retainBrowserMethods(guard, ['redact']);
+    const redact = methods.value('redact');
+    if (typeof redact !== 'function') throw new BrowserSessionError('Checkout redaction is unavailable.');
+    const scrub = (text: string): string => {
+      if (this.cardGuard !== guard) throw new BrowserSessionError('The original checkout redactor was replaced.');
+      methods.assertCurrent(); work.assertCurrent();
+      const result: unknown = Reflect.apply(redact, guard, [sessionId, pageId, text]);
+      methods.assertCurrent(); work.assertCurrent();
+      if (typeof result !== 'string') throw new BrowserSessionError('Checkout redaction is unavailable.');
+      return result;
+    };
+    const fail = (error: unknown): never => {
+      work.assertCurrent();
+      if (error instanceof BrowserSessionError || error instanceof StaleElementError) throw error;
+      // Native evaluation failures may contain page-authored text or values.
+      throw new BrowserSessionError('The complete current checkout could not be safely read.', 'Read the live checkout again before starting another purchase.');
+    };
+    try { return await this.sessions.withPage(sessionId, pageId, async (page, currentPage) => {
+      const scope = submitTarget ? this.refScope(sessionId, pageId, page, work, ownership, undefined, undefined, true) : undefined;
+      const current = (): void => {
+        currentPage(); work.assertCurrent(); methods.assertCurrent();
+        scope?.current();
+        if (this.cardGuard !== guard) throw new BrowserSessionError('The original checkout redactor was replaced.');
+      };
+      const selected = submitTarget && scope ? await scope.resolve(submitTarget) : undefined;
+      if (selected) { await selected.revalidate(); current(); }
+      const observation = await captureCredentialPage(page, work, current, text => {
+        if (scrub(text) !== text) throw new BrowserSessionError('Checkout metadata contains live payment material.');
+      }, { scrub });
+      current();
+      if (observation.password) throw new BrowserSessionError('Checkout terms cannot be verified on a credential-entry page.');
+      if (selected) for (const text of [submitTarget, selected.element.selector, selected.element.name,
+        selected.element.role, ...selected.element.frameChain]) {
+        if (typeof text !== 'string' || scrub(text) !== text) throw new BrowserSessionError('Checkout submit metadata contains live payment material.');
+      }
+      const state = captureOwnedJson({ ...observation.state, ...(selected ? { submitControl: {
+        ref: submitTarget, selector: selected.element.selector, frameChain: selected.element.frameChain,
+        name: selected.element.name, role: selected.element.role, submits: selected.element.submits,
+      } } : {}) });
+      if (!state || typeof state !== 'object' || Array.isArray(state)) throw new BrowserSessionError('Checkout evidence is incomplete.');
+      this.recordPageIngest(observation.url, JSON.stringify(state)); current();
+      return { state, assertCurrent: async () => {
+        try { await this.sessions.withPage(sessionId, pageId, async (original, assertPage) => {
+          if (original !== page) throw new BrowserSessionError('The original checkout page was replaced.');
+          assertPage(); await observation.assertCurrent(); assertPage();
+        }); } catch (error) { fail(error); }
+      } };
+    }); } catch (error) { return fail(error); }
+  }
+
   private currentSnapshot(sessionId: string, pageId: string): BrowserSnapshot | null {
     return this.snapshots.get(sessionId, pageId);
   }
@@ -442,7 +502,7 @@ export class BrowserEngine {
 
   /** Bind every ref consumer to one stored snapshot and one original source. */
   private refScope(sessionId: string, pageId: string, page: Page, work: BrowserControlIdentityWork, ownership?: BrowserActionLifetime,
-    action?: string, args?: Readonly<Record<string, unknown>>) {
+    action?: string, args?: Readonly<Record<string, unknown>>, observationOnly = false) {
     const snapshot = this.currentSnapshot(sessionId, pageId), expected = ownership?.snapshotId;
     const pageMethods = retainBrowserMethods(page, ['url']);
     const current = () => {
@@ -456,7 +516,7 @@ export class BrowserEngine {
     if (action && args) retainAdmittedBrowserWork(work, this, ownership, sessionId, pageId, action, args, current);
     return { snapshot, current, resolve: (ref: string) => resolveRef(page, snapshot, ref, work, current, () => {
       if (this.cardGuard?.hasLiveMaterial(sessionId, pageId)) throw new StaleElementError('Cannot read changed control identity while payment material is live.', 'Use an unchanged control or finish the authorized payment flow first.');
-    }) };
+    }, { observationOnly }) };
   }
 
   async click(
@@ -496,7 +556,8 @@ export class BrowserEngine {
     const urlBefore = page.url();
     let attempted = false;
     try {
-      await work.action(signal => {
+      await work.action(async signal => {
+        if (ownership?.beforeDispatch) { await ownership.beforeDispatch(); current(); }
         attempted = true;
         return locator.click({ signal, button: args.button ?? 'left', clickCount: args.clickCount ?? 1,
           timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS });

@@ -8,7 +8,7 @@ import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redactio
 import { CheckoutRegistry, MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
 import { CheckoutOwnershipError } from '../sdk/src/platform/payments/checkout-ownership.js';
 import { runCheckout, type CheckoutFlowDeps, type CheckoutControls, type PurchaseRequest } from '../sdk/src/platform/payments/checkout-flow.js';
-import { CheckoutSubmitRefused } from '../sdk/src/platform/payments/checkout-page.js';
+import { CheckoutSubmitRefused, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
 import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
 import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
 import type { RawCheckoutReading } from '../sdk/src/platform/payments/checkout-extraction.js';
@@ -37,6 +37,8 @@ function fixture() {
   let active = true, page = 'page', metadataFailure = false;
   owners.push(() => { active = false; });
   let onMerchant = async () => {}, onMetadata = async () => {}, onChoose = async () => {}, onSubmit = async () => {};
+  let onTerms = async (_expected: CheckoutTerms) => true;
+  const terms: CheckoutTerms[] = [];
   const effects: string[] = [], records: PurchaseRecord[] = [], notices: { kind: string; message: string }[] = [];
   let merchantCalls = 0;
   const request: PurchaseRequest = { purchaseId: 'owned-purchase', merchantDomain: 'bestbuy.com', checkoutUrl: 'https://www.bestbuy.com/checkout',
@@ -61,6 +63,12 @@ function fixture() {
     },
     driver: {
       identity: () => ({ sessionId: 'session', pageId: page }), async url() { return 'https://www.bestbuy.com/checkout'; },
+      async verifyTerms(expected, owner) {
+        owner.assertCurrent(); terms.push(expected);
+        const result = await onTerms(expected); owner.assertCurrent();
+        return result && expected.totalMinorUnits === 1_100 && expected.currency === 'USD'
+          && expected.lines.length === 1 && expected.lines[0]?.label === 'Original item' && expected.lines[0]?.quantity === 1;
+      },
       async fill(target, _value, owner) { owner?.assertCurrent(); effects.push(`fill:${target}`); },
       async fillSecrets(fields, owner) { owner?.assertCurrent(); effects.push(...fields.map(field => `secret:${field.target}`)); return { filledTargets: fields.map(field => field.target), failedTarget: null }; },
       async choose(target, _value, owner) { owner?.assertCurrent(); effects.push(`choose:${target}`); await onChoose(); },
@@ -72,13 +80,52 @@ function fixture() {
     gates: { enabled: true, hasUsableCard: true, hasShippingAddress: true, isOwnerDirectRequest: true, isPaymentsLeader: true },
     merchantJudge: { async judge() { merchantCalls++; await onMerchant(); return { qualifies: true, confident: true, recourse: 'Fixture recourse' }; } },
   };
-  return { deps, request, reading, controls, ledger, journal, redactor, effects, records, notices,
+  return { deps, request, reading, controls, ledger, journal, redactor, effects, records, notices, terms,
     run: () => { const pending = runCheckout(request, reading, controls, deps); work.push(pending); drainOwned(pending); return pending; },
     revoke: () => { active = false; }, changePage: () => { page = 'replacement-page'; },
     merchantCalls: () => merchantCalls, failMetadata: () => { metadataFailure = true; },
     onMerchant: (work: () => Promise<void>) => { onMerchant = work; }, onMetadata: (work: () => Promise<void>) => { onMetadata = work; },
-    onChoose: (work: () => Promise<void>) => { onChoose = work; }, onSubmit: (work: () => Promise<void>) => { onSubmit = work; } };
+    onChoose: (work: () => Promise<void>) => { onChoose = work; }, onSubmit: (work: () => Promise<void>) => { onSubmit = work; },
+    onTerms: (work: (expected: CheckoutTerms) => Promise<boolean>) => { onTerms = work; } };
 }
+
+test.each(['before-card', 'before-submit'] as const)('changed checkout terms %s release the hold and never submit', async phase => {
+  const f = fixture(); let calls = 0;
+  f.onTerms(async expected => { calls++; expect(expected.totalMinorUnits).toBe(1_100); return phase === 'before-submit' && calls === 1; });
+  const result = await f.run();
+  expect(result).toMatchObject({ kind: 'refused', code: 'total-changed' });
+  expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false); expect(f.records).toEqual([]);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+  if (phase === 'before-card') expect(f.effects).not.toContain('card-read');
+  else { expect(f.effects).toContain('card-read'); expect(f.redactor.hasLiveMaterial('session', 'page')).toBe(true); }
+});
+
+test('fresh quote capability cannot be replaced while the approval window is pending', async () => {
+  const f = fixture(), entered = barrier(), wait = barrier();
+  f.deps.notifier.awaitAnswer = async () => { entered.release(); await wait.wait; return { answer: 'acknowledge', channel: 'operator' }; };
+  const result = f.run().catch((error: unknown) => error);
+  try {
+    await entered.wait;
+    f.deps.driver.verifyTerms = async () => true;
+    wait.release(); expect(await result).toBeInstanceOf(CheckoutOwnershipError);
+    expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+    expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+  } finally { wait.release(); await result; }
+});
+
+test('an unavailable fresh quote reader cannot release the window into a purchase', async () => {
+  const f = fixture(); f.onTerms(async () => { throw new Error('Fresh page unavailable'); });
+  await expect(f.run()).rejects.toThrow('Fresh page unavailable');
+  expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('a driver without a fresh quote reader refuses before taking money or asking a model', async () => {
+  const f = fixture(); Reflect.deleteProperty(f.deps.driver, 'verifyTerms');
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'total-changed' });
+  expect(f.effects).toEqual([]); expect(readings.requests).toEqual([]);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
 
 test('a checkout retains the original complete request, page reading and controls through a suspended merchant read', async () => {
   const f = fixture(), entered = barrier(), gate = barrier();

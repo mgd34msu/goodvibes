@@ -313,6 +313,46 @@ test('mutated artifacts, rewritten checkpoint roots and copied receipts cannot v
   await expect(verifyNativeWorkExecution({ execution: { ...record, receipt: { ...record.receipt!, contractId: 'ctr_000000000000' } }, runner: f.harness.runner, port: f.hostOptions.port, decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true, signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow();
 });
 
+test('the held artifact guard compares exact bytes even when two files decode to identical text', async () => {
+  const f = await fixture(); const started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId);
+  const path = join(f.root, 'src/csv.ts');
+  const original = Buffer.from([0x61, 0xff, 0x62]), replacement = Buffer.from([0x61, 0xfe, 0x62]);
+  expect(original.toString('utf8')).toBe(replacement.toString('utf8'));
+  writeFileSync(path, original);
+  const proof = await verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
+    port: f.hostOptions.port, decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS),
+    readAccessFilter: async () => true, signal: new AbortController().signal, assertCurrent() {} });
+  proof.assertCurrent();
+  writeFileSync(path, replacement);
+  expect(() => proof.assertCurrent()).toThrow('artifact changed');
+  expect(f.storage.current(f.key).ledger.evidence).toHaveLength(0);
+});
+
+for (const initial of ['absent', 'empty-file'] as const) test(`a held ${initial} artifact is distinct from the other state`, async () => {
+  const f = await fixture(); const started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId);
+  const path = join(f.root, 'src/csv.ts');
+  if (initial === 'absent') rmSync(path); else writeFileSync(path, '');
+  const proof = await verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!, runner: f.harness.runner,
+    port: f.hostOptions.port, decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS),
+    readAccessFilter: async () => true, signal: new AbortController().signal, assertCurrent() {} });
+  proof.assertCurrent();
+  if (initial === 'absent') writeFileSync(path, ''); else rmSync(path);
+  expect(() => proof.assertCurrent()).toThrow('artifact changed');
+  expect(f.storage.current(f.key).settlement).toBeNull();
+});
+
+test('a returned verifier proof stays bound to the complete captured checkpoint', async () => {
+  const f = await fixture(); const started = await f.host.start(f.target, f.authority);
+  const checkpoint = structuredClone(await completed(f.harness, started.admission.contractId));
+  const proof = await verifyNativeWorkExecution({ execution: f.storage.current(f.key).record!,
+    runner: { join: f.harness.runner.join, get: () => checkpoint },
+    port: f.hostOptions.port, decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS),
+    readAccessFilter: async () => true, signal: new AbortController().signal, assertCurrent() {} });
+  proof.assertCurrent();
+  Object.assign(checkpoint, { answer: 'Changed after the verifier returned.' });
+  expect(() => proof.assertCurrent()).toThrow('contract changed');
+});
+
 test('automatic completion settles through the owned lifetime and close drains held checks', async () => {
   const f = await fixture({ automatic: true }); const started = await f.host.start(f.target, f.authority);
   await waitFor(() => f.storage.current(f.key).settlement !== null, 'automatic native settlement', 15000);

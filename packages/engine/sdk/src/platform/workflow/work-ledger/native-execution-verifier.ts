@@ -1,6 +1,7 @@
 /** Host-only original-source checks. A terminal runner is never its own attestation. */
 import { createHash } from 'node:crypto';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { hashState, readYesNo, type YesNoBand, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { assertDurableCheckpoint, parseDurableAdmission } from '../../contract/durable-admission.js';
@@ -59,23 +60,40 @@ function evidenceRoot(contract: ContractView): string {
   }
   return realpathSync(contract.projectRoot);
 }
-function readArtifact(root: string, path: string): { digest: string; text: string; byteLength: number } {
+type ArtifactSnapshot =
+  | { readonly kind: 'absent'; readonly text: string; readonly byteLength: 0 }
+  | { readonly kind: 'file'; readonly bytes: Buffer; readonly text: string; readonly byteLength: number };
+const ARTIFACT_MAX_BYTES = 20 * 1024 * 1024;
+function readArtifact(root: string, path: string): ArtifactSnapshot {
   const absolute = contained(root, path);
   try {
     const stat = lstatSync(absolute);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 20 * 1024 * 1024) throw new Error('Native artifact must be a bounded regular file');
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > ARTIFACT_MAX_BYTES) throw new Error('Native artifact must be a bounded regular file');
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { digest: digest('native-artifact:absent'), text: '(deleted file)', byteLength: 0 };
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'absent', text: '(deleted file)', byteLength: 0 };
     throw error;
   }
-  const fd = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW);
+  const fd = openSync(absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
-    const before = fstatSync(fd); const named = lstatSync(contained(root, path));
-    if (!before.isFile() || named.isSymbolicLink() || named.dev !== before.dev || named.ino !== before.ino || before.size > 20 * 1024 * 1024) throw new Error('Native artifact changed before capture');
-    const bytes = readFileSync(fd); const after = fstatSync(fd);
-    if (bytes.length > 20 * 1024 * 1024 || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new Error('Native artifact changed during capture');
-    return { digest: nativeSettlementDigest({ kind: 'file', sha256: digest(bytes) }), byteLength: bytes.length, text: bytes.includes(0) ? `(binary file, ${bytes.length} bytes)` : bytes.toString('utf8') };
+    const before = fstatSync(fd, { bigint: true }); const named = lstatSync(contained(root, path), { bigint: true });
+    if (!before.isFile() || !named.isFile() || named.isSymbolicLink() || named.dev !== before.dev || named.ino !== before.ino || before.size > BigInt(ARTIFACT_MAX_BYTES)) throw new Error('Native artifact changed before capture');
+    // A file growing during a read must not allocate beyond the admitted size.
+    const buffer = Buffer.alloc(Number(before.size) + 1); let offset = 0;
+    while (offset < buffer.length) {
+      const count = readSync(fd, buffer, offset, buffer.length - offset, offset);
+      if (!count) break;
+      offset += count;
+    }
+    const after = fstatSync(fd, { bigint: true }), current = lstatSync(contained(root, path), { bigint: true });
+    if (offset !== Number(before.size) || before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
+      || !current.isFile() || current.isSymbolicLink() || current.dev !== after.dev || current.ino !== after.ino
+      || current.size !== after.size || current.mtimeNs !== after.mtimeNs || current.ctimeNs !== after.ctimeNs) throw new Error('Native artifact changed during capture');
+    const bytes = buffer.subarray(0, offset);
+    return { kind: 'file', bytes, byteLength: bytes.length, text: bytes.includes(0) ? `(binary file, ${bytes.length} bytes)` : bytes.toString('utf8') };
   } finally { closeSync(fd); }
+}
+function sameArtifact(left: ArtifactSnapshot, right: ArtifactSnapshot): boolean {
+  return left.kind === 'file' ? right.kind === 'file' && left.bytes.equals(right.bytes) : right.kind === 'absent';
 }
 
 export interface VerifiedNativeWorkExecution {
@@ -151,9 +169,9 @@ export async function verifyNativeWorkExecution(options: {
     const recordedInitial = object(proof['sourceGoal']), recorded = object(proof['reading']), policy = object(proof['policy']);
     if (!source || !entry || entry.context.battery !== battery.name || entry.context.batteryVersion !== battery.version
       || entry.stateHash !== proof['stateHash'] || proof['literalSourceDigest'] !== literalSourceDigest || proof['outputDigest'] !== hashState(contract.answer ?? '')
-      || nativeSettlementDigest(proof['sourceJudgmentDecisionIds']) !== nativeSettlementDigest(sourceIds)
-      || nativeSettlementDigest(decision.decisionIds) !== nativeSettlementDigest(ids)
-      || nativeSettlementDigest(source.question) !== nativeSettlementDigest(goalObligationQuestion(battery.items.omitted.question, literalSourceDigest))
+      || !isDeepStrictEqual(proof['sourceJudgmentDecisionIds'], sourceIds)
+      || !isDeepStrictEqual(decision.decisionIds, ids)
+      || !isDeepStrictEqual(source.question, goalObligationQuestion(battery.items.omitted.question, literalSourceDigest))
       || sourceProbability <= 0.5 || initial.outcome === 'act' || recordedInitial?.['probability'] !== sourceProbability
       || recordedInitial['verdict'] !== initial.verdict || recordedInitial['outcome'] !== initial.outcome
       || policy?.['name'] !== battery.name || policy['version'] !== battery.version) return false;
@@ -214,7 +232,7 @@ export async function verifyNativeWorkExecution(options: {
     const overviewQuestion = contentQuestions?.get('unsupported');
     const rawOverview = overviewQuestion?.answer.noul;
     if (typeof rawOverview !== 'number' || rawOverview <= 0.5 || overview?.['probability'] !== rawOverview
-      || nativeSettlementDigest(overviewQuestion?.question) !== nativeSettlementDigest(battery.items.unsupported.question)
+      || !isDeepStrictEqual(overviewQuestion?.question, battery.items.unsupported.question)
       || readYesNo({ type: 'noul', noul: rawOverview }, battery.items.unsupported.band).outcome === 'act') return false;
     let worst = -1;
     for (const rawClaim of claims) {
@@ -224,7 +242,7 @@ export async function verifyNativeWorkExecution(options: {
       const actual = nativeQuestionBatches([id], ['unsupported'], 'contract.check.final-answer-review', options.decisionLog)?.get('unsupported');
       if (!actual || !entry || entry.context.battery !== battery.name || entry.context.batteryVersion !== battery.version
         || entry.stateHash !== claim['stateHash'] || entry.stateHash === content?.['stateHash']
-        || nativeSettlementDigest(actual.question) !== nativeSettlementDigest(scopedClaimQuestion(battery.items.unsupported.question,
+        || !isDeepStrictEqual(actual.question, scopedClaimQuestion(battery.items.unsupported.question,
           rawClaim as AnswerClaimReview, hashState(contract.answer ?? '')))) return false;
       const raw = rawNo(actual.answer, battery.items.unsupported.band);
       if (raw === null || reading?.['probability'] !== raw || reading['verdict'] !== 'no' || reading['outcome'] !== 'act') return false;
@@ -258,8 +276,8 @@ export async function verifyNativeWorkExecution(options: {
     || original['sourceDigest'] !== hashState(originalObligationSource(contract)) || original['outputDigest'] !== hashState(contract.answer ?? '')
     || typeof original['evidenceDigest'] !== 'string' || !originalQuestion || originalProbability === null
     || originalReading?.['probability'] !== originalProbability || originalReading['verdict'] !== 'no' || originalReading['outcome'] !== 'act'
-    || nativeSettlementDigest(originalQuestion.question) !== nativeSettlementDigest(originalBattery.items.original_obligations_unmet.question)
-    || nativeSettlementDigest(originalDecision?.decisionIds) !== nativeSettlementDigest(originalIds)
+    || !isDeepStrictEqual(originalQuestion.question, originalBattery.items.original_obligations_unmet.question)
+    || !isDeepStrictEqual(originalDecision?.decisionIds, originalIds)
     || !deliverable.decisionIds.includes(originalId)) {
     throw new Error('Native execution lacks genuine original-obligation coverage');
   }
@@ -276,29 +294,31 @@ export async function verifyNativeWorkExecution(options: {
       if (key === 'unsupported' && claims !== undefined) return genuineClaims();
       const raw = rawNo(source.answer, item.band);
       return raw !== null && reading?.['probability'] === raw && reading['verdict'] === 'no' && reading['outcome'] === 'act'
-        && nativeSettlementDigest(source.question) === nativeSettlementDigest(item.question);
+        && isDeepStrictEqual(source.question, item.question);
     }) || !Array.isArray(fulfillmentIds) || !fulfillmentIds.every(id => typeof id === 'string')
     || !nativeJudgeBatches(fulfillmentIds, contract.criteria, deliverableSite, options.decisionLog)
-    || !contentDecision || nativeSettlementDigest(contentDecision.decisionIds) !== nativeSettlementDigest(contentIds)
+    || !contentDecision || !isDeepStrictEqual(contentDecision.decisionIds, contentIds)
     || deliverable.decisionIds.length !== expectedIds.length || !expectedIds.every(id => typeof id === 'string' && deliverable.decisionIds.includes(id))) {
     throw new Error('Native execution lacks a genuine final-answer content review');
   }
   const root = evidenceRoot(contract);
   const paths = [...new Set(contract.units.flatMap(unit => unit.touchedPaths))];
   if (paths.length > 94) throw new Error('Native evidence exceeds ledger reference capacity');
-  const captured: { path: string; digest: string; text: string }[] = [];
+  const captured: (ArtifactSnapshot & { readonly path: string; readonly digest: string })[] = [];
   let bytes = 0;
   for (const path of paths) {
     current(); const absolute = contained(root, path);
     if (!await options.readAccessFilter(absolute)) throw new Error('Native artifact read is access-restricted');
     current(); const content = readArtifact(root, path); bytes += content.byteLength;
     if (bytes > 20 * 1024 * 1024) throw new Error('Native artifact capture exceeds total budget');
-    captured.push({ path, ...content });
+    const artifactDigest = content.kind === 'file'
+      ? nativeSettlementDigest({ kind: 'file', sha256: digest(content.bytes) }) : digest('native-artifact:absent');
+    captured.push({ path, ...content, digest: artifactDigest });
   }
   const assertCurrent = () => {
     current(); const latest = options.runner.get(admission.contractId);
-    if (!latest || nativeSettlementDigest(latest) !== contractDigest || evidenceRoot(latest) !== root) throw new Error('Native contract changed during verification');
-    for (const artifact of captured) if (readArtifact(root, artifact.path).digest !== artifact.digest) throw new Error('Native artifact changed during verification');
+    if (!latest || !isDeepStrictEqual(latest, contract) || evidenceRoot(latest) !== root) throw new Error('Native contract changed during verification');
+    for (const artifact of captured) if (!sameArtifact(readArtifact(root, artifact.path), artifact)) throw new Error('Native artifact changed during verification');
     current();
   };
   assertCurrent();
@@ -310,7 +330,7 @@ export async function verifyNativeWorkExecution(options: {
   const changes: FileChange[] = captured.map(item => ({ path: item.path, diff: `${item.path}\n${item.text}` }));
   const evidence = freeze(trimEvidence({ output: contract.answer ?? '', changes, gates: deliverable!.gates, commands: [] }, unit));
   const originalSource = nativeContractSourceForAdmission(contract);
-  const states = new Map<string, { hash: string; questions: string; answers: string; decisionId?: string }>();
+  const states = new Map<string, { hash: string; questions: unknown; answers: unknown; decisionId?: string }>();
   const checkAbort = new AbortController(); const checkSignal = AbortSignal.any([options.signal, checkAbort.signal]);
   const pending = new Set<Promise<unknown>>();
   const checkPort: JudgmentPort = { ...options.port, ask(request) {
@@ -320,7 +340,7 @@ export async function verifyNativeWorkExecution(options: {
       const questions = freeze(structuredClone(request.questions));
       const site = request.context?.site;
       if (!site || (site !== CHECK_SITES.judge && site !== CHECK_SITES.quality)) throw new Error('Unexpected native settlement decision site');
-      const captured = { hash: hashState(state), questions: nativeSettlementDigest(questions) };
+      const captured = { hash: hashState(state), questions };
       // Forward the registered runUnitCheck request with detached images. This
       // adapter defines no questions or decision; the generic request type stays intact.
       const forwarded: typeof request = { ...request, state, questions, signal: checkSignal, beforeAttempt: active };
@@ -329,7 +349,7 @@ export async function verifyNativeWorkExecution(options: {
       // later microtask can change what the battery reads after provenance capture.
       const result = freeze(structuredClone(await options.port.ask(forwarded)));
       active();
-      states.set(site, { ...captured, answers: nativeSettlementDigest(result.answers), ...(result.decisionId ? { decisionId: result.decisionId } : {}) }); return result;
+      states.set(site, { ...captured, answers: result.answers, ...(result.decisionId ? { decisionId: result.decisionId } : {}) }); return result;
     });
     pending.add(operation); void operation.then(() => pending.delete(operation), () => pending.delete(operation)); return operation;
   } };
@@ -344,7 +364,7 @@ export async function verifyNativeWorkExecution(options: {
   const decisionReferences = result.check.decisionIds.map((id, index): WorkEvidenceReference => {
     const entry = options.decisionLog.get(id); const site = index === 0 ? CHECK_SITES.judge : CHECK_SITES.quality;
     const expected = hashState({ ...(index === 0 ? judgeState(unit, evidence) : qualityState(unit, evidence)), originalSource } as unknown as EntryType);
-    if (!entry || entry.status !== 'answered' || entry.context.site !== site || entry.stateHash !== expected || states.get(site)?.hash !== expected || states.get(site)?.decisionId !== id || states.get(site)?.questions !== nativeSettlementDigest(entry.questions) || states.get(site)?.answers !== nativeSettlementDigest(entry.answers)) throw new Error('Native decision provenance is missing or mismatched');
+    if (!entry || entry.status !== 'answered' || entry.context.site !== site || entry.stateHash !== expected || states.get(site)?.hash !== expected || states.get(site)?.decisionId !== id || !isDeepStrictEqual(states.get(site)?.questions, entry.questions) || !isDeepStrictEqual(states.get(site)?.answers, entry.answers)) throw new Error('Native decision provenance is missing or mismatched');
     const { notes: _notes, ...immutable } = entry;
     return { kind: 'decision', ref: `decision:${id}`, digest: nativeSettlementDigest(immutable) };
   });

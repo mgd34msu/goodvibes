@@ -3,7 +3,7 @@ import type { KnowledgeStore } from './store.js';
 import { snapshotNodeInput } from './activation/projection.js';
 import { getKnowledgeSpaceId } from './spaces.js';
 import { isDeepStrictEqual } from 'node:util';
-import { supportHash } from './semantic/verification/projection.js';
+import { prepareObservedEvidenceCheck } from './store-observed-evidence.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 
 export type KnowledgeObservationOrigin = 'catalog-structure' | 'source-declaration' | 'link-declaration' | 'memory-mirror' | 'home-assistant-snapshot' | 'browser-profile' | 'generated-page-index' | 'research-task';
@@ -41,9 +41,8 @@ export function prepareObservedKnowledgeNodeInput(store: KnowledgeStore, input: 
   };
   if (!kinds[origin]?.includes(input.kind)) throw new KnowledgeNodeActivationHeldError('malformed');
   const frozen = snapshotNodeInput(input);
-  const expected = supportHash(evidence ?? null);
+  const checkEvidence = prepareObservedEvidenceCheck(store, evidence, readEvidence);
   const existing = input.id ? store.getNode(input.id) : store.getNodeByKindAndSlug(input.kind, input.slug);
-  const checkEvidence = () => { if (supportHash(readEvidence() ?? null) !== expected) throw new KnowledgeNodeActivationHeldError('stale'); };
   const observation = Object.freeze({ existing: existing ?? null, origin,
     check: checkEvidence, checkEvidence });
   observations.set(frozen, observation);

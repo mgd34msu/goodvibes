@@ -45,6 +45,39 @@ async function held(promise: Promise<unknown>, reason?: Held['reason']) {
 }
 
 describe('synthesized knowledge serving authority', () => {
+  test('observed nodes retain shared evidence without refreshing older proofs after an in-place edit', async () => {
+    const { store } = await fixture();
+    const evidence = { source: { title: 'Original source', sections: ['First section'] } };
+    const prepare = (id: string) => prepareObservedKnowledgeNodeInput(store,
+      { id, kind: 'topic', slug: id, title: id }, 'catalog-structure', evidence, () => evidence);
+    const first = prepare('first'), second = prepare('second');
+    const firstProof = resolveKnowledgeNodeObservation(first, undefined), secondProof = resolveKnowledgeNodeObservation(second, undefined);
+    if (!firstProof || !secondProof) throw new Error('Missing native observations');
+    firstProof.assertCurrent(); secondProof.assertCurrent();
+    evidence.source.sections[0] = 'Changed section';
+    expect(firstProof.assertCurrent).toThrow(Held); expect(secondProof.assertCurrent).toThrow(Held);
+    const fresh = resolveKnowledgeNodeObservation(prepare('fresh'), undefined);
+    expect(fresh).toBeDefined(); fresh!.assertCurrent();
+    expect(firstProof.assertCurrent).toThrow(Held); expect(secondProof.assertCurrent).toThrow(Held);
+    await store.close();
+  });
+  test('observed evidence accepts an equal replacement but refuses changed array fields and preserves owner failures', async () => {
+    const { store } = await fixture();
+    let current = { title: 'Declared evidence', values: ['Original'], extra: 'Complete' };
+    const prepared = prepareObservedKnowledgeNodeInput(store, { id: 'replacement', kind: 'topic', slug: 'replacement', title: 'Replacement' },
+      'catalog-structure', current, () => current);
+    const proof = resolveKnowledgeNodeObservation(prepared, undefined);
+    if (!proof) throw new Error('Missing native observation');
+    current = { extra: 'Complete', values: ['Original'], title: 'Declared evidence' };
+    proof.assertCurrent();
+    Object.defineProperty(current.values, 'meaning', { value: 'Changed named array field', enumerable: true });
+    expect(proof.assertCurrent).toThrow(Held);
+    const ownerFailure = new Error('Owner retired');
+    const cancelled = prepareObservedKnowledgeNodeInput(store, { id: 'cancelled', kind: 'topic', slug: 'cancelled', title: 'Cancelled' },
+      'catalog-structure', null, () => { throw ownerFailure; });
+    expect(() => resolveKnowledgeNodeObservation(cancelled, undefined)).toThrow(ownerFailure);
+    await store.close();
+  });
   test('native observation binds the frozen producer input and exact previous node without reusable digest fields', async () => {
     const { store } = await fixture();
     try {

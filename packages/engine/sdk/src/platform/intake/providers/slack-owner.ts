@@ -94,6 +94,8 @@ export async function createSlackInboxOwner(
   const active = new Set<Promise<unknown>>();
   let closed = false;
   let closing: Promise<void> | undefined;
+  // One private verified credential belongs to this live account owner.
+  // Direct comparison adds no repeatable token fingerprint to runtime state.
   let verifiedCredential: string | undefined;
   let identityEpoch = 0;
   let identityLifetime = new AbortController();
@@ -197,7 +199,7 @@ export async function createSlackInboxOwner(
           const token = await readCredential();
           if (!usableToken(token)) { configured = false; invalidateIdentity(); return unavailable(false); }
           configured = true;
-          if (verifiedCredential && verifiedCredential !== digest(token)) invalidateIdentity();
+          if (verifiedCredential && verifiedCredential !== token) invalidateIdentity();
           let verified: number | undefined;
           const delegate = createSlackInboxAdapter({ logger: context.logger,
             ...(resolveRouteId ? { resolveRouteId } : {}),
@@ -209,7 +211,7 @@ export async function createSlackInboxOwner(
           if (await readCredential() !== token) { invalidateIdentity(); return unavailable(true); }
           // A later auth denial must not be overwritten by an older mapper/read.
           if (verified !== undefined && verified !== identityEpoch) return unavailable(true);
-          if (verified !== undefined) { verifiedCredential = digest(token); commitEpoch = verified; }
+          if (verified !== undefined) { verifiedCredential = token; commitEpoch = verified; }
           return result;
         });
       } catch { return unavailable(configured); }
@@ -220,16 +222,15 @@ export async function createSlackInboxOwner(
     try {
       const token = await readCredential();
       if (!usableToken(token)) { invalidateIdentity(); throw new Error(); }
-      const fingerprint = digest(token);
-      if (verifiedCredential && verifiedCredential !== fingerprint) invalidateIdentity();
-      if (force || verifiedCredential !== fingerprint) {
+      if (verifiedCredential && verifiedCredential !== token) invalidateIdentity();
+      if (force || verifiedCredential !== token) {
         let verified: number | undefined;
         await identityHttp(token, (epoch) => { verified = epoch; })(new URL(AUTH_URL), {
           method: 'GET', headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' }, signal,
         });
         if (await readCredential() !== token) { invalidateIdentity(); throw new Error(); }
         if (verified === undefined || verified !== identityEpoch) throw new Error();
-        verifiedCredential = fingerprint;
+        verifiedCredential = token;
       }
       current();
       return identityEpoch;
@@ -272,6 +273,7 @@ export async function createSlackInboxOwner(
     close() {
       if (!closing) {
         closed = true;
+        verifiedCredential = undefined; commitEpoch = undefined;
         let resolve!: () => void;
         let reject!: (error: unknown) => void;
         // Abort callbacks can synchronously reenter close; publish ownership first.

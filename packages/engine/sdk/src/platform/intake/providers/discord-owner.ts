@@ -134,6 +134,8 @@ export async function createDiscordInboxOwner(
   const active = new Set<Promise<unknown>>();
   let closed = false;
   let closing: Promise<void> | undefined;
+  // One private verified credential belongs to this live account owner.
+  // Direct comparison adds no repeatable token fingerprint to runtime state.
   let verifiedCredential: string | undefined;
   let credentialObservation: Exclude<IntakeCredentialSnapshot, { state: 'unsupported' }> | undefined;
   let identityEpoch = 0;
@@ -289,7 +291,7 @@ export async function createDiscordInboxOwner(
           const token = await readCredential();
           if (!usableToken(token)) { configured = false; invalidateIdentity(); return unavailable(false); }
           configured = true;
-          if (verifiedCredential && verifiedCredential !== digest(token)) invalidateIdentity();
+          if (verifiedCredential && verifiedCredential !== token) invalidateIdentity();
           let verified: number | undefined;
           const delegate = createDiscordInboxAdapter({ logger: context.logger,
             ...(resolveRouteId ? { resolveRouteId } : {}),
@@ -302,7 +304,7 @@ export async function createDiscordInboxOwner(
           if (await readCredential() !== token) { invalidateIdentity(); return unavailable(true); }
           // A later auth denial must not be overwritten by an older mapper/read.
           if (verified !== undefined && verified !== identityEpoch) return unavailable(true);
-          if (verified !== undefined) { verifiedCredential = digest(token); commitEpoch = verified; }
+          if (verified !== undefined) { verifiedCredential = token; commitEpoch = verified; }
           return result;
         });
       } catch { return unavailable(configured); }
@@ -313,16 +315,15 @@ export async function createDiscordInboxOwner(
     try {
       const token = await readCredential();
       if (!usableToken(token)) { invalidateIdentity(); throw new Error(); }
-      const fingerprint = digest(token);
-      if (verifiedCredential && verifiedCredential !== fingerprint) invalidateIdentity();
-      if (force || verifiedCredential !== fingerprint) {
+      if (verifiedCredential && verifiedCredential !== token) invalidateIdentity();
+      if (force || verifiedCredential !== token) {
         let verified: number | undefined;
         await identityHttp(token, (epoch) => { verified = epoch; })(new URL(AUTH_URL), {
           method: 'GET', headers: { Authorization: `Bot ${token}`, Accept: 'application/json' }, signal,
         });
         if (await readCredential() !== token) { invalidateIdentity(); throw new Error(); }
         if (verified === undefined || verified !== identityEpoch) throw new Error();
-        verifiedCredential = fingerprint;
+        verifiedCredential = token;
       }
       await readCatalog(token, { selfId: account.userId, beforeMs: Date.now(), signal });
       current();
@@ -366,6 +367,8 @@ export async function createDiscordInboxOwner(
     close() {
       if (!closing) {
         closed = true;
+        verifiedCredential = undefined; commitEpoch = undefined;
+        credentialObservation = undefined;
         let resolve!: () => void;
         let reject!: (error: unknown) => void;
         // Abort callbacks can synchronously reenter close; publish ownership first.

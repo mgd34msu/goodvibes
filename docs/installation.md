@@ -55,6 +55,10 @@ requirement keeps the installed programs in place. Do not delete compatibility
 evidence to force a downgrade. The evidence survives data-preserving uninstall.
 Native build admission also checks explicit saved-data reader support: two
 builds with the same version number need not support the same formats.
+When an older updater installs a newer daemon using an older receipt format,
+the running daemon preserves its confirmed reader support during its next
+automatic update. Rollback uses that evidence only for the matching executable
+and complete payload cohort; it does not infer compatibility from the version.
 
 Installation holds transaction claims beside the three executables while suite
 files are replaced. A competing updater is refused. If replacement is interrupted

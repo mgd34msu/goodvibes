@@ -52,7 +52,8 @@ export function writeNativeInstallationFixture(prefix: string, version: string, 
     assets[member.assetName] = index === buffers.length ? Buffer.from(JSON.stringify(artifact)) : bytes;
   }
   return { execPath, targets, buffers, receipt, assets,
-    options: { bundled: true, execPath, version, platform: 'linux', arch },
+    options: { bundled: true, execPath, version, platform: 'linux', arch,
+      runningExecutableIdentity: () => { const stat = lstatSync(execPath, { bigint: true }); return `${stat.dev}:${stat.ino}`; } },
     checksumManifest: Object.entries(assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join(''),
   };
 }

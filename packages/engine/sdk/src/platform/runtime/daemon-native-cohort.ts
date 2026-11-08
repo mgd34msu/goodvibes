@@ -22,6 +22,13 @@ export interface DaemonInstallationReceipt {
   packageName: '@goodvibes-jev/daemon';
   version: string;
   artifact: DaemonCiArtifact;
+  /** Evidence issued by the outgoing running program, bound to its entire
+   * verified cohort. Older updaters can leave that program a v1 receipt. */
+  previousReader?: DaemonPreviousReader;
+}
+export interface DaemonPreviousReader {
+  version: string;
+  artifact: Extract<DaemonCiArtifact, { schema: 2 }>;
 }
 function record(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 function exact(value: Record<string, unknown>, keys: readonly string[]): boolean { return Object.keys(value).length === keys.length && keys.every(key => Object.hasOwn(value, key)); }
@@ -69,11 +76,36 @@ export function parseDaemonCiArtifact(value: unknown, target: DaemonNativeTarget
   return value.schema === 1 ? { schema: 1, ...base } : { schema: 2, ...base, readers: parseNativeReaderCapabilities(value.readers) };
 }
 export function parseDaemonInstallationReceipt(value: unknown, target: DaemonNativeTarget): DaemonInstallationReceipt {
-  if (!record(value) || !exact(value, ['schema', 'packageName', 'version', 'artifact']) || value.schema !== 1 || value.packageName !== '@goodvibes-jev/daemon'
+  if (!record(value) || !exact(value, Object.hasOwn(value, 'previousReader') ? ['schema', 'packageName', 'version', 'artifact', 'previousReader']
+    : ['schema', 'packageName', 'version', 'artifact']) || value.schema !== 1 || value.packageName !== '@goodvibes-jev/daemon'
     || typeof value.version !== 'string' || !parseSemanticVersion(value.version)) throw new Error('Native daemon installation receipt is invalid');
   const artifact = parseDaemonCiArtifact(value.artifact, target);
   if (artifact.schema === 2 && artifact.readers.version !== value.version) throw new Error('Native daemon reader version differs from its installed product');
-  return { schema: 1, packageName: '@goodvibes-jev/daemon', version: value.version, artifact };
+  let previousReader: DaemonPreviousReader | undefined;
+  if (Object.hasOwn(value, 'previousReader')) {
+    const previous = value.previousReader;
+    if (!record(previous) || !exact(previous, ['version', 'artifact']) || typeof previous.version !== 'string'
+      || !parseSemanticVersion(previous.version)) throw new Error('Previous native reader evidence is invalid');
+    const previousArtifact = parseDaemonCiArtifact(previous.artifact, target);
+    if (previousArtifact.schema !== 2 || previousArtifact.readers.version !== previous.version) throw new Error('Previous native reader evidence is invalid');
+    previousReader = { version: previous.version, artifact: previousArtifact };
+  }
+  return { schema: 1, packageName: '@goodvibes-jev/daemon', version: value.version, artifact,
+    ...(previousReader === undefined ? {} : { previousReader }) };
+}
+/** Both receipts must already belong to the retained native transaction. A
+ * matching version alone never transfers reader support to another build. */
+export function resolveDaemonInstallationReaders(candidate: DaemonInstallationReceipt, companion: DaemonInstallationReceipt | null): NativeReaderCapabilities | undefined {
+  if (candidate.artifact.schema === 2) return candidate.artifact.readers;
+  const evidence = companion?.previousReader;
+  if (!evidence || evidence.version !== candidate.version) return undefined;
+  const actual = candidate.artifact, expected = evidence.artifact;
+  if (actual.sourceCommit !== expected.sourceCommit || actual.sourceTree !== expected.sourceTree || actual.headCommit !== expected.headCommit
+    || actual.target !== expected.target || actual.files.length !== expected.files.length || actual.files.some((file, index) => {
+      const other = expected.files[index];
+      return !other || file.path !== other.path || file.sha256 !== other.sha256 || file.mode !== other.mode || file.size !== other.size;
+    })) return undefined;
+  return evidence.artifact.readers;
 }
 export function assertDaemonNativePayloadBytes(artifact: DaemonCiArtifact, buffers: readonly Buffer[]): void {
   if (buffers.length !== artifact.files.length) throw new Error('Native daemon payload set is incomplete');

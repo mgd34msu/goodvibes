@@ -11,11 +11,11 @@ import { createHash } from 'node:crypto';
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
-import { assertDaemonNativePayloadBytes, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard } from './daemon-native-cohort.js';
-import { assertNativeReaderCompatible, type NativeReaderCapabilities } from './native-reader-compatibility.js';
+import { assertDaemonNativePayloadBytes, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard, type DaemonPreviousReader, type DaemonInstallationReceipt } from './daemon-native-cohort.js';
+import { assertNativeReaderCompatible, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
 export { DAEMON_NATIVE_TARGETS, DAEMON_INSTALLATION_RECEIPT, assertDaemonNativePayloadBytes, inspectDaemonNativeInstallation,
-  parseDaemonCiArtifact, parseDaemonInstallationReceipt, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles,
-  type DaemonNativeTarget, type DaemonNativePayload, type DaemonArtifactSource, type DaemonCiArtifact, type DaemonInstallationReceipt } from './daemon-native-cohort.js';
+  parseDaemonCiArtifact, parseDaemonInstallationReceipt, resolveDaemonInstallationReaders, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles,
+  type DaemonNativeTarget, type DaemonNativePayload, type DaemonArtifactSource, type DaemonCiArtifact, type DaemonInstallationReceipt, type DaemonPreviousReader } from './daemon-native-cohort.js';
 export { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, parseNativeReaderCapabilities, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from './native-reader-compatibility.js';
 export type { NativeDataFormat, NativeDataWriteOwner, AdmittedNativeDataPublisher, NativeReaderCapabilities } from './native-reader-compatibility.js';
 
@@ -540,6 +540,11 @@ export function swapFileAtomically(
     options.io ?? realUpdateFileIo, options.platform ?? process.platform);
 }
 
+export interface DaemonCurrentReader {
+  readonly readers: NativeReaderCapabilities;
+  readonly assertCurrent: () => void;
+}
+
 export interface ApplyVerifiedUpdateOptions extends UpdateRequestOptions {
   readonly fetchImpl: UpdateFetchLike;
   readonly downloadBaseUrl: string;
@@ -549,7 +554,10 @@ export interface ApplyVerifiedUpdateOptions extends UpdateRequestOptions {
   /** Final synchronous admission/cancellation check AFTER all staging, BEFORE live renames. This is not a work-admission lease. */
   readonly beforeCommit?: () => void;
   /** Native daemon publication requires its complete payload and source-receipt cohort. */
-  readonly daemonNative?: { readonly execPath: string; readonly platform: string; readonly arch: string; readonly version: string; readonly allowLegacyBinary?: boolean };
+  readonly daemonNative?: { readonly execPath: string; readonly platform: string; readonly arch: string; readonly version: string; readonly allowLegacyBinary?: boolean;
+    /** Actual outgoing program's compiled readers and original installation
+     * owner. Host-only input; candidate version strings establish no support. */
+    readonly currentReader?: DaemonCurrentReader };
   /** Preserve physical ownership for an already admitted complete native cohort. */
   readonly native?: boolean;
   /** Construction-owned effect lifetime, checked before each forward native filesystem mutation. */
@@ -565,17 +573,35 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
   validateTargets(options.targets);
   const native = options.daemonNative;
   let nativeReaders: NativeReaderCapabilities | undefined;
+  let previousReader: DaemonPreviousReader | undefined;
+  const readerOwner = native?.currentReader;
+  const readerGuard = readerOwner?.assertCurrent.bind(readerOwner);
+  const currentReaders = readerOwner ? parseNativeReaderCapabilities(readerOwner.readers) : undefined;
   let assertNativeCurrent: (() => void) | undefined;
   if (native) {
     const expected = resolveDaemonNativeTargets(native.execPath, native.platform, native.arch);
     if (!expected || JSON.stringify(options.targets) !== JSON.stringify(expected) || !parseSemanticVersion(normalizeVersion(native.version))) throw new Error('Native daemon update target identity is invalid');
     const io = options.io ?? realUpdateFileIo;
+    let installed: DaemonInstallationReceipt | null = null;
     if (native.allowLegacyBinary) {
       if (!io.observe || !io.readFile || !io.observe(native.execPath)) throw new Error('Legacy daemon binary is not retained');
       // An existing receipt is already a native installation and must be complete.
-      if (io.exists(expected[expected.length - 1]!.path)) inspectDaemonNativeInstallation(native.execPath, native.platform, native.arch, '', io);
-    } else if (!inspectDaemonNativeInstallation(native.execPath, native.platform, native.arch, '', io)) throw new Error('No complete owned native daemon installation is available');
+      if (io.exists(expected[expected.length - 1]!.path)) installed = inspectDaemonNativeInstallation(native.execPath, native.platform, native.arch, '', io);
+    } else {
+      installed = inspectDaemonNativeInstallation(native.execPath, native.platform, native.arch, '', io);
+      if (!installed) throw new Error('No complete owned native daemon installation is available');
+    }
     assertNativeCurrent = retainDaemonNativeFiles(expected, io);
+    if (currentReaders) {
+      assertSynchronousCurrent(readerGuard);
+      if (!installed || installed.version !== currentReaders.version) throw new Error('Outgoing native reader does not own the installed version');
+      // A v2 receipt already carries its producer's evidence. Only the older
+      // receipt needs the actual running program to preserve its support.
+      if (installed.artifact.schema === 1) previousReader = { version: installed.version,
+        artifact: { ...installed.artifact, schema: 2, readers: currentReaders } };
+      assertSynchronousCurrent(readerGuard);
+      assertNativeCurrent();
+    }
   }
   for (const target of options.targets) {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(target.assetName)) throw new Error(`invalid update asset filename: ${target.assetName}`);
@@ -628,7 +654,8 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       nativeReaders = artifact.readers;
       assertDaemonNativePayloadBytes(artifact, verified.slice(0, -1).map(member => member.buffer));
       verified[verified.length - 1] = { target: descriptor.target, buffer: Buffer.from(JSON.stringify({ schema: 1,
-        packageName: '@goodvibes-jev/daemon', version: normalizeVersion(native.version), artifact }, null, 2) + '\n') };
+        packageName: '@goodvibes-jev/daemon', version: normalizeVersion(native.version), artifact,
+        ...(previousReader === undefined ? {} : { previousReader }) }, null, 2) + '\n') };
     }
     signal.throwIfAborted();
     return verified;
@@ -644,6 +671,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
   installVerifiedBuffers(verified, options.io ?? realUpdateFileIo, options.platform ?? process.platform, () => {
     assertCurrent();
     assertNativeCurrent?.();
+    assertSynchronousCurrent(readerGuard);
     const result = options.beforeCommit?.();
     if (result !== undefined) {
       drainOwned(result);

@@ -10,7 +10,7 @@
  * orderly stop, and collectReceipts() for the /status payload.
  */
 import { join } from 'node:path';
-import { assertNativeReaderCompatible, NativeDataCompatibilityError } from '../runtime/native-reader-compatibility.js';
+import { assertNativeReaderCompatible, parseNativeReaderCapabilities, NativeDataCompatibilityError } from '../runtime/native-reader-compatibility.js';
 import { observeServiceCommand, runServiceCommand, type ServiceCommandRunner, type ServiceHandoverOutcome } from './service-handover.js';
 import { flushActivityLogSync, logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -29,7 +29,7 @@ import {
   type LifecycleMarkerIo,
 } from './lifecycle-marker.js';
 import { crashLoopRollbackReceipt, decideCrashLoopRollback } from './boot-rollback.js';
-import { rollbackKeptPrevious, realUpdateFileIo, captureUpdateFileIo, inspectDaemonNativeInstallation, retainDaemonNativeFiles, resolveDaemonNativeTargets, UpdateTransactionError, type UpdateFileIo, type UpdateTransactionReceipt } from '../runtime/self-update.js';
+import { rollbackKeptPrevious, realUpdateFileIo, captureUpdateFileIo, inspectDaemonNativeInstallation, resolveDaemonInstallationReaders, retainDaemonNativeFiles, resolveDaemonNativeTargets, UpdateTransactionError, type UpdateFileIo, type UpdateTransactionReceipt, type DaemonCurrentReader } from '../runtime/self-update.js';
 import { currentProcessSignals, isCompiledBinaryInvocation } from './daemon-exec-invocation.js';
 import { deliverOwnerAlert } from './owner-alert.js';
 import type { DaemonUpdateStatus } from './update-status.js';
@@ -125,6 +125,9 @@ export interface DaemonUpdateArtifact {
   readonly assertCurrent?: (() => void) | undefined;
   /** Allows only the initial crash-loop decision to inspect a damaged current build. */
   readonly assertStarting?: (() => void) | undefined;
+  /** Original healthy program's compiled readers. Its guard retains that
+   * cohort while the canonical updater separately owns transaction slots. */
+  readonly currentReader?: DaemonCurrentReader;
 }
 
 export interface DaemonLifecycleRuntimeOptions {
@@ -225,11 +228,20 @@ export class DaemonLifecycleRuntime {
 
   private readonly assertArtifactCurrent: (() => void) | undefined;
   private readonly assertArtifactStarting: (() => void) | undefined;
+  private readonly currentReader: DaemonCurrentReader | undefined;
 
   constructor(private readonly options: DaemonLifecycleRuntimeOptions) {
     const artifact = options.updateArtifact;
     this.assertArtifactCurrent = artifact?.assertCurrent?.bind(artifact);
     this.assertArtifactStarting = artifact?.assertStarting?.bind(artifact) ?? this.assertArtifactCurrent;
+    if (artifact?.currentReader) {
+      const reader = artifact.currentReader, readers = reader.readers, guard = reader.assertCurrent, execPath = artifact.execPath, version = artifact.version;
+      this.currentReader = Object.freeze({ readers: parseNativeReaderCapabilities(readers), assertCurrent: () => {
+        if (options.updateArtifact !== artifact || artifact.currentReader !== reader || reader.readers !== readers || reader.assertCurrent !== guard
+          || artifact.execPath !== execPath || artifact.version !== version) throw new Error('Running native reader ownership changed');
+        return guard.call(reader);
+      } });
+    }
   }
 
   /** Lazily-created persisted store for update/crash receipts. */
@@ -405,7 +417,7 @@ export class DaemonLifecycleRuntime {
         current();
         const previous = inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io);
         if (!previous) throw new Error('Previous native reader is unavailable');
-        assertNativeReaderCompatible(execPath, previous.version, io, previous.artifact.readers);
+        assertNativeReaderCompatible(execPath, previous.version, io, resolveDaemonInstallationReaders(previous, installed));
       }, { requireComplete: true, native: true, assertCurrent: () => {
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
       } });
@@ -687,6 +699,7 @@ export class DaemonLifecycleRuntime {
     const alertAfter = Number(configManager.get('update.alertAfterFailedChecks') ?? 3);
     const updater = new DaemonAutoUpdater({
       currentVersion: artifact.version,
+      ...(this.currentReader ? { currentReader: this.currentReader } : {}),
       execPath: artifact.execPath ?? process.execPath,
       platform: process.platform,
       arch: process.arch,

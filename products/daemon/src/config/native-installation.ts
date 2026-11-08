@@ -4,9 +4,10 @@
  * The CLI/host must separately opt in to the facade's update lifecycle.
  */
 import { isAbsolute, join, dirname, resolve } from 'node:path';
+import { statSync } from 'node:fs';
 import type { GoodVibesHomeOwnership } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { DaemonUpdateArtifact } from '@goodvibes-jev/engine/sdk/platform/daemon';
-import { captureUpdateFileIo, DAEMON_NATIVE_TARGETS, inspectDaemonNativeInstallation, realUpdateFileIo,
+import { captureUpdateFileIo, DAEMON_NATIVE_TARGETS, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo,
   resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { detectInstallKind } from '@goodvibes-jev/engine/sdk/platform/runtime/operations';
 import { VERSION } from '../version.js';
@@ -32,6 +33,9 @@ export interface ResolveInstalledDaemonUpdateArtifactOptions extends ResolveDaem
   readonly arch?: string;
   /** Construction seam only; the real caller uses this module's compiled location. */
   readonly bundled?: boolean;
+  /** Construction seam for inert native fixtures. Production reads the OS's
+   * loaded executable, not the potentially replaced path in process.execPath. */
+  readonly runningExecutableIdentity?: () => string;
   readonly signal?: AbortSignal;
 }
 
@@ -48,6 +52,11 @@ export function resolveInstalledDaemonUpdateArtifact(
   const targets = resolveDaemonNativeTargets(execPath, platform, arch);
   if (!targets) return undefined;
   const io = captureUpdateFileIo(realUpdateFileIo);
+  const runningImage = options.runningExecutableIdentity?.() ?? (() => {
+    const stat = statSync('/proc/self/exe', { bigint: true });
+    return `${stat.dev}:${stat.ino}`;
+  })();
+  if (io.observe?.(execPath)?.ownerIdentity !== runningImage) throw new Error('Running daemon image differs from the installed executable');
   // Transient slots are not a settled installation, including foreign-target slots.
   const paths = [...targets.map(target => target.path), ...DAEMON_NATIVE_TARGETS.flatMap(target =>
     (resolveDaemonNativePayloads('linux', target.slice('linux-'.length)) ?? []).map(payload => join(dirname(execPath), payload.relativePath)))];
@@ -67,8 +76,10 @@ export function resolveInstalledDaemonUpdateArtifact(
     assertRetained();
   };
   let assertStarting = assertCurrent;
+  let healthyCurrent = true;
   try { assertCurrent(); }
   catch (error) {
+    healthyCurrent = false;
     // A damaged current build can only reach the existing native crash-loop
     // recovery owner; normal startup still has to pass assertCurrent.
     assertRetained();
@@ -80,5 +91,13 @@ export function resolveInstalledDaemonUpdateArtifact(
     };
   }
   assertStarting();
-  return Object.freeze({ version, execPath, assertStarting, assertCurrent });
+  const currentReader = Object.freeze({ readers: nativeReaderCapabilities(version), assertCurrent: () => {
+    signal?.throwIfAborted();
+    if (!healthyCurrent) throw new Error('Damaged current daemon cannot issue reader evidence');
+    // The canonical updater owns its transaction slots by the time it asks
+    // again. Retain the original healthy files without treating its own claims
+    // as an unrelated unfinished installation. Publication still owns all slots.
+    assertInstallationCurrent();
+  } });
+  return Object.freeze({ version, execPath, currentReader, assertStarting, assertCurrent });
 }

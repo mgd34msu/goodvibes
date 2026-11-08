@@ -21,6 +21,8 @@ import {
   PREVIOUS_FILE_SUFFIX,
   PeriodicUpdateLoop,
   sha256,
+  nativeReaderCapabilities,
+  type DaemonCurrentReader,
   type UpdateFetchLike,
   type UpdateFileIo,
 } from '../sdk/src/platform/runtime/self-update.js';
@@ -143,6 +145,7 @@ function makeHarness(options: {
   platform?: NodeJS.Platform;
   latestTag?: string;
   currentVersion?: string;
+  currentReader?: DaemonCurrentReader;
   /** The version a crash-loop rollback rejected, as the lifecycle marker would report it. */
   rejectedVersion?: () => string | null;
   /** Consecutive failed checks before the owner is told. */
@@ -185,6 +188,7 @@ function makeHarness(options: {
   const alerts: string[] = [];
   const updater = new DaemonAutoUpdater({
     currentVersion: options.currentVersion ?? '1.0.0',
+    ...(options.currentReader ? { currentReader: options.currentReader } : {}),
     execPath: '/opt/gv/goodvibes-daemon',
     platform: options.platform ?? 'linux',
     arch: 'x64',
@@ -219,6 +223,41 @@ const unreachableFetch: UpdateFetchLike = async () => {
 };
 
 describe('DaemonAutoUpdater', () => {
+  test('the real update loop preserves captured running readers for an outgoing v1 receipt', async () => {
+    const profile = { schema: 1 as const, version: '3.1.2', formats: ['payment-retained-holds-v2'] };
+    let guardCalls = 0;
+    const h = makeHarness({ idle: () => true, currentVersion: profile.version, latestTag: 'v3.1.3',
+      currentReader: { readers: profile, assertCurrent: () => { guardCalls++; } } });
+    profile.formats.length = 0;
+    try {
+      await h.updater.tick();
+      expect(h.updater.snapshot().appliedVersion).toBe('3.1.3');
+      const receipt = JSON.parse(h.files.get('/opt/gv/daemon-installation.json')?.toString() ?? 'null');
+      expect(receipt.previousReader).toEqual({ version: '3.1.2', artifact: {
+        ...currentCohort('3.1.2').artifact, schema: 2, readers: nativeReaderCapabilities('3.1.2'),
+      } });
+      expect(guardCalls).toBeGreaterThanOrEqual(2);
+      const previous = JSON.parse(h.files.get('/opt/gv/daemon-installation.json.previous')?.toString() ?? 'null');
+      expect(previous.artifact.schema).toBe(1); expect(previous.previousReader).toBeUndefined();
+    } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+  });
+
+  test('retiring the running reader during lookup cannot stamp a replacement native cohort', async () => {
+    let active = true;
+    const release = releaseFetch({ latestTag: 'v3.1.3' });
+    const h = makeHarness({ idle: () => true, currentVersion: '3.1.2',
+      currentReader: { readers: nativeReaderCapabilities('3.1.2'), assertCurrent: () => { if (!active) throw new Error('retired native reader'); } },
+      fetchOverride: async (url, init) => { active = false; return release.fetchImpl(url, init); } });
+    const before = [...h.files.entries()];
+    try {
+      await h.updater.tick();
+      expect(h.updater.snapshot().appliedVersion).toBeNull();
+      expect([...h.files.entries()]).toEqual(before);
+      expect(h.mutations.some(operation => operation.startsWith('rename:'))).toBe(false);
+      expect(h.actions.restarted).toBe(0);
+    } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+  });
+
   test('boot-settle first check, then the hourly cadence; a current daemon does nothing', async () => {
     const h = makeHarness({ idle: () => true, latestTag: 'v1.0.0' });
     try {

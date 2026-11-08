@@ -5,7 +5,7 @@ import { lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
   applyVerifiedUpdate, captureUpdateFileIo, realUpdateFileIo, rollbackKeptPrevious, sha256, UpdateTransactionError,
-  assertDaemonNativePayloadBytes, retainDaemonNativeFiles, assertNativeReaderCompatible, type UpdateFileIo, type UpdateFetchLike,
+  assertDaemonNativePayloadBytes, retainDaemonNativeFiles, assertNativeReaderCompatible, resolveDaemonInstallationReaders, type UpdateFileIo, type UpdateFetchLike,
 } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { readVerifiedDaemonCiArtifact } from './ci-artifact.ts';
 import { assertNativeInstallHost, assertPath, expectedModes, inspectInstallation, inspectInstallationIdentity, targetPaths, validateOwner, type DaemonInstallOwner, type InstallationReceipt } from '../src/cli/native-installation.ts';
@@ -121,10 +121,11 @@ export function rollbackDaemonNative(prefix: string, io?: UpdateFileIo): void {
     retained();
     // The current payload may be damaged: rollback is its recovery path.
     // Admit only its owner/target here; fully verify the previous bytes below.
-    if (!inspectInstallationIdentity(prefix, '')) throw new Error('No owned current daemon cohort is available');
+    const installed = inspectInstallationIdentity(prefix, '');
+    if (!installed) throw new Error('No owned current daemon cohort is available');
     const previous = inspectInstallation(prefix, '.previous');
     if (!previous) throw new Error('No complete previous daemon cohort is available');
-    assertNativeReaderCompatible(join(prefix, 'goodvibes-daemon'), previous.version, filesystem, previous.artifact.readers);
+    assertNativeReaderCompatible(join(prefix, 'goodvibes-daemon'), previous.version, filesystem, resolveDaemonInstallationReaders(previous, installed));
   }, { requireComplete: true, native: true });
   if (result.skipped.length) throw new Error('Previous native cohort changed before rollback completed');
 }

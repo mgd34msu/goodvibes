@@ -67,7 +67,9 @@ import {
   type UpdateFileIo,
   type UpdateTarget,
   type UpdateTransactionReceipt,
+  type DaemonCurrentReader,
 } from '../runtime/self-update.js';
+import { parseNativeReaderCapabilities } from '../runtime/native-reader-compatibility.js';
 import { PeriodicUpdateLoop, type PeriodicCheckOutcome } from '../runtime/update-schedule.js';
 import { formatReceiptTime, type DaemonReceiptStore } from './receipts.js';
 import { CLIENT_COMPATIBILITY_FLOOR } from '../control-plane/client-compatibility.js';
@@ -112,6 +114,8 @@ export function resolveDaemonInstalledFiles(location: DaemonUpdateInstallLocatio
 
 export interface DaemonAutoUpdaterOptions {
   readonly currentVersion: string;
+  /** Compiled reader evidence retained by the original running installation. */
+  readonly currentReader?: DaemonCurrentReader;
   readonly execPath: string;
   readonly platform: NodeJS.Platform;
   readonly arch: string;
@@ -239,8 +243,10 @@ export class DaemonAutoUpdater {
     // probes still observe their live closure state; callers cannot redirect
     // an admitted update by replacing members on the retained options object.
     const actions = options.serviceActions;
+    const reader = options.currentReader;
     this.options = {
       ...options,
+      ...(reader ? { currentReader: Object.freeze({ readers: parseNativeReaderCapabilities(reader.readers), assertCurrent: reader.assertCurrent.bind(reader) }) } : {}),
       fetchImpl: options.fetchImpl ?? (fetch as unknown as UpdateFetchLike),
       serviceActions: {
         isSupervised: actions.isSupervised.bind(actions),
@@ -528,7 +534,8 @@ export class DaemonAutoUpdater {
         platform: this.options.platform,
         signal,
         timeoutMs: remainingBudget(),
-        daemonNative: { execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch, version: tag },
+        daemonNative: { execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch, version: tag,
+          ...(this.options.currentReader ? { currentReader: this.options.currentReader } : {}) },
         assertCurrent: assertLifecycleCurrent,
         beforeCommit: () => {
           assertCurrent();

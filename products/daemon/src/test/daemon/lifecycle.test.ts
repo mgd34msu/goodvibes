@@ -2,7 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { chmodSync, copyFileSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveDaemonCliOwnership } from '../../cli/configuration.js';
-import { applyVerifiedUpdate, realUpdateFileIo, rollbackKeptPrevious, sha256 } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { applyVerifiedUpdate, createNativeDataWriteOwner, inspectDaemonNativeInstallation, nativeReaderCapabilities, realUpdateFileIo, rollbackKeptPrevious, sha256 } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { rollbackDaemonNative } from '../../../scripts/install-native.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import { writeNativeInstallationFixture } from '../helpers/native-runtime-provenance.js';
 import { fileURLToPath } from 'node:url';
@@ -134,6 +135,53 @@ describe('verified native lifecycle admission', () => {
     expect(resolveInstalledDaemonUpdateArtifact(defaultHome, { ...f.options, bundled: false })).toBeUndefined();
   });
 
+  test('an installed same-version replacement cannot borrow the original running image', () => {
+    const f = installedFixture();
+    const runningImage = f.options.runningExecutableIdentity();
+    copyFileSync(f.execPath, f.execPath + '.peer'); renameSync(f.execPath + '.peer', f.execPath);
+    expect(() => resolveInstalledDaemonUpdateArtifact(defaultHome, { ...f.options, runningExecutableIdentity: () => runningImage })).toThrow('Running daemon image');
+    const restarted = resolveInstalledDaemonUpdateArtifact(defaultHome, f.options);
+    expect(restarted?.currentReader?.readers.version).toBe(f.receipt.version);
+    expect(() => restarted?.assertCurrent?.()).not.toThrow();
+  });
+
+  (process.platform === 'linux' ? test : test.skip)('the production loaded-image observation refuses a synthetic adjacent executable', () => {
+    const f = installedFixture();
+    const { runningExecutableIdentity: fixtureImage, ...productionImageOptions } = f.options;
+    expect(fixtureImage()).not.toBe('');
+    expect(() => resolveInstalledDaemonUpdateArtifact(defaultHome, productionImageOptions)).toThrow('Running daemon image');
+  });
+
+  const nativeTest = process.platform === 'linux' && process.arch === 'x64' ? test : test.skip;
+  nativeTest('a v1 receipt from an older updater preserves actual running readers through update and offline rollback', async () => {
+    const f = installedFixture('3.1.2'); const next = installedFixture('3.1.3');
+    const owner = resolveInstalledDaemonUpdateArtifact(defaultHome, f.options);
+    if (!owner?.currentReader || !owner.assertCurrent) throw new Error('Fixture native owner was not admitted');
+    const before = f.targets.map(target => readFileSync(target.path));
+    createNativeDataWriteOwner({ execPath: f.execPath, version: owner.version, assertCurrent: owner.assertCurrent }).declare('payment-retained-holds-v2');
+    const descriptor = next.targets.at(-1); if (!descriptor) throw new Error('Fixture descriptor missing');
+    next.assets[descriptor.assetName.replace('.ci-artifact.json', '.reader-ci-artifact.json')] = Buffer.from(JSON.stringify({
+      ...next.receipt.artifact, schema: 2, readers: nativeReaderCapabilities(next.receipt.version),
+    }));
+    const manifest = Object.entries(next.assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join('');
+    const base = 'https://native-fixture.test/release';
+    await applyVerifiedUpdate({ targets: f.targets, platform: 'linux', io: realUpdateFileIo,
+      daemonNative: { execPath: f.execPath, platform: 'linux', arch: 'x64', version: next.receipt.version,
+        currentReader: owner.currentReader }, downloadBaseUrl: base,
+      fetchImpl: async url => {
+        const name = String(url).slice(base.length + 1), bytes = name === 'SHA256SUMS.txt' ? Buffer.from(manifest) : next.assets[name];
+        return new Response(bytes ? new Uint8Array(bytes) : null, { status: bytes ? 200 : 404 });
+      },
+    });
+    expect(() => owner.assertCurrent?.()).toThrow();
+    const installed = inspectDaemonNativeInstallation(f.execPath, 'linux', 'x64', '', realUpdateFileIo);
+    expect(installed?.previousReader).toEqual({ version: owner.version, artifact: { ...f.receipt.artifact, schema: 2, readers: owner.currentReader.readers } });
+    expect(inspectDaemonNativeInstallation(f.execPath, 'linux', 'x64', '.previous', realUpdateFileIo)?.artifact.schema).toBe(1);
+    rollbackDaemonNative(join(f.execPath, '..'));
+    expect(f.targets.map(target => readFileSync(target.path))).toEqual(before);
+    expect(() => resolveInstalledDaemonUpdateArtifact(defaultHome, f.options)?.assertCurrent?.()).not.toThrow();
+  });
+
   for (const override of ['tree', 'identity', 'flag'] as const) test(`${override} home override refuses a complete native cohort`, () => {
     const f = installedFixture(); const root = makeOwnedTempDir('native-home-override');
     const ownership = resolveDaemonCliOwnership({ daemonHome: override === 'flag' ? join(root, 'flag') : undefined, workingDir: undefined },
@@ -217,6 +265,7 @@ describe('verified native lifecycle admission', () => {
     expect(artifact).toBeDefined();
     expect(() => artifact!.assertStarting!()).not.toThrow();
     expect(() => artifact!.assertCurrent!()).toThrow();
+    expect(() => artifact!.currentReader!.assertCurrent()).toThrow('Damaged current daemon');
     writeFileSync(f.targets[1]!.path + '.previous', 'changed prior runtime');
     expect(() => artifact!.assertStarting!()).toThrow();
   });

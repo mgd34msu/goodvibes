@@ -166,8 +166,12 @@ export type { PurchaseRecord } from './purchase-record.js';
 
 export type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './payment-ports.js';
 import type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './payment-ports.js';
+import { isDeepStrictEqual } from 'node:util';
+import { retainResumedCheckoutHold } from './resumed-hold.js';
+import { captureCheckoutWindowCheckpoint, type CheckoutWindowResumption } from './checkout-window-checkpoint.js';
 
 export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
+  readonly resumeWindow?: CheckoutWindowResumption | undefined;
   /** Host-only durable quote/control checkpoint after the journal flush and
    * before arming reception. Never supplied by checkout wire arguments. */
   readonly retainWindowCheckpoint?: ((checkpoint: import('./checkout-window-checkpoint.js').CheckoutWindowCheckpoint) => Promise<void>) | undefined;
@@ -284,17 +288,24 @@ export async function runCheckout(
     try { driverCurrent(); } catch { throw new CheckoutOwnershipError(); }
     owner.assertCurrent();
   };
-  const lifecycle: CheckoutExecutionLifetime = { current, submitMayHaveHappened: false };
+  const resumption = deps.resumeWindow === undefined ? undefined : Object.freeze({
+    checkpoint: captureCheckoutWindowCheckpoint(deps.resumeWindow.checkpoint), prepare: deps.resumeWindow.prepare.bind(deps.resumeWindow) });
+  if (resumption && (resumption.checkpoint.record.purchaseId !== input.request.purchaseId
+    || resumption.checkpoint.record.cardId !== input.request.cardId || resumption.checkpoint.record.item !== input.request.item)) throw new CheckoutOwnershipError();
+  const lifecycle: CheckoutExecutionLifetime = { current, submitMayHaveHappened: false, resumption };
   current();
   deps = { ...deps, taintEvidence: deps.taintEvidence === undefined ? retainTaintEvidence(deps.untrusted)
     : captureOwnedJson(deps.taintEvidence) as RetainedTaintEvidence };
   try {
-    let currentReading = input.reading;
+    let currentReading = resumption?.checkpoint.reading ?? input.reading;
     for (;;) {
       current();
       const result = await runOwnedCheckout(input.request, currentReading, input.controls,
         { ...deps, gates: input.gates, limits: input.limits, merchantPolicy: input.merchantPolicy }, lifecycle);
-      if (result.kind !== 'reprice') return result;
+      if (result.kind !== 'reprice') {
+        if ((result.kind === 'refused' || result.kind === 'cancelled') && lifecycle.release && !lifecycle.submitMayHaveHappened) await lifecycle.release();
+        return result;
+      }
       current();
       currentReading = result.reading;
     }
@@ -316,6 +327,8 @@ interface CheckoutExecutionLifetime {
   pageClaim?: CheckoutPageClaim | undefined;
   release?: (() => Promise<void>) | undefined;
   submitMayHaveHappened: boolean;
+  resumption?: CheckoutWindowResumption | undefined;
+  resumedHold?: ReturnType<typeof retainResumedCheckoutHold> | undefined;
 }
 
 type CheckoutAttemptOutcome = CheckoutOutcome | { readonly kind: 'reprice'; readonly reading: RawCheckoutReading };
@@ -324,6 +337,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   deps: CheckoutFlowDeps, lifecycle: CheckoutExecutionLifetime): Promise<CheckoutAttemptOutcome> {
   const { registry, driver, ledger, notifier, now } = deps;
   const signal = deps.signal;
+  const resumption = lifecycle.resumption;
+  lifecycle.resumption = undefined;
   let originalPage: ReturnType<CheckoutPageDriver['identity']> | undefined;
   let identityReader: CheckoutPageDriver['identity'] | undefined;
   let termsReader: CheckoutPageDriver['verifyTerms'];
@@ -333,6 +348,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     lifecycle.current();
     lifecycle.originalAddress?.assertCurrent();
     lifecycle.pageClaim?.assertCurrent();
+    lifecycle.resumedHold?.assertCurrent();
     if (termsReader && driver.verifyTerms !== termsReader) throw new CheckoutOwnershipError();
     if (quoteReaderCaptured && driver.readCurrentQuote !== quoteReader) throw new CheckoutOwnershipError();
     if (originalPage && identityReader) {
@@ -343,6 +359,23 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   };
   const ownership = { signal, assertCurrent: current };
   current();
+
+  if (resumption) {
+    identityReader = driver.identity;
+    originalPage = Object.freeze({ ...identityReader.call(driver) });
+    lifecycle.originalPage = originalPage;
+    lifecycle.pageClaim = registry.claimPage(originalPage.sessionId, originalPage.pageId);
+    lifecycle.resumedHold = retainResumedCheckoutHold(ledger, resumption.checkpoint.record);
+    const retainedHold = lifecycle.resumedHold;
+    current();
+    await registry.resumeWindow(resumption.checkpoint.record, originalPage, lifecycle.pageClaim, current);
+    lifecycle.release = async () => {
+      retainedHold.release(); lifecycle.resumedHold = undefined;
+      await registry.close(request.purchaseId);
+      lifecycle.release = undefined;
+    };
+    current();
+  }
 
   // ── 0. Terminal gates ───────────────────────────────────────────────────
   const gateRefusal = checkPaymentGates(deps.gates);
@@ -449,7 +482,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // Which offered option is each shipping tier is read (shipping.ts); the ladder is arithmetic.
   const shippingTiers = await readShippingTiers(checkout.shippingOptions, checkout.currency, ownership);
   current();
-  const pools = ledger.snapshot(deps.limits, now(), deps.timezone);
+  const pools = lifecycle.resumedHold ? lifecycle.resumedHold.snapshot(deps.limits, now(), deps.timezone)
+    : ledger.snapshot(deps.limits, now(), deps.timezone);
   const decision = decidePurchase({
     quoted: {
       itemMinorUnits: checkout.itemMinorUnits,
@@ -475,6 +509,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     taxMinorUnits: checkout.taxMinorUnits, feesMinorUnits: checkout.feesMinorUnits, feeLabels: checkout.feeLabels,
     shippingLabel: shipping.option.rawLabel, shippingMinorUnits: shipping.costMinorUnits, totalMinorUnits: draw.totalMinorUnits,
   }) as unknown as CheckoutTerms;
+  if (resumption && (!resumption.checkpoint.terms || !isDeepStrictEqual(resumption.checkpoint.terms, expectedTerms)
+    || !isDeepStrictEqual(resumption.checkpoint.record.draw, draw) || resumption.checkpoint.record.shippingTierUsed !== shipping.tier)) {
+    // An older checkpoint lacks its exact selection, or the current decision
+    // selects different terms. Void that window before creating a fresh one.
+    await lifecycle.release?.(); current(); return { kind: 'reprice', reading };
+  }
 
   // ── 5. Hold the money before any window opens ───────────────────────────
   //
@@ -494,7 +534,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     ? admitApprovedItemOverdraw(deps.limits, draw.itemMinorUnits, pools.item.remaining)
     : deps.limits;
   current();
-  const reservation = ledger.reserve({
+  const reservation = lifecycle.resumedHold?.reservation ?? ledger.reserve({
     id: request.purchaseId,
     itemMinorUnits: draw.itemMinorUnits,
     overageMinorUnits: draw.overageMinorUnits,
@@ -511,7 +551,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     );
   }
 
-  try {
+  if (!resumption) try {
     await registry.open({
       purchaseId: request.purchaseId,
       sessionId: identity.sessionId,
@@ -550,9 +590,11 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
    * closure disarms it. Navigation and URL changes alone do not establish
    * that card material is gone.
    */
+  const resumedHold = lifecycle.resumedHold;
   const release = async (): Promise<void> => {
+    if (resumedHold) resumedHold.release(); else ledger.release(reservation.id);
+    lifecycle.resumedHold = undefined;
     await registry.close(request.purchaseId);
-    ledger.release(reservation.id);
     lifecycle.release = undefined;
   };
   lifecycle.release = release;
@@ -663,13 +705,21 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     aboveRequestedMaximum: exceedsRequestedMaximum,
     merchantIsMajor: merchantVerdict.isMajor,
   });
+  if (resumption && resumption.checkpoint.record.windowKind !== windowKind) {
+    await release(); addressCurrent(); return { kind: 'reprice', reading };
+  }
+  if (resumption) {
+    const sameQuote = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
+    addressCurrent();
+    if (!sameQuote) return reprice();
+  }
   let windowOutcome: string;
   let answeredBy: string | null = null;
 
   if (windowKind === 'approval') {
     // Silence DENIES. Undeliverable DENIES. Either because it is over budget,
     // or because nobody can tell the owner what recourse they would have here.
-    const message = renderPurchaseNotice({
+    const message = resumption?.checkpoint.record.windowNotice ?? renderPurchaseNotice({
       facts,
       mode: 'approval',
       expiresInMinutes: deps.approvalMinutes,
@@ -677,22 +727,29 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     });
     if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
     let reception: PaymentNoticeWindow | undefined;
+    let restoredDeadline: Promise<number> | undefined;
     let state: ApprovalState;
     try {
       let deliveries: readonly ChannelDelivery[];
       try {
-        reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind: 'approval', notice: message, assertCurrent: addressCurrent, signal });
+        if (resumption) {
+          const restored = resumption.prepare({ signal, assertCurrent: addressCurrent });
+          reception = Object.freeze({ deliveries: restored.deliveries, awaitAnswer: restored.awaitAnswer.bind(restored), cancel: restored.cancel.bind(restored) });
+          restoredDeadline = restored.deadlineMs;
+        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind: 'approval', notice: message, assertCurrent: addressCurrent, signal });
         deliveries = await (reception?.deliveries ?? notifier.deliver({ kind: 'approval', message, assertCurrent: addressCurrent, signal }));
         addressCurrent();
       }
       catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
-      const deadlineMs = windowDeadlineMs(now(), deps.approvalMinutes);
+      const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.approvalMinutes);
+      addressCurrent();
+      if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < 0) throw new CheckoutOwnershipError();
       // Persisted so a restart can apply the delivery-keyed recovery rules.
       const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
       addressCurrent();
       state = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
       if (state === 'awaiting-approval') {
-        await deps.retainWindowCheckpoint?.({ record: checkpoint, reading });
+        await deps.retainWindowCheckpoint?.({ record: checkpoint, reading, terms: expectedTerms });
         addressCurrent();
         let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
         try {
@@ -763,7 +820,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   } else {
     // WITHIN BUDGET AND RECOURSE ESTABLISHED. Silence PROCEEDS. Undeliverable
     // PROCEEDS.
-    const message = renderPurchaseNotice({
+    const message = resumption?.checkpoint.record.windowNotice ?? renderPurchaseNotice({
       facts,
       mode: 'veto',
       expiresInMinutes: deps.vetoMinutes,
@@ -771,22 +828,29 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     });
     if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before the purchase notice.'); }
     let reception: PaymentNoticeWindow | undefined;
+    let restoredDeadline: Promise<number> | undefined;
     let state: VetoState;
     try {
       let deliveries: readonly ChannelDelivery[];
       try {
-        reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind: 'veto', notice: message, assertCurrent: addressCurrent, signal });
+        if (resumption) {
+          const restored = resumption.prepare({ signal, assertCurrent: addressCurrent });
+          reception = Object.freeze({ deliveries: restored.deliveries, awaitAnswer: restored.awaitAnswer.bind(restored), cancel: restored.cancel.bind(restored) });
+          restoredDeadline = restored.deadlineMs;
+        } else reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind: 'veto', notice: message, assertCurrent: addressCurrent, signal });
         deliveries = await (reception?.deliveries ?? notifier.deliver({ kind: 'veto', message, assertCurrent: addressCurrent, signal }));
         addressCurrent();
       }
       catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
-      const deadlineMs = windowDeadlineMs(now(), deps.vetoMinutes);
+      const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.vetoMinutes);
+      addressCurrent();
+      if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < 0) throw new CheckoutOwnershipError();
       // Persisted so a restart can apply the delivery-keyed recovery rules.
       const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
       addressCurrent();
       state = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
       if (state === 'open') {
-        await deps.retainWindowCheckpoint?.({ record: checkpoint, reading });
+        await deps.retainWindowCheckpoint?.({ record: checkpoint, reading, terms: expectedTerms });
         addressCurrent();
         let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
         try {
@@ -975,7 +1039,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // real charge with no purchase record while the journal claims it was
   // recorded.
   const atMs = now();
-  ledger.commit(reservation.id, atMs);
+  if (lifecycle.resumedHold) lifecycle.resumedHold.commit(atMs); else ledger.commit(reservation.id, atMs);
+  lifecycle.resumedHold = undefined;
 
   const record: PurchaseRecord = {
     purchaseId: request.purchaseId,

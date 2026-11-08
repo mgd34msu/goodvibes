@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -407,12 +407,12 @@ test.each(['payments.majorRetailersAdditional', 'payments.majorRetailersExcluded
 });
 
 
-function serviceFixture(f: ReturnType<typeof fixture>) {
+function serviceFixture(f: ReturnType<typeof fixture>, driverFor?: () => CheckoutFlowDeps['driver']) {
   const { deps } = f;
   const service = new PaymentsGatewayServiceImpl({ ...deps, journal: f.journal,
     config: () => ({ limits: deps.limits, budgetCurrency: deps.budgetCurrency, timezone: deps.timezone,
       preferredTier: 'normal', approvalMinutes: deps.approvalMinutes, vetoMinutes: deps.vetoMinutes }),
-    gates: () => deps.gates, driverFor: () => deps.driver, cardFieldGuard: f.redactor });
+    gates: () => deps.gates, driverFor: driverFor ?? (() => deps.driver), cardFieldGuard: f.redactor });
   const input = { sessionId: 'session', pageId: 'page', merchantDomain: f.request.merchantDomain,
     checkoutUrl: f.request.checkoutUrl, item: f.request.item, cardId: f.request.cardId,
     requestedLines: f.request.requestedLines, reading: f.reading,
@@ -751,4 +751,143 @@ test.each(['approval', 'veto'] as const)('an undeliverable %s notice does not ca
   f.deps.notifier.deliver = async () => [{ channel: 'telegram', delivered: false, backfillable: false }];
   Reflect.set(f.deps, 'retainWindowCheckpoint', async () => { checkpoints++; });
   expect((await f.run()).kind).toBe(kind === 'approval' ? 'refused' : 'purchased'); expect(checkpoints).toBe(0);
+});
+
+/** Capture an actual running flow's published checkpoint/accounting, retire
+ * that owner, then load the captured bookkeeping into another real flow.
+ * This tests engine resumption, not native grant/browser/history recovery. */
+async function resumedFixture() {
+  const before = fixture(), entered = barrier(), retire = barrier();
+  let saved: CheckoutWindowCheckpoint | undefined;
+  Reflect.set(before.deps, 'retainWindowCheckpoint', async (value: CheckoutWindowCheckpoint) => {
+    saved = captureCheckoutWindowCheckpoint(value); entered.release(); await retire.wait;
+  });
+  const first = before.run().catch(() => undefined);
+  await entered.wait;
+  const state = before.ledger.state(); before.revoke(); retire.release(); await first;
+  if (!saved?.terms) throw new Error('The real initial flow did not retain exact selected terms');
+  const checkpoint = saved, f = fixture(), ledger = new BudgetLedger(state), journal = new MemoryCheckoutJournal();
+  await journal.put(checkpoint.record);
+  Reflect.set(f.deps, 'ledger', ledger); Reflect.set(f.deps, 'registry', new CheckoutRegistry(journal));
+  let prepared = 0;
+  const resume = { checkpoint, prepare(owner: { readonly assertCurrent?: (() => void) | undefined }) {
+    owner.assertCurrent?.(); prepared++;
+    return { deliveries: Promise.resolve(checkpoint.record.windowDeliveries ?? []), deadlineMs: Promise.resolve(checkpoint.record.windowDeadlineMs ?? 0),
+      async awaitAnswer(deadlineMs: number) { owner.assertCurrent?.(); expect(deadlineMs).toBe(checkpoint.record.windowDeadlineMs);
+        return { answer: 'acknowledge' as const, channel: 'operator' as const }; }, cancel() {} };
+  } };
+  Reflect.set(f.deps, 'resumeWindow', resume);
+  return { ...f, ledger, journal, checkpoint, resume, prepared: () => prepared };
+}
+
+test('actual flow resumption reuses the original reservation, journal and notice instead of opening another purchase', async () => {
+  const f = await resumedFixture();
+  const reserve = spyOn(f.ledger, 'reserve'), open = spyOn(f.deps.registry, 'open');
+  try {
+    expect(f.ledger.state().reservations).toHaveLength(1);
+    expect((await f.run()).kind).toBe('purchased');
+    expect(reserve).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled(); expect(f.prepared()).toBe(1);
+    expect(f.records).toMatchObject([{ purchaseId: f.checkpoint.record.purchaseId, totalMinorUnits: f.checkpoint.record.totalMinorUnits }]);
+    expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+    expect(f.notices).toHaveLength(1); // Completion report only; original window was not sent twice.
+  } finally { reserve.mockRestore(); open.mockRestore(); }
+});
+
+test('a resumed purchase excludes only its own hold when deciding, preserving another purchase reservation', async () => {
+  const f = await resumedFixture();
+  const other = f.ledger.reserve({ id: 'other-purchase', itemMinorUnits: 3_000, overageMinorUnits: 0, toleranceMinorUnits: 0,
+    limits: f.deps.limits, nowMs: f.deps.now(), timezone: 'UTC', retainUntilSettled: true });
+  expect(other).not.toBeNull();
+  expect((await f.run()).kind).toBe('purchased'); expect(f.prepared()).toBe(1);
+  expect(f.ledger.state().reservations).toEqual([other]);
+});
+
+test.each(['missing-terms', 'different-selection'] as const)('a checkpoint with %s cannot reuse an earlier window answer', async kind => {
+  const f = await resumedFixture(), changed = structuredClone(f.checkpoint);
+  if (kind === 'missing-terms') Reflect.deleteProperty(changed, 'terms');
+  else {
+    Reflect.set(changed.reading, 'shippingOptions', [...changed.reading.shippingOptions, { label: 'Other delivery', cost: '$0.00' }]);
+    Reflect.set(changed.terms ?? {}, 'shippingLabel', 'Other delivery');
+  }
+  f.resume.checkpoint = changed;
+  const reserve = spyOn(f.ledger, 'reserve');
+  try {
+    expect((await f.run()).kind).toBe('purchased'); expect(f.prepared()).toBe(0);
+    expect(reserve).toHaveBeenCalledTimes(1); expect(f.notices).toHaveLength(2); // Fresh notice plus completion.
+    expect(f.ledger.state().reservations).toEqual([]);
+  } finally { reserve.mockRestore(); }
+});
+
+test.each(['release', 'same-id-replacement'] as const)('a resumed hold cannot be %s during a semantic await', async kind => {
+  const f = await resumedFixture();
+  f.onMerchant(async () => {
+    expect(f.ledger.release(f.request.purchaseId)).toBe(true);
+    if (kind === 'same-id-replacement') expect(f.ledger.reserve({ id: f.request.purchaseId, itemMinorUnits: 1_000, overageMinorUnits: 100, toleranceMinorUnits: 0,
+      limits: f.deps.limits, nowMs: f.deps.now(), timezone: 'UTC', retainUntilSettled: true })).not.toBeNull();
+  });
+  await expect(f.run()).rejects.toThrow();
+  expect(f.prepared()).toBe(0); expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+  if (kind === 'same-id-replacement') expect(f.ledger.state().reservations).toHaveLength(1);
+});
+
+test('resumed local browser coordinates are rebound only after the original exact journal record is confirmed', async () => {
+  const f = await resumedFixture(); f.changePage();
+  let rebound = false;
+  Reflect.set(f.deps, 'retainWindowCheckpoint', async (value: CheckoutWindowCheckpoint) => {
+    expect(value.record.pageId).toBe('replacement-page'); expect(value.record.purchaseId).toBe(f.request.purchaseId);
+    expect((await f.journal.list())[0]).toEqual(value.record); rebound = true;
+  });
+  expect((await f.run()).kind).toBe('purchased'); expect(rebound).toBe(true);
+});
+
+test('the actual service recovery entry routes the original checkpoint through its explicitly restored driver', async () => {
+  const f = await resumedFixture(), { service, input } = serviceFixture(f, () => { throw new Error('Recovery selected a replacement browser driver'); });
+  try {
+    const result = await service.resumeCheckoutWindow(input, f.resume, f.deps.driver,
+      { purchaseId: f.request.purchaseId, assertCurrent: f.deps.assertCurrent });
+    expect(result).toMatchObject({ outcome: 'purchased', purchaseId: f.request.purchaseId, totalMinorUnits: 1_100 });
+    expect(f.prepared()).toBe(1); expect(f.ledger.state().spend).toHaveLength(1); expect(f.ledger.state().reservations).toEqual([]);
+  } finally { await service.close(); }
+});
+
+test('an invalid restored deadline is not replaced by a new default window', async () => {
+  const f = await resumedFixture();
+  f.resume.prepare = () => ({ deliveries: Promise.resolve(f.checkpoint.record.windowDeliveries ?? []), deadlineMs: Promise.resolve(Number.NaN),
+    async awaitAnswer() { throw new Error('An invalid deadline armed an answer'); }, cancel() {} });
+  await expect(f.run()).rejects.toBeInstanceOf(CheckoutOwnershipError);
+  expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]); expect(f.ledger.state().reservations).toEqual([]);
+});
+
+test('a later wrapper mutation cannot replace the original resumed-window factory during an await', async () => {
+  const f = await resumedFixture();
+  f.onMerchant(async () => { f.resume.prepare = () => { throw new Error('Replacement window factory'); }; });
+  expect((await f.run()).kind).toBe('purchased'); expect(f.prepared()).toBe(1);
+});
+
+test('service shutdown retains and drains a resumed answer read that ignores cancellation', async () => {
+  const f = await resumedFixture(), entered = barrier(), release = barrier(), { service, input } = serviceFixture(f);
+  f.resume.prepare = () => ({ deliveries: Promise.resolve(f.checkpoint.record.windowDeliveries ?? []),
+    deadlineMs: Promise.resolve(f.checkpoint.record.windowDeadlineMs ?? 0),
+    async awaitAnswer() { entered.release(); await release.wait; return { answer: 'acknowledge' as const, channel: 'operator' as const }; }, cancel() {} });
+  const purchase = service.resumeCheckoutWindow(input, f.resume, f.deps.driver, { purchaseId: f.request.purchaseId });
+  const handled = purchase.catch(() => undefined); work.push(purchase);
+  await entered.wait;
+  let drained = false; const closing = service.close().then(() => { drained = true; }); work.push(closing);
+  await Promise.resolve(); expect(drained).toBe(false);
+  release.release(); await handled; await closing;
+  expect(drained).toBe(true); expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+});
+
+test.each(['notice', 'submit-pending', 'submitted'] as const)('a changed original journal (%s) prevents adoption before model, card or reservation work', async kind => {
+  const f = await resumedFixture(), calls = readings.requests.length, held = f.ledger.state().reservations;
+  const changed = kind === 'notice' ? { ...f.checkpoint.record, windowNotice: 'A different native journal window' }
+    : { ...f.checkpoint.record, phase: kind };
+  await f.journal.put(changed);
+  const reserve = spyOn(f.ledger, 'reserve');
+  try {
+    await expect(f.run()).rejects.toThrow('original payment journal changed');
+    expect(readings.requests).toHaveLength(calls); expect(f.effects).toEqual([]); expect(f.prepared()).toBe(0);
+    expect(reserve).not.toHaveBeenCalled(); expect(f.ledger.state().reservations).toEqual(held);
+    expect(await f.journal.list()).toEqual([changed]);
+  } finally { reserve.mockRestore(); }
 });

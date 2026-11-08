@@ -43,6 +43,7 @@ import type { BudgetDraw } from './decide.js';
 import type { ChannelDelivery } from './windows.js';
 import { capturePaymentNoticeReceipt } from './notice-receipt.js';
 import type { CurrencyCode, MinorUnits, OwnerSuppliedText, ShippingStepDown, ShippingTier } from './types.js';
+import { isDeepStrictEqual } from 'node:util';
 
 export type CheckoutPhase =
   | 'deciding'
@@ -241,6 +242,41 @@ export class CheckoutRegistry {
       this.forget(owned);
       throw error;
     } finally { this.#writing.delete(owned.purchaseId); }
+  }
+
+  /** Adopt an exact, durably retained pre-submit window under the host's
+   * original execution lease and restored native-page proof. Local browser
+   * IDs can change after reconnect; no new purchase/window/hold is created.
+   * A parsed record by itself never authorizes this host-only operation. */
+  async resumeWindow(record: InFlightCheckout, page: { readonly sessionId: string; readonly pageId: string },
+    claim: CheckoutPageClaim, assertCurrent: () => void): Promise<InFlightCheckout> {
+    const original = ownCheckout(record), sessionId = page.sessionId, pageId = page.pageId;
+    if (original.phase !== 'awaiting-window' || !original.windowNotice || original.windowDeadlineMs === undefined
+      || original.windowKind === undefined || original.windowDeliveries === undefined || original.draw === null
+      || original.reservationId === null || !sessionId || !pageId) throw new CheckoutRegistryError(
+      'The original payment window is incomplete.', 'Inspect the retained purchase before resuming it.');
+    const current = () => {
+      assertCurrent(); claim.assertCurrent();
+      if (this.#pageOwners.get(sessionId)?.get(pageId) !== claim) throw new CheckoutRegistryError(
+        'The restored purchase does not own this page.', 'Use the original native checkout page.');
+    };
+    current(); this.assertWritable(original.purchaseId);
+    if (this.#byPurchase.has(original.purchaseId) || this.#byPage.get(sessionId)?.has(pageId)) throw new CheckoutRegistryError(
+      'The checkout is already owned by a live executor.', 'Use the original purchase status.');
+    const resumed = ownCheckout({ ...original, sessionId, pageId });
+    const pages = this.#byPage.get(sessionId) ?? new Map<string, InFlightCheckout>();
+    this.#byPage.set(sessionId, pages); pages.set(pageId, resumed); this.#byPurchase.set(original.purchaseId, resumed);
+    this.#writing.add(original.purchaseId);
+    try {
+      const records = await this.journal.list(); current();
+      if (!isDeepStrictEqual(records.find(entry => entry.purchaseId === original.purchaseId), original)) throw new CheckoutRegistryError(
+        'The original payment journal changed.', 'Inspect its current purchase evidence before resuming.');
+      if (sessionId !== original.sessionId || pageId !== original.pageId) {
+        await this.journal.put(resumed); current();
+      }
+      return resumed;
+    } catch (error) { this.forget(resumed); throw error; }
+    finally { this.#writing.delete(original.purchaseId); }
   }
 
   /** The durably published checkout on this exact page, or null while changing. */

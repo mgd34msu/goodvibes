@@ -84,8 +84,7 @@ function own(value: unknown): ProtectedPaymentRequest {
     || host['browserControls'] !== undefined && host['browser'] === undefined
     || !object(host['authority']) || !object(host['configuration'])) throw new ProtectedPaymentRequestError();
   const window = row['window'] === undefined ? undefined : captureCheckoutWindowCheckpoint(row['window']);
-  if (window && (window.record.purchaseId !== row['purchaseId'] || window.record.sessionId !== input['sessionId']
-    || window.record.pageId !== input['pageId'] || window.record.cardId !== input['cardId'] || window.record.item !== input['item']
+  if (window && (window.record.purchaseId !== row['purchaseId'] || window.record.cardId !== input['cardId'] || window.record.item !== input['item']
     || window.record.reservationId !== row['purchaseId'])) throw new ProtectedPaymentRequestError();
   const reading = readCheckoutReadingInput(input['reading']);
   if (!reading.ok || !isDeepStrictEqual(captureOwnedJson(reading.reading), input['reading'])) throw new ProtectedPaymentRequestError();
@@ -144,7 +143,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   private key: { bytes: Buffer; file: FileObservation; owner: ImportFileObservation } | undefined;
   private failed = false;
   private readonly records = new Map<string, { operationId: string; physical: string }>();
-  constructor(private readonly directory: string, private readonly beforeCheckpoint?: () => void) {}
+  constructor(private readonly directory: string, private readonly beforeCheckpoint?: (version: 1 | 2) => void) {}
   private path(id: string): string { return join(this.directory, `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.json`); }
   private safeDirectory(): void {
     const entry = lstatSync(this.directory);
@@ -237,6 +236,13 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
       const selected = captureCheckoutWindowCheckpoint(window);
       if (original.window && selected.record.updatedAtMs < original.window.record.updatedAtMs) throw new ProtectedPaymentRequestError();
       const recovery = browser === null ? null : captureBrowserCheckoutRecovery(browser);
+      const previousPage = original.window?.record ?? original.input;
+      // Reconnection allocates new local IDs, while the actual native page
+      // must remain the one independently restored by the host. Serialized
+      // identity alone grants nothing; the caller still owns the real lease.
+      if ((selected.record.sessionId !== previousPage.sessionId || selected.record.pageId !== previousPage.pageId)
+        && (!recovery || !original.host.browser || !isDeepStrictEqual(recovery.connection, original.host.browser))) throw new ProtectedPaymentRequestError();
+      if (selected.terms && selected.terms.submitTarget !== original.input.controls.placeOrderTarget) throw new ProtectedPaymentRequestError();
       const { browser: _oldBrowser, browserControls: _oldControls, ...authority } = original.host;
       const next = own({ ...original, window: selected,
         host: { ...authority, ...(recovery ? { browser: recovery.connection, browserControls: recovery.controls } : {}) } });
@@ -249,7 +255,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
         if (observed.physical !== file.physical || !observed.bytes.equals(file.bytes)) throw new ProtectedPaymentRequestError();
       };
       before();
-      const declared: unknown = this.beforeCheckpoint?.();
+      const declared: unknown = this.beforeCheckpoint?.(selected.terms === undefined ? 1 : 2);
       if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
       before();
       atomicWriteFileSync(path, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, assertCurrent: before });

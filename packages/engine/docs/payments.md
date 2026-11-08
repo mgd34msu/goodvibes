@@ -990,11 +990,28 @@ submit. Undeliverable notices do not incur a window checkpoint.
 
 Admission-only encrypted records remain readable and carry no window
 checkpoint. They cannot establish what a later repriced window displayed.
-Publishing the new checkpoint declares `payment-window-checkpoints-v1` before
-the incompatible write; a candidate reader must support that format, including
-when its version number also says 3.1.2. A checkpoint remains evidence, not
-authority to resume: original issued-grant validation, held-reservation adoption,
-reply coverage and the startup continuation consumer remain unfinished.
+The earlier `payment-window-checkpoints-v1` format retains the raw quote and
+journal record. New checkpoints also retain the exact selected terms, including
+the delivery option and submit control, under `payment-window-checkpoints-v2`.
+Each writer declares its format before the incompatible write; a candidate
+reader must support that format even when its version number also says 3.1.2.
+Earlier records remain readable without inventing their missing selection.
+
+The engine's composition-only `resumeCheckoutWindow` path adopts the exact
+journal under the restored page claim and reuses the original retained budget
+hold. Budget rechecks exclude only that hold while other purchases remain
+reserved. A replaced hold, including a same-ID replacement, cannot be released
+or committed by the earlier continuation. Reconnection may change local
+session/page IDs; the actual native browser identity must still be restored
+independently by the host.
+
+Resumption accepts a host-owned channel recovery callback and its deadline,
+never a serialized receipt as permission to invent a fresh window. It preserves
+the original notice only when the exact selected terms and required window type
+still match. Changed terms or an older checkpoint without the exact selection
+void that window before a fresh decision and notification. Native automatic
+startup integration, original issued-grant restoration and verified reply-history
+coverage remain unfinished; the engine entry is not a complete restart feature.
 
 Each wait now carries its exact `purchaseId`, rendered notice, deadline and
 owning cancellation signal. The notifier does not keep a shared last notice;

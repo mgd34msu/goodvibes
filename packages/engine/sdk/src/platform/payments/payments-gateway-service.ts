@@ -55,6 +55,7 @@ import type { GateInput } from './gates.js';
 import type { MerchantJudgePort, MerchantPolicy } from './merchant-recourse.js';
 import type { PaymentNotifier } from './checkout-flow.js';
 import { retainTaintEvidence, type RetainedTaintEvidence, type UntrustedContentLedger } from '../security/untrusted-content.js';
+import { captureCheckoutWindowCheckpoint, type CheckoutWindowResumption } from './checkout-window-checkpoint.js';
 import type { CurrencyCode, ShippingTier } from './types.js';
 
 export { RECOVERY_IO_TIMEOUT_MS } from './checkout-recovery.js';
@@ -249,6 +250,22 @@ export class PaymentsGatewayServiceImpl {
    * should apply to this purchase.
    */
   async beginCheckout(input: BeginCheckoutInput, options: CheckoutBeginOptions = {}): Promise<PaymentBeginResult> {
+    return this.startBeginCheckout(input, options);
+  }
+
+  /** Composition-only recovery entry. The caller supplies the independently
+   * restored native driver, grant/lease lifetime and channel recovery owner;
+   * no public checkout verb reads these capabilities from its wire body. */
+  async resumeCheckoutWindow(input: BeginCheckoutInput, value: CheckoutWindowResumption, driver: CheckoutPageDriver,
+    options: CheckoutBeginOptions): Promise<PaymentBeginResult> {
+    const checkpoint = captureCheckoutWindowCheckpoint(value.checkpoint);
+    if (options.purchaseId !== checkpoint.record.purchaseId) throw new CheckoutOwnershipError();
+    const resumption = Object.freeze({ checkpoint, prepare: value.prepare.bind(value) });
+    return this.startBeginCheckout(input, options, resumption, driver);
+  }
+
+  private startBeginCheckout(input: BeginCheckoutInput, options: CheckoutBeginOptions,
+    resumption?: CheckoutWindowResumption, restoredDriver?: CheckoutPageDriver): Promise<PaymentBeginResult> {
     if (this.closed) throw new CheckoutOwnershipError();
     const purchaseId = options.purchaseId;
     const retainWindowCheckpoint = options.retainWindowCheckpoint?.bind(options);
@@ -257,11 +274,12 @@ export class PaymentsGatewayServiceImpl {
     owner.assertCurrent?.();
     const taintEvidence = options.taintEvidence === undefined ? retainTaintEvidence(this.deps.untrusted)
       : captureOwnedJson(options.taintEvidence) as RetainedTaintEvidence;
-    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence, retainWindowCheckpoint));
+    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence, retainWindowCheckpoint, resumption, restoredDriver));
   }
 
   private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId: string | undefined, taintEvidence: RetainedTaintEvidence,
-    retainWindowCheckpoint?: CheckoutFlowDeps['retainWindowCheckpoint']): Promise<PaymentBeginResult> {
+    retainWindowCheckpoint?: CheckoutFlowDeps['retainWindowCheckpoint'], resumption?: CheckoutWindowResumption,
+    restoredDriver?: CheckoutPageDriver): Promise<PaymentBeginResult> {
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
@@ -283,7 +301,7 @@ export class PaymentsGatewayServiceImpl {
       return { ...this.refused('The item has to be described in your own words, from your own request.'), purchaseId: purchaseId ?? null };
     }
 
-    const driver = this.deps.driverFor(input.sessionId, input.pageId);
+    const driver = restoredDriver ?? this.deps.driverFor(input.sessionId, input.pageId);
     options.assertCurrent?.();
     const request: PurchaseRequest = {
       purchaseId: purchaseId ?? `pur-${String(now())}-${Math.random().toString(36).slice(2, 10)}`,
@@ -326,6 +344,7 @@ export class PaymentsGatewayServiceImpl {
     };
 
     const outcome = await runCheckout(request, input.reading, controls, {
+      resumeWindow: resumption,
       retainWindowCheckpoint,
       signal: options.signal,
       assertCurrent: options.assertCurrent,

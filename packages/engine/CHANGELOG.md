@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Add the engine checkout-window resume path using the original journal and
+  held funds. Preserve exact selected terms in v2 checkpoints, reject replaced
+  holds and void earlier answers when the selected terms or window type change.
+  Native automatic startup and reply-history integration remain unfinished.
+
 - Follow the repository rename to `mgd34msu/goodvibes` in install/uninstall
   downloads, native acquisition, updates, release tooling, workflow action
   references and package/documentation links. Migrate the exact previous

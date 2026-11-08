@@ -8,6 +8,7 @@ import { protectedPaymentRequest } from './helpers/protected-payment-request.js'
 import { protectedPaymentWindow } from './helpers/protected-payment-window.js';
 import { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, NATIVE_READER_REQUIREMENT_FILE } from '../sdk/src/platform/runtime/native-reader-compatibility.js';
 import { realUpdateFileIo } from '../sdk/src/platform/runtime/self-update.js';
+import { extractCheckout } from '../sdk/src/platform/payments/checkout-extraction.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -95,4 +96,27 @@ test('capture rejects incomplete windows and retains detached immutable quote fa
   Reflect.set(window.reading, 'lines', []); Reflect.set(window.record, 'windowNotice', 'replacement');
   expect(captured.reading.lines).toHaveLength(1); expect(captured.record.windowNotice).toBe('Approve the actual twenty dollar quote.');
   expect(() => captureCheckoutWindowCheckpoint({ ...captured, record: { ...captured.record, windowDeliveries: undefined } })).toThrow();
+});
+
+test('exact selected terms use the v2 native reader floor and remain independently readable after restart', async () => {
+  const f = await fixture(), parsed = extractCheckout(f.window.reading, f.window.record.currency);
+  if (!parsed.ok) throw new Error('Fixture quote');
+  const quote = parsed.checkout;
+  const window = { ...f.window, terms: { submitTarget: f.original.input.controls.placeOrderTarget,
+    merchantDomain: f.window.record.merchantDomain, currency: quote.currency, lines: quote.lines,
+    taxMinorUnits: quote.taxMinorUnits, feesMinorUnits: quote.feesMinorUnits, feeLabels: quote.feeLabels,
+    shippingLabel: 'normal', shippingMinorUnits: 0, totalMinorUnits: 2_000 } };
+  const execPath = join(f.root, 'goodvibes-daemon'), native = createNativeDataWriteOwner({ execPath, version: '3.1.2', assertCurrent: () => {} });
+  const store = new ProtectedPaymentRequests(f.directory, version => {
+    expect(version).toBe(2); expect(readFileSync(f.path)).toEqual(f.old);
+    native.declare('payment-window-checkpoints-v2');
+  });
+  await store.checkpointWindow(f.original.purchaseId, f.original.operationId, window, null, () => {});
+  const saved = await new ProtectedPaymentRequests(f.directory).read(f.original.purchaseId, f.original.operationId, () => {});
+  expect(saved.window?.terms).toEqual(window.terms);
+  expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo,
+    { schema: 1, version: '3.1.2', formats: ['payment-retained-holds-v2', 'telegram-account-cursors-v2', 'payment-window-checkpoints-v1'] })).toThrow();
+  expect(() => assertNativeReaderCompatible(execPath, '3.1.2', realUpdateFileIo, nativeReaderCapabilities('3.1.2'))).not.toThrow();
+  expect(() => captureCheckoutWindowCheckpoint({ ...window, terms: { ...window.terms, shippingLabel: 'Unselected option' } })).toThrow();
+  expect(() => captureCheckoutWindowCheckpoint({ ...window, terms: { ...window.terms, totalMinorUnits: 1 } })).toThrow();
 });

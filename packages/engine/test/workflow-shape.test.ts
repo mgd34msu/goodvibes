@@ -289,8 +289,13 @@ describe('ci.yml: build once, restore everywhere', () => {
     for (const [index, row] of bun.entries()) {
       const stall = index === bun.length - 1 ? ' GOODVIBES_TEST_STALL_MS=270000' : '';
       expect(row['test-cmd']).toStartWith(`GOODVIBES_TEST_CEILING_MS=900000${stall} bun packages/engine/scripts/test.ts --partition=`);
-      expect(row['test-cmd']).toMatch(/ --manifest-sha256=[a-f0-9]{64}$/);
+      expect(row['test-cmd']).toEndWith(' --manifest=/tmp/engine-test-manifest/engine-test-manifest.json');
     }
+    const expected = steps(platform).find(step => (step.with as { name?: string })?.name === 'engine-test-manifest');
+    const run = steps(platform).find(step => step.run === '${{ matrix.test-cmd }}');
+    expect(expected?.with).toMatchObject({ path: '/tmp/engine-test-manifest' });
+    expect(expected?.if).toBe("matrix.platform == 'bun'");
+    expect(steps(platform).indexOf(expected!)).toBeLessThan(steps(platform).indexOf(run!));
     expect(include.filter((row) => row.foundation).map(row => row.name)).toEqual([bun[0]!.name]);
     expect(new Set(include.map((row) => row.name)).size).toBe(include.length);
     expect(platform.name).toBe('Platform matrix (${{ matrix.name }})');
@@ -376,8 +381,12 @@ describe('ci.yml: build once, restore everywhere', () => {
     expect(terminal?.if).toBeUndefined();
     expect(run).toBeDefined();
     expect(run?.if).toBeUndefined();
-    expect(run?.env).toEqual({ AGENT_GROUP: '${{ matrix.group }}', AGENT_MANIFEST_SHA256: '${{ matrix.manifest-sha256 }}' });
-    expect(run?.run).toBe('bun packages/engine/scripts/agent-test-partitions.ts run --group="$AGENT_GROUP" --manifest-sha256="$AGENT_MANIFEST_SHA256"');
+    expect(run?.env).toEqual({ AGENT_GROUP: '${{ matrix.group }}' });
+    expect(run?.run).toBe('bun packages/engine/scripts/agent-test-partitions.ts run --group="$AGENT_GROUP" --manifest=/tmp/agent-test-manifest/agent-test-manifest.json');
+    const expected = steps(product).find(step => (step.with as { name?: string })?.name === 'agent-test-manifest');
+    expect(expected?.with).toMatchObject({ path: '/tmp/agent-test-manifest' });
+    expect(expected?.if).toBeUndefined();
+    expect(steps(product).indexOf(expected!)).toBeLessThan(steps(product).indexOf(run!));
     expect(verify?.run).toContain('bun products/agent/scripts/ci-artifact.ts verify "$GITHUB_SHA"');
     expect(verify?.run).toContain('products/agent/dist/goodvibes-agent-linux-x64 --version');
     expect(verify?.run).toContain('echo "GOODVIBES_E2E_BINARY=$GITHUB_WORKSPACE/products/agent/dist/goodvibes-agent-linux-x64" >> "$GITHUB_ENV"');

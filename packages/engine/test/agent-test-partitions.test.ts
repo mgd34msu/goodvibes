@@ -1,5 +1,4 @@
 import { afterEach, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -30,9 +29,16 @@ function fixture(): { root: string; agent: string } {
   return { root, agent };
 }
 
+/** A retained discovery artifact, stored outside either product's inventory. */
+function manifestArgument(manifest: unknown): string {
+  const root = mkdtempSync(join(tmpdir(), 'agent-expected-manifest-')); roots.push(root);
+  const path = join(root, 'manifest.json'); writeFileSync(path, JSON.stringify(manifest));
+  return `--manifest=${path}`;
+}
+
 function copyRunner(root: string): string {
   const scripts = join(root, 'packages/engine/scripts'); mkdirSync(scripts, { recursive: true });
-  for (const file of ['agent-test-partitions.ts', 'test.ts', 'test-discovery.ts', 'test-partitions.ts', 'owned-test-child.ts', 'stale-tmp-sweep.ts',
+  for (const file of ['agent-test-partitions.ts', 'test.ts', 'test-discovery.ts', 'test-partitions.ts', 'test-manifest.ts', 'owned-test-child.ts', 'stale-tmp-sweep.ts',
     'test-run-tmp.ts', 'workspace-lock.ts', 'test-child-watchdog-env.ts', 'test-child-watchdog.ts',
     'test-isolation.ts', 'test-network-guard.ts', 'test-network-preload.ts']) {
     copyFileSync(resolve(import.meta.dir, '../scripts', file), join(scripts, file));
@@ -63,7 +69,7 @@ test('actual Agent inventory is an independent complete disjoint census, with no
   expect(manifest.files).toEqual(census);
   expect(manifest.files).toEqual(agentTestFiles(agent));
   const selected = agentTestMatrix(agent).include.flatMap((row) => {
-    const args = agentGroupTestArgs(agent, [`--group=${row.group}`, `--manifest-sha256=${row['manifest-sha256']}`]);
+    const args = agentGroupTestArgs(agent, [`--group=${row.group}`, manifestArgument(manifest)]);
     expect(args.slice(0, 2)).toEqual(['--cwd', '../../products/agent']);
     return args.slice(2).map((file) => { expect(file).toStartWith('./src/test/'); return file.slice(2); });
   });
@@ -85,14 +91,14 @@ test('native harness groups retain whole files and leave nested names in the com
   const manifest = agentTestManifest(agent);
   for (const [id, file] of Object.entries(AGENT_HARNESS_GROUP_FILES)) {
     expect(manifest.groups.find(group => group.id === id)?.files).toEqual([file]);
-    expect(agentGroupTestPlans(agent, [`--group=${id}`, `--manifest-sha256=${manifest.sha256}`]))
+    expect(agentGroupTestPlans(agent, [`--group=${id}`, manifestArgument(manifest)]))
       .toEqual([['--cwd', '../../products/agent', `./${file}`]]);
   }
   expect(manifest.groups.find(group => group.id === 'remaining')?.files).toContain(nested);
   expect(manifest.groups.flatMap(group => group.files).sort()).toEqual([...manifest.files]);
 });
 
-test('every new group rejects the old grouping digest even when the file inventory is unchanged', () => {
+test('every new group rejects an old grouping plan even when the file inventory is unchanged', () => {
   const { agent } = fixture();
   const manifest = agentTestManifest(agent);
   const oldGroups = [
@@ -100,10 +106,10 @@ test('every new group rejects the old grouping digest even when the file invento
     { id: 'headless', files: [headless] },
     { id: 'remaining', files: manifest.files.filter(file => !file.startsWith('src/test/e2e/') && file !== headless) },
   ];
-  const oldDigest = createHash('sha256').update(JSON.stringify({ files: manifest.files, groups: oldGroups })).digest('hex');
-  expect(manifest.sha256).not.toBe(oldDigest);
+  const oldManifest = { ...manifest, groups: oldGroups };
+  expect(manifest).not.toEqual(oldManifest);
   for (const group of AGENT_TEST_GROUPS) {
-    expect(() => agentGroupTestArgs(agent, [`--group=${group}`, `--manifest-sha256=${oldDigest}`])).toThrow('differs');
+    expect(() => agentGroupTestArgs(agent, [`--group=${group}`, manifestArgument(oldManifest)])).toThrow('differs');
   }
 });
 
@@ -113,7 +119,7 @@ test('two owned remaining plans preserve every complete file and all future sour
   const future = 'src/test/future/agent-harness-tool.test.ts';
   for (const file of [...catalogs, future]) write(agent, file);
   const manifest = agentTestManifest(agent);
-  const args = ['--group=remaining', `--manifest-sha256=${manifest.sha256}`];
+  const args = ['--group=remaining', manifestArgument(manifest)];
   const plans = agentGroupTestPlans(agent, args);
   expect(plans).toHaveLength(2);
   expect(plans[0]).toEqual(['--cwd', '../../products/agent', ...catalogs.map(file => `./${file}`)]);
@@ -136,7 +142,7 @@ test('complete remaining CI partitions preserve every file and isolate the nativ
   const manifest = agentTestManifest(agent);
   const groups = manifest.groups.filter(group => group.id === 'remaining' || group.id.startsWith('remaining-'));
   const selected = groups.flatMap(group => {
-    const plans = agentGroupTestPlans(agent, [`--group=${group.id}`, `--manifest-sha256=${manifest.sha256}`]);
+    const plans = agentGroupTestPlans(agent, [`--group=${group.id}`, manifestArgument(manifest)]);
     const files = plans.flatMap(plan => plan.slice(2).map(file => file.slice(2)));
     expect(files.sort()).toEqual(group.files);
     return files;
@@ -159,13 +165,13 @@ test('future nested tests are discovered once; stale, malformed, duplicate and m
   const after = agentTestManifest(agent);
   expect(after.files).toHaveLength(paths.length + 2);
   expect(new Set(after.groups.flatMap((group) => group.files)).size).toBe(after.files.length);
-  expect(after.sha256).not.toBe(before.sha256);
-  expect(() => agentGroupTestArgs(agent, ['--group=e2e', `--manifest-sha256=${before.sha256}`])).toThrow('differs');
-  const digest = `--manifest-sha256=${after.sha256}`;
-  for (const args of [[], ['--group=e2e'], [digest], ['--group=bad', digest], ['--group=e2e', '--manifest-sha256=bad'],
-    ['--group=e2e', digest, '--group=headless'], ['--group=e2e', digest, digest],
-    ['--group=e2e', digest, '--cwd', '.'], ['--group=e2e', digest, '--timeout=1'],
-    ['--group=e2e', digest, '--test-name-pattern=x'], ['--group=e2e', digest, 'src/test'],
+  expect(after).not.toEqual(before);
+  expect(() => agentGroupTestArgs(agent, ['--group=e2e', manifestArgument(before)])).toThrow('differs');
+  const expected = manifestArgument(after);
+  for (const args of [[], ['--group=e2e'], [expected], ['--group=bad', expected], ['--group=e2e', '--manifest=bad'],
+    ['--group=e2e', expected, '--group=headless'], ['--group=e2e', expected, expected],
+    ['--group=e2e', expected, '--cwd', '.'], ['--group=e2e', expected, '--timeout=1'],
+    ['--group=e2e', expected, '--test-name-pattern=x'], ['--group=e2e', expected, 'src/test'],
   ]) expect(() => agentGroupTestArgs(agent, args), JSON.stringify(args)).toThrow();
 });
 
@@ -192,7 +198,7 @@ test('real grouped runner preserves preload, isolation, skip/TODO, owned tmp cle
   `);
   const manifest = agentTestManifest(agent);
   const run = (group: string) => {
-    const child = Bun.spawnSync({ cmd: [process.execPath, join(scripts, 'agent-test-partitions.ts'), 'run', `--group=${group}`, `--manifest-sha256=${manifest.sha256}`], cwd: root,
+    const child = Bun.spawnSync({ cmd: [process.execPath, join(scripts, 'agent-test-partitions.ts'), 'run', `--group=${group}`, manifestArgument(manifest)], cwd: root,
       env: { PATH: process.env.PATH ?? '', HOME: root, OPENAI_API_KEY: 'synthetic-must-not-inherit' }, timeout: 20_000, stdout: 'pipe', stderr: 'pipe' });
     return { code: child.exitCode, output: child.stdout.toString() + child.stderr.toString() };
   };
@@ -335,7 +341,7 @@ for (const outcome of ['pass', 'failure', 'ceiling', 'cancel', 'force-kill', 'pa
     `);
     const log = join(root, 'run.stdout.log'), errors = join(root, 'run.stderr.log'), githubOutput = join(root, 'github-output');
     writeFileSync(githubOutput, '');
-    const parent = Bun.spawn([process.execPath, join(scripts, 'agent-test-partitions.ts'), 'run', '--group=remaining', `--manifest-sha256=${manifest.sha256}`], {
+    const parent = Bun.spawn([process.execPath, join(scripts, 'agent-test-partitions.ts'), 'run', '--group=remaining', manifestArgument(manifest)], {
       cwd: root, stdout: Bun.file(log), stderr: Bun.file(errors),
       env: { PATH: process.env.PATH ?? '', HOME: root, GITHUB_OUTPUT: githubOutput, OPENAI_API_KEY: 'Synthetic-must-not-inherit', ...(outcome === 'ceiling' ? { GOODVIBES_TEST_CEILING_MS: '1000' } : {}) },
     });
@@ -477,7 +483,7 @@ test('settled owner diagnostics refuse a replaced native log before replay or ar
     });
   `);
   const manifest = agentTestManifest(agent);
-  const parent = Bun.spawn([process.execPath, join(scripts, 'agent-test-partitions.ts'), 'run', '--group=remaining', `--manifest-sha256=${manifest.sha256}`], {
+  const parent = Bun.spawn([process.execPath, join(scripts, 'agent-test-partitions.ts'), 'run', '--group=remaining', manifestArgument(manifest)], {
     cwd: root, env: { PATH: process.env.PATH ?? '', HOME: root, GITHUB_OUTPUT: githubOutput, TMPDIR: nativeTmpParent, TMP: nativeTmpParent, TEMP: nativeTmpParent }, stdout: 'pipe', stderr: 'pipe',
   });
   const [code, stdout, stderr] = await Promise.all([parent.exited, new Response(parent.stdout).text(), new Response(parent.stderr).text()]);

@@ -35,13 +35,13 @@ test('complete daemon ownership matches an independent recursive census and disc
   write(root, 'src/test/dist/ignored.test.ts');
   const after = daemonTestManifest(root);
   expect(after.files).toEqual(['src/test/future/deeper/new.spec.cts', 'src/test/one.test.ts']);
-  expect(after.sha256).not.toBe(before.sha256);
+  expect(after).not.toEqual(before);
 });
 
 test('real daemon entrypoint runs all children, preserves isolation and propagates a failed owner', () => {
   const root = mkdtempSync(join(tmpdir(), 'daemon-runner-')); roots.push(root);
   const scripts = join(root, 'packages/engine/scripts'); mkdirSync(scripts, { recursive: true });
-  for (const file of ['daemon-test-partitions.ts', 'test.ts', 'test-discovery.ts', 'test-partitions.ts', 'owned-test-child.ts', 'stale-tmp-sweep.ts',
+  for (const file of ['daemon-test-partitions.ts', 'test.ts', 'test-discovery.ts', 'test-partitions.ts', 'test-manifest.ts', 'owned-test-child.ts', 'stale-tmp-sweep.ts',
     'test-run-tmp.ts', 'workspace-lock.ts', 'test-child-watchdog-env.ts', 'test-child-watchdog.ts',
     'test-isolation.ts', 'test-network-guard.ts', 'test-network-preload.ts']) {
     copyFileSync(resolve(import.meta.dir, '../scripts', file), join(scripts, file));

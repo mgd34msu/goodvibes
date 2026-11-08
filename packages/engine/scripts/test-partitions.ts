@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { assertTestManifest } from './test-manifest.ts';
 import { resolve } from 'node:path';
 import { defaultTestArgs } from './test-discovery.ts';
 
@@ -29,10 +29,8 @@ export function partitionTestFiles(files: readonly string[], count: number): rea
 
 export function engineTestManifest(engineRoot: string, count?: number) {
   const files = defaultTestArgs(engineRoot);
-  const sha256 = createHash('sha256').update(JSON.stringify(files)).digest('hex');
   return {
-    version: 1,
-    sha256,
+    version: 2,
     files,
     partitions: partitionTestFiles(files, count ?? Math.min(ENGINE_TEST_PARTITIONS, files.length)).map((selected, index, partitions) => ({
       id: `${index + 1}/${partitions.length}`, files: selected,
@@ -42,11 +40,11 @@ export function engineTestManifest(engineRoot: string, count?: number) {
 
 /** Select only the canonical default manifest; never combine a shard with filters. */
 export function partitionTestArgs(engineRoot: string, args: readonly string[]): readonly string[] | null {
-  if (!args.some((arg) => arg.startsWith('--partition') || arg.startsWith('--manifest-sha256'))) return null;
+  if (!args.some((arg) => arg.startsWith('--partition') || arg.startsWith('--manifest'))) return null;
   const partition = args.filter((arg) => arg.startsWith('--partition='));
-  const digest = args.filter((arg) => arg.startsWith('--manifest-sha256='));
-  if (partition.length !== 1 || digest.length > 1 || args.length !== partition.length + digest.length) {
-    throw new Error('Use --partition=INDEX/COUNT with optional --manifest-sha256=HASH and no other test arguments');
+  const expected = args.filter((arg) => arg.startsWith('--manifest='));
+  if (partition.length !== 1 || expected.length > 1 || args.length !== partition.length + expected.length) {
+    throw new Error('Use --partition=INDEX/COUNT with optional --manifest=FILE and no other test arguments');
   }
   const match = /^--partition=([1-9]\d*)\/([1-9]\d*)$/.exec(partition[0]!);
   if (!match) throw new Error('Invalid test partition; expected --partition=INDEX/COUNT');
@@ -54,14 +52,12 @@ export function partitionTestArgs(engineRoot: string, args: readonly string[]): 
   const count = Number(match[2]);
   const manifest = engineTestManifest(engineRoot, count);
   if (!Number.isSafeInteger(index) || index > count) throw new Error('Test partition index is outside its manifest');
-  if (digest.length > 0 && digest[0] !== `--manifest-sha256=${manifest.sha256}`) {
-    throw new Error('Test manifest differs from the CI build discovery');
-  }
+  if (expected.length > 0) assertTestManifest(expected[0]!.slice('--manifest='.length), manifest, 'Engine');
   const selected = manifest.partitions[index - 1]!;
-  console.log(`[engine-tests] partition ${selected.id}: ${selected.files.length}/${manifest.files.length} files; manifest ${manifest.sha256}`);
+  console.log(`[engine-tests] partition ${selected.id}: ${selected.files.length}/${manifest.files.length} files`);
   // Bun treats bare test/... arguments as substring filters. Explicit paths
   // prevent test/a.test.ts from also selecting test/nested/test/a.test.ts in
-  // another partition. Keep the canonical manifest/hash independent of argv.
+  // another partition. Keep the canonical manifest independent of argv.
   return selected.files.map((file) => `./${file}`);
 }
 
@@ -77,7 +73,7 @@ export function platformTestMatrix(engineRoot: string) {
       // This dedicated workflow declares a four-minute test. Its watchdog
       // must let that test settle; ordinary partitions keep the default stall
       // ceiling and every partition retains the same finite overall deadline.
-      'test-cmd': `GOODVIBES_TEST_CEILING_MS=900000${partition.files.some(file => DEDICATED_TEST_FILES.includes(file)) ? ' GOODVIBES_TEST_STALL_MS=270000' : ''} bun packages/engine/scripts/test.ts --partition=${partition.id} --manifest-sha256=${manifest.sha256}`,
+      'test-cmd': `GOODVIBES_TEST_CEILING_MS=900000${partition.files.some(file => DEDICATED_TEST_FILES.includes(file)) ? ' GOODVIBES_TEST_STALL_MS=270000' : ''} bun packages/engine/scripts/test.ts --partition=${partition.id} --manifest=/tmp/engine-test-manifest/engine-test-manifest.json`,
     })),
     ...[
       ['rn-bundle', 'test:rn'], ['workers', 'test:workers'], ['workers-wrangler', 'test:workers:wrangler'],

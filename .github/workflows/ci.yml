@@ -252,6 +252,12 @@ jobs:
         run: |
           git config --global user.email "ci@goodvibes.local"
           git config --global user.name "GoodVibes CI"
+      - name: Download expected engine test plan
+        if: matrix.platform == 'bun'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: engine-test-manifest
+          path: /tmp/engine-test-manifest
       - name: Run test suite (${{ matrix.platform }})
         run: ${{ matrix.test-cmd }}
       - name: Check installer lifecycle
@@ -609,12 +615,16 @@ jobs:
         run: |
           git config --global user.email "ci@goodvibes.local"
           git config --global user.name "GoodVibes CI"
+      - name: Download expected Agent test plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: agent-test-manifest
+          path: /tmp/agent-test-manifest
       - name: Run complete Agent test group through the owned runner
         id: agent-test-run
         env:
           AGENT_GROUP: ${{ matrix.group }}
-          AGENT_MANIFEST_SHA256: ${{ matrix.manifest-sha256 }}
-        run: bun packages/engine/scripts/agent-test-partitions.ts run --group="$AGENT_GROUP" --manifest-sha256="$AGENT_MANIFEST_SHA256"
+        run: bun packages/engine/scripts/agent-test-partitions.ts run --group="$AGENT_GROUP" --manifest=/tmp/agent-test-manifest/agent-test-manifest.json
       - name: Upload exact settled Agent owner diagnostics
         if: ${{ always() && steps.agent-test-run.outputs.owner_evidence != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

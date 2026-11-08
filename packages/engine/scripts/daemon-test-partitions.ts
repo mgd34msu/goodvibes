@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -30,14 +29,13 @@ export function daemonTestManifest(daemonRoot: string) {
   if (new Set(census).size !== files.length || census.some((file, index) => file !== files[index])) {
     throw new Error('Daemon child plans differ from the complete test inventory');
   }
-  const sha256 = createHash('sha256').update(JSON.stringify({ files, groups: nonempty })).digest('hex');
-  return { version: 1, sha256, files, groups: nonempty };
+  return { version: 2, files, groups: nonempty };
 }
 
 export function daemonTestPlans(daemonRoot: string, args: readonly string[]): readonly (readonly string[])[] {
   if (args.length > 0) throw new Error('The complete daemon test command does not accept test selectors');
   const manifest = daemonTestManifest(daemonRoot);
-  console.log(`[daemon-tests] ${manifest.files.length} files in ${manifest.groups.length} owned children; manifest ${manifest.sha256}`);
+  console.log(`[daemon-tests] ${manifest.files.length} files in ${manifest.groups.length} owned children`);
   return manifest.groups.map(group => ['--cwd', '../../products/daemon', ...group.files.map(file => `./${file}`)]);
 }
 

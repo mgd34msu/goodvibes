@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { assertTestManifest } from './test-manifest.ts';
 import { readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -97,21 +97,19 @@ export function groupAgentTestFiles(files: readonly string[]) {
 export function agentTestManifest(agentRoot: string) {
   const files = agentTestFiles(agentRoot);
   const groups = groupAgentTestFiles(files);
-  // Bind both inventory and grouping, so even a changed grouping rule fails closed.
-  const sha256 = createHash('sha256').update(JSON.stringify({ files, groups })).digest('hex');
-  return { version: 1, sha256, files, groups };
+  return { version: 2, files, groups };
 }
 
 /** Explicit paths prevent Bun's substring filters from selecting another group's file. */
 function selectedAgentGroup(agentRoot: string, args: readonly string[]) {
-  if (args.length !== 2 || !args[0]?.startsWith('--group=') || !/^--manifest-sha256=[a-f0-9]{64}$/.test(args[1] ?? '')) {
-    throw new Error('Use --group=GROUP --manifest-sha256=HASH with no other test arguments');
+  if (args.length !== 2 || !args[0]?.startsWith('--group=') || !args[1]?.startsWith('--manifest=') || args[1].length === '--manifest='.length) {
+    throw new Error('Use --group=GROUP --manifest=FILE with no other test arguments');
   }
   const manifest = agentTestManifest(agentRoot);
   const group = manifest.groups.find((entry) => args[0] === `--group=${entry.id}`);
   if (!group) throw new Error('Unknown Agent test group');
-  if (args[1] !== `--manifest-sha256=${manifest.sha256}`) throw new Error('Agent test manifest differs from the CI build discovery');
-  console.log(`[agent-tests] group ${group.id}: ${group.files.length}/${manifest.files.length} files; manifest ${manifest.sha256}`);
+  assertTestManifest(args[1].slice('--manifest='.length), manifest, 'Agent');
+  console.log(`[agent-tests] group ${group.id}: ${group.files.length}/${manifest.files.length} files`);
   return group;
 }
 
@@ -134,7 +132,7 @@ export function agentGroupTestPlans(agentRoot: string, args: readonly string[]):
 
 export function agentTestMatrix(agentRoot: string) {
   const manifest = agentTestManifest(agentRoot);
-  return { include: manifest.groups.map((group) => ({ group: group.id, 'manifest-sha256': manifest.sha256 })) };
+  return { include: manifest.groups.map((group) => ({ group: group.id })) };
 }
 
 if (import.meta.main) {
@@ -145,5 +143,5 @@ if (import.meta.main) {
   } else if (mode === 'run') {
     const { runTests } = await import('./test.ts');
     await runTests(() => agentGroupTestPlans(agentRoot, args), join(agentRoot, '.test-tmp'));
-  } else throw new Error('Usage: agent-test-partitions.ts matrix|manifest|run --group=GROUP --manifest-sha256=HASH');
+  } else throw new Error('Usage: agent-test-partitions.ts matrix|manifest|run --group=GROUP --manifest=FILE');
 }

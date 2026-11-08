@@ -25,7 +25,15 @@ test('required captured mode capability cannot silently skip', () => {
 });
 const roots: string[] = [];
 const managers: ProcessManager[] = [];
-afterEach(async () => { for (const manager of managers.splice(0)) await manager.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
+afterEach(async () => {
+  const errors: unknown[] = [];
+  for (const manager of managers.splice(0)) { try { await manager.close(); } catch (error) { errors.push(error); } }
+  for (const authority of ownedAuthorities) { try { revokeContractInputAuthority(authority); } catch (error) { errors.push(error); } }
+  ownedAuthorities.clear();
+  for (const root of roots.splice(0)) { try { rmSync(root, { recursive: true, force: true }); } catch (error) { errors.push(error); } }
+  if (errors.length) throw new AggregateError(errors, 'Captured mode fixture cleanup failed');
+});
 function git(root: string, ...args: string[]) { const result = spawnSync('git', ['-C', root, ...args]); if (result.status) throw new Error(result.stderr.toString()); }
 async function fixture(nodeRuntime = false) {
   const owner = mkdtempSync(join(tmpdir(), 'captured-modes-')); roots.push(owner);
@@ -35,6 +43,7 @@ async function fixture(nodeRuntime = false) {
   git(owner, 'worktree', 'add', '--no-checkout', '-b', `input/${inputSnapshot.id}`, root, inputSnapshot.inputCommit);
   await materializeContractInput(inputSnapshot, root);
   const authority = await createContractInputAuthority({ projectRoot: owner, inputSnapshot } as Contract, root, { mutable: true, branch: `input/${inputSnapshot.id}` });
+  ownedAuthorities.add(authority);
   const manager = new ProcessManager(); managers.push(manager);
   const base = { authority, root, readAccessFilter: async () => true };
   const binding = { ...base, nodeRuntimeAdmission: nodeRuntime ? createCapturedExecNodeRuntimeAdmission(base) : undefined };

@@ -1,17 +1,18 @@
-import { fileContentDigestSync } from '../../utils/file-content.js';
+import type { RetainedFileBytes, RetainedFileSlice } from '../../utils/retained-file-bytes.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 /** Compare and publish a completed projection under the captured mutation lock. */
 import type { Stats } from 'node:fs';
-import { chmodSync, copyFileSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, unlinkSync } from 'node:fs';
+import { chmodSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, unlinkSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { assertContractInputAuthority, authorizeContractInputPath, contractInputAuthorityMutable } from '../../contract/input-authority.js';
 import { withCapturedPublication, publishWithinCapturedLease, type CapturedPublicationLease } from '../shared/captured-publication.js';
 import type { CapturedExecAuthority } from './captured-exec.js';
-export interface CapturedFileBytes { readonly digest: string; readonly mode: number }
+export interface CapturedFileBytes { readonly bytes: RetainedFileSlice; readonly mode: number }
 interface CapturedFileChange extends CapturedFileBytes { readonly path: string }
 
 export async function publishCapturedProjection(
   binding: CapturedExecAuthority,
+  bytes: { readonly originals: RetainedFileBytes; readonly changes: RetainedFileBytes },
   originals: ReadonlyMap<string, CapturedFileBytes>,
   originalDirectories: ReadonlyMap<string, number>,
   present: ReadonlySet<string>,
@@ -57,7 +58,7 @@ export async function publishCapturedProjection(
     for (const path of writes) {
       const current = physical(path);
       const original = originals.get(path);
-      if (original ? !current?.isFile() || original.digest !== fileContentDigestSync(join(binding.root, path)) || (current.mode & 0o777) !== original.mode : current !== undefined)
+      if (original ? !current?.isFile() || !bytes.originals.matchesFileSync(original.bytes, join(binding.root, path)) || (current.mode & 0o777) !== original.mode : current !== undefined)
         throw new Error('captured output conflicts with a newer member edit');
     }
     for (const [path] of changedDirectories) {
@@ -78,15 +79,19 @@ export async function publishCapturedProjection(
       }
     };
     for (const path of removedDirectories) assertCompleteRemoval(path);
+    // Validate every staged output before the first host mutation. Writes below
+    // use the independent retained bytes, so projection races cannot substitute
+    // a different payload after this final comparison.
+    for (const change of changes.values()) {
+      if (!bytes.changes.matchesFileSync(change.bytes, change.path)) throw new Error('captured output changed before publication');
+    }
     for (const [path, mode] of changedDirectories) {
       if (!originalDirectories.has(path)) mkdirSync(join(binding.root, path));
       chmodSync(join(binding.root, path), mode);
     }
     for (const [path, change] of changes) {
       const { mode } = change;
-      if (fileContentDigestSync(change.path) !== change.digest) throw new Error('captured output changed before publication');
-      copyFileSync(change.path, join(binding.root, path));
-      chmodSync(join(binding.root, path), mode);
+      bytes.changes.copyToSync(change.bytes, join(binding.root, path), mode, originals.has(path));
     }
     for (const path of removedFiles) unlinkSync(join(binding.root, path));
     // Never recursively remove a host tree: only now-empty admitted directories.

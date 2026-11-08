@@ -1,5 +1,5 @@
 import { checkCapturedInputsInBatches } from './captured-exec-validation.js';
-import { fileContentDigest } from '../../utils/file-content.js';
+import { RetainedFileBytes, type RetainedFileSlice } from '../../utils/retained-file-bytes.js';
 import { projectCapturedExecBunRuntime, type CapturedExecBunRuntimeInput } from './captured-bun-runtime-input.js';
 import { resolveProcessCapturedBunRuntimeExecutable } from '../../runtime/captured-bun-runtime.js';
 import { collectCommandNodes } from '../../runtime/permissions/normalization/ast.js';
@@ -18,7 +18,7 @@ import { projectCapturedExecDependencies, type CapturedExecDependencyInput } fro
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, openSync } from 'node:fs';
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import {
@@ -231,6 +231,8 @@ export async function runCapturedCommand(
   const operations = new AbortController();
   const operationSignal = combined ? AbortSignal.any([combined, operations.signal]) : operations.signal;
   let temporary: string | undefined;
+  let originalBytes: RetainedFileBytes | undefined;
+  let outputBytes: RetainedFileBytes | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let monitor: ReturnType<typeof setInterval> | undefined;
   let killed = false;
@@ -243,8 +245,8 @@ export async function runCapturedCommand(
   let childCompletion: Promise<number | null> | undefined;
   const paths = new Set<string>();
   let checkDependencies = async (): Promise<void> => {};
-  const authorize = (path: string): Promise<string> => executePolicyCheck(
-    () => authorizeContractInputPath(binding.authority, path, binding.readAccessFilter, operationSignal), operationSignal);
+  const authorize = (path: string, current: AbortSignal = operationSignal): Promise<string> => executePolicyCheck(
+    () => authorizeContractInputPath(binding.authority, path, binding.readAccessFilter, current), current);
   const check = async (): Promise<void> => executePolicyCheck(async () => {
     if (observer.repairCandidate) {
       if (!observer.publicationLease) throw new Error('repair requires its active publication owner');
@@ -252,7 +254,7 @@ export async function runCapturedCommand(
     }
     if (!binding.readAccessFilter) throw new Error('captured exec requires original-owner read authorization');
     await assertContractInputAuthority(binding.authority, root, combined);
-    await withContractInputReadBatch(binding.authority, () => checkCapturedInputsInBatches([...paths], async path => { await authorize(path); }, operationSignal));
+    await withContractInputReadBatch(binding.authority, () => checkCapturedInputsInBatches([...paths], async (path, current) => { await authorize(path, current); }, operationSignal));
     await checkDependencies();
     if (observer.repairCandidate) assertCapturedPublicationOwner(observer.publicationLease!, binding.authority);
   }, operationSignal);
@@ -297,33 +299,39 @@ export async function runCapturedCommand(
     temporary = await mkdtemp(join(tmpdir(), 'goodvibes-captured-exec-'));
     const projection = join(temporary, 'view');
     await mkdir(projection);
-    const originals = new Map<string, { digest: string; mode: number }>();
+    const originals = new Map<string, { bytes: RetainedFileSlice; mode: number }>();
     const originalDirectories = new Map<string, number>();
-    const populate = async (dir: string): Promise<void> => {
-      const entries = await readdir(join(root, dir), { withFileTypes: true });
-      const visit = async (entry: (typeof entries)[number]): Promise<void> => {
-        if (CONTRACT_INPUT_EXCLUSIONS.includes(entry.name as typeof CONTRACT_INPUT_EXCLUSIONS[number])) return;
-        const rel = join(dir, entry.name);
-        const source = join(root, rel);
-        try { await authorize(source); }
-        catch { await assertContractInputAuthority(binding.authority, root, combined); return; }
-        const stat = await lstat(source);
-        if (stat.isDirectory()) { originalDirectories.set(rel, stat.mode & 0o777); await mkdir(join(projection, rel), { recursive: true, mode: stat.mode & 0o777 }); await chmod(join(projection, rel), stat.mode & 0o777); await populate(rel); }
-        else if (stat.isFile() && !stat.isSymbolicLink()) {
-          const destination = join(projection, rel);
-          const digest = await fileContentDigest(source, operationSignal);
-          await copyFile(source, destination);
-          if (await fileContentDigest(destination, operationSignal) !== digest) throw new Error('captured input changed while copying');
-          await authorize(source);
-          paths.add(source);
-          originals.set(rel, { digest, mode: stat.mode & 0o777 });
-          await chmod(destination, stat.mode & 0o777);
-        }
+    const retainedOriginals = await RetainedFileBytes.capture(async capture => {
+      const populate = async (dir: string): Promise<void> => {
+        const entries = await readdir(join(root, dir), { withFileTypes: true });
+        const visit = async (entry: (typeof entries)[number], current: AbortSignal = operationSignal): Promise<void> => {
+          if (CONTRACT_INPUT_EXCLUSIONS.includes(entry.name as typeof CONTRACT_INPUT_EXCLUSIONS[number])) return;
+          const rel = join(dir, entry.name);
+          const source = join(root, rel);
+          try { await authorize(source, current); }
+          catch { current.throwIfAborted(); await assertContractInputAuthority(binding.authority, root, current); return; }
+          const stat = await lstat(source);
+          if (stat.isDirectory()) { originalDirectories.set(rel, stat.mode & 0o777); await mkdir(join(projection, rel), { recursive: true, mode: stat.mode & 0o777 }); await chmod(join(projection, rel), stat.mode & 0o777); await populate(rel); }
+          else if (stat.isFile() && !stat.isSymbolicLink()) {
+            const bytes = await capture.capture(source, current);
+            await authorize(source, current);
+            originals.set(rel, { bytes, mode: stat.mode & 0o777 });
+          }
+        };
+        for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
+        await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
       };
-      for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
-      await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
-    };
-    await withContractInputReadBatch(binding.authority, () => populate(''));
+      await withContractInputReadBatch(binding.authority, () => populate(''));
+    }, operationSignal);
+    const originalByteOwner = retainedOriginals.files;
+    originalBytes = originalByteOwner;
+    await withContractInputReadBatch(binding.authority, () => checkCapturedInputsInBatches([...originals], async ([rel, original], current) => {
+      const source = join(root, rel), destination = join(projection, rel);
+      await originalByteOwner.copyTo(original.bytes, destination, original.mode, current);
+      if (!await originalByteOwner.matchesFile(original.bytes, destination, current)) throw new Error('captured input changed while copying');
+      await authorize(source, current);
+      paths.add(source);
+    }, operationSignal));
     const candidate = observer.repairCandidate;
     let candidateRelative: string | undefined;
     if (candidate) {
@@ -451,46 +459,52 @@ export async function runCapturedCommand(
     if (invalid) throw new Error('authority changed');
     if (killed) return { cmd: command, cwd, exit_code: null, stdout: '', stderr: '', success: false, timed_out: timedOut, duration_ms: Date.now() - start };
     if (script) await rm(join(projection, script.name), { force: true });
-    const changes = new Map<string, { path: string; digest: string; mode: number }>();
+    const changes = new Map<string, { path: string; bytes: RetainedFileSlice; mode: number }>();
     const present = new Set<string>();
     const directories = new Map<string, number>();
-    const inspect = async (dir: string): Promise<boolean> => {
-      let retained = false;
-      const entries = await readdir(join(projection, dir), { withFileTypes: true });
-      const visit = async (entry: (typeof entries)[number]): Promise<void> => {
-        const rel = join(dir, entry.name);
-        const target = join(root, rel);
-        if (dependencies.mounts.some((mount) => mount.target === target)) return;
-        const reserved = CONTRACT_INPUT_EXCLUSIONS.find(name => name === entry.name);
-        if (reserved !== undefined) throw new ReservedCapturedOutput(reserved);
-        await authorize(target);
-        paths.add(target);
-        const stat = await lstat(join(projection, rel));
-        if (stat.isDirectory()) {
-          const children = await inspect(rel);
-          if (!originalDirectories.has(rel) && !children && dependencies.mounts.some((mount) => within(target, mount.target))) return;
-          directories.set(rel, stat.mode & 0o777);
-          retained = true;
-        }
-        else if (stat.isFile() && !stat.isSymbolicLink()) {
-          if (candidateRelative === rel && stat.nlink !== 1) throw new Error('repair candidate is a hardlink');
-          const path = join(projection, rel);
-          const digest = await fileContentDigest(path, operationSignal);
-          present.add(rel);
-          retained = true;
-          const previous = originals.get(rel);
-          if (previous?.digest !== digest || previous.mode !== (stat.mode & 0o777)) changes.set(rel, { path, digest, mode: stat.mode & 0o777 });
-        } else throw new Error('captured output contains an alias or special file');
+    const retainedOutputs = await RetainedFileBytes.capture(async capture => {
+      const inspect = async (dir: string): Promise<boolean> => {
+        let retained = false;
+        const entries = await readdir(join(projection, dir), { withFileTypes: true });
+        const visit = async (entry: (typeof entries)[number], current: AbortSignal = operationSignal): Promise<void> => {
+          const rel = join(dir, entry.name);
+          const target = join(root, rel);
+          if (dependencies.mounts.some((mount) => mount.target === target)) return;
+          const reserved = CONTRACT_INPUT_EXCLUSIONS.find(name => name === entry.name);
+          if (reserved !== undefined) throw new ReservedCapturedOutput(reserved);
+          await authorize(target, current);
+          paths.add(target);
+          const stat = await lstat(join(projection, rel));
+          if (stat.isDirectory()) {
+            const children = await inspect(rel);
+            if (!originalDirectories.has(rel) && !children && dependencies.mounts.some((mount) => within(target, mount.target))) return;
+            directories.set(rel, stat.mode & 0o777);
+            retained = true;
+          }
+          else if (stat.isFile() && !stat.isSymbolicLink()) {
+            if (candidateRelative === rel && stat.nlink !== 1) throw new Error('repair candidate is a hardlink');
+            const path = join(projection, rel);
+            present.add(rel);
+            retained = true;
+            const previous = originals.get(rel);
+            if (!previous || previous.mode !== (stat.mode & 0o777) || !await originalByteOwner.matchesFile(previous.bytes, path, current)) {
+              const bytes = await capture.capture(path, current);
+              changes.set(rel, { path, bytes, mode: stat.mode & 0o777 });
+            }
+          } else throw new Error('captured output contains an alias or special file');
+        };
+        for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
+        await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
+        return retained;
       };
-      for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
-      await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
-      return retained;
-    };
-    await withContractInputReadBatch(binding.authority, () => inspect(''));
+      await withContractInputReadBatch(binding.authority, () => inspect(''));
+    }, operationSignal);
+    const outputByteOwner = retainedOutputs.files;
+    outputBytes = outputByteOwner;
     await check();
     untilPattern?.assertCurrent();
     if (!candidate && contractInputAuthorityMutable(binding.authority))
-      await publishCapturedProjection(binding, originals, originalDirectories, present, directories, changes, combined, observer.publicationLease, observer.beforePublish);
+      await publishCapturedProjection(binding, { originals: originalByteOwner, changes: outputByteOwner }, originals, originalDirectories, present, directories, changes, combined, observer.publicationLease, observer.beforePublish);
     await check();
     if (candidate && candidateRelative) {
       assertCapturedPublicationOwner(observer.publicationLease!, binding.authority);
@@ -518,15 +532,19 @@ export async function runCapturedCommand(
       ...(combined?.aborted ? { cancelled: true } : {}), duration_ms: Date.now() - start };
   } finally {
     clearTimeout(timer); clearInterval(monitor);
-    if (temporary) {
-      const restoreDirectoryAccess = async (path: string): Promise<void> => {
-        const stat = await lstat(path);
-        if (!stat.isDirectory() || stat.isSymbolicLink()) return;
-        await chmod(path, (stat.mode & 0o777) | 0o700);
-        for (const name of await readdir(path)) await restoreDirectoryAccess(join(path, name));
-      };
-      await restoreDirectoryAccess(temporary);
-      await rm(temporary, { recursive: true, force: true });
+    try {
+      if (temporary) {
+        const restoreDirectoryAccess = async (path: string): Promise<void> => {
+          const stat = await lstat(path);
+          if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+          await chmod(path, (stat.mode & 0o777) | 0o700);
+          for (const name of await readdir(path)) await restoreDirectoryAccess(join(path, name));
+        };
+        await restoreDirectoryAccess(temporary);
+        await rm(temporary, { recursive: true, force: true });
+      }
+    } finally {
+      try { originalBytes?.close(); } finally { outputBytes?.close(); }
     }
   }
 }

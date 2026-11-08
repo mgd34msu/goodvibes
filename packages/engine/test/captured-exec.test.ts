@@ -1,6 +1,6 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { closeSync, openSync, ftruncateSync, statSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, openSync, ftruncateSync, chmodSync, statSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { admitCapturedExecDependency } from '../sdk/src/platform/tools/exec/captured-exec-dependencies.js';
@@ -11,11 +11,17 @@ import { assertContractInputReadAccess, createContractInputAuthority, revokeCont
 import type { Contract } from '../sdk/src/platform/contract/types.js';
 import { runCapturedCommand, probeCapturedExecAvailability, type CapturedExecAuthority } from '../sdk/src/platform/tools/exec/captured-exec.js';
 import { formatResult } from '../sdk/src/platform/tools/exec/result-format.js';
+import { publishCapturedProjection } from '../sdk/src/platform/tools/exec/captured-exec-publication.js';
+import { RetainedFileBytes } from '../sdk/src/platform/utils/retained-file-bytes.js';
 
 const roots: string[] = [];
 const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
+const retainedBundles = new Set<RetainedFileBytes>();
 afterEach(() => {
-  try { for (const authority of ownedAuthorities) revokeContractInputAuthority(authority); }
+  try {
+    for (const bundle of retainedBundles) bundle.close(); retainedBundles.clear();
+    for (const authority of ownedAuthorities) revokeContractInputAuthority(authority);
+  }
   finally { ownedAuthorities.clear(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }
 });
 const availability = await probeCapturedExecAvailability();
@@ -50,6 +56,56 @@ async function fixture(filter: (path: string) => boolean | Promise<boolean> = ()
   return { authority, root, owner, readAccessFilter: async (path) => filter(path) };
 }
 const run = (binding: CapturedExecAuthority, command: string, signal?: AbortSignal) => runCapturedCommand(binding, command, {}, binding.root, 5000, signal);
+
+async function publicationFixture() {
+  const binding = await fixture(), host = join(binding.root, 'input.txt'), added = join(binding.root, 'added.bin');
+  const original = readFileSync(host), mode = statSync(host).mode & 0o777;
+  const inputs = await RetainedFileBytes.capture(writer => writer.capture(host)); retainedBundles.add(inputs.files);
+  const staging = mkdtempSync(join(tmpdir(), 'captured-publication-test-')); roots.push(staging);
+  const first = join(staging, 'first'), second = join(staging, 'second');
+  const prepared = Buffer.from([0x61, 0xff, 0x62]);
+  writeFileSync(first, prepared); writeFileSync(second, '');
+  const outputs = await RetainedFileBytes.capture(writer => Promise.all([writer.capture(first), writer.capture(second)] as const));
+  retainedBundles.add(outputs.files);
+  const publish = (beforePublish?: () => void) => publishCapturedProjection(binding, { originals: inputs.files, changes: outputs.files },
+    new Map([['input.txt', { bytes: inputs.value, mode }]]), new Map(), new Set(['input.txt', 'added.bin']), new Map(),
+    new Map([['input.txt', { path: first, bytes: outputs.value[0], mode: 0o640 }], ['added.bin', { path: second, bytes: outputs.value[1], mode: 0o750 }]]),
+    undefined, undefined, beforePublish);
+  return { binding, host, added, original, prepared, first, second, publish };
+}
+
+test('publication preserves exact binary and empty output bytes and their selected modes', async () => {
+  const f = await publicationFixture();
+  await f.publish();
+  expect(readFileSync(f.host)).toEqual(f.prepared);
+  expect(statSync(f.host).mode & 0o777).toBe(0o640);
+  expect(readFileSync(f.added)).toEqual(Buffer.alloc(0));
+  expect(statSync(f.added).mode & 0o777).toBe(0o750);
+});
+
+for (const changed of ['owner-bytes', 'owner-mode', 'staged-output'] as const) test(`a changed ${changed} is held before any publication effect`, async () => {
+  const f = await publicationFixture();
+  await expect(f.publish(() => {
+    if (changed === 'owner-bytes') writeFileSync(f.host, 'newer member data');
+    else if (changed === 'owner-mode') chmodSync(f.host, 0o600);
+    else writeFileSync(f.second, 'unreviewed staged bytes');
+  })).rejects.toThrow(changed === 'staged-output' ? 'changed before publication' : 'newer member edit');
+  expect(readFileSync(f.host)).toEqual(changed === 'owner-bytes' ? Buffer.from('newer member data') : f.original);
+  expect(existsSync(f.added)).toBe(false);
+});
+
+test('a late projection mutation cannot substitute different bytes after final publication comparisons', async () => {
+  const f = await publicationFixture(), copy = RetainedFileBytes.prototype.copyToSync;
+  let raced = false;
+  const tap = spyOn(RetainedFileBytes.prototype, 'copyToSync').mockImplementation(function(this: RetainedFileBytes, ...args) {
+    if (!raced) { raced = true; writeFileSync(f.first, 'late first replacement'); writeFileSync(f.second, 'late second replacement'); }
+    return Reflect.apply(copy, this, args);
+  });
+  try { await f.publish(); } finally { tap.mockRestore(); }
+  expect(raced).toBe(true);
+  expect(readFileSync(f.host)).toEqual(f.prepared);
+  expect(readFileSync(f.added)).toEqual(Buffer.alloc(0));
+});
 
 test.skipIf(!supported)('reserved output gives a specific correction, publishes nothing, and permits a corrected retry', async () => {
   const binding = await fixture();

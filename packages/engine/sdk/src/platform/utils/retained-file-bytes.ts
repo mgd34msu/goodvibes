@@ -2,7 +2,7 @@
  * is unlinked before publication; only its owner's read-only descriptor lives.
  * No plaintext path, content fingerprint or reusable authority is exported.
  */
-import { closeSync, constants, fstatSync, openSync, read, unlinkSync, type BigIntStats } from 'node:fs';
+import { closeSync, constants, fchmodSync, fstatSync, ftruncateSync, lstatSync, openSync, read, readSync, unlinkSync, writeSync, type BigIntStats } from 'node:fs';
 import { lstat, mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -42,8 +42,9 @@ export class RetainedFileBytes {
     this.#ranges = ranges;
   }
 
-  /** Collection is sequential. A failed/cancelled collection owns and removes
-   * all partial bytes before rejecting. Call close() when its actual owner ends.
+  /** Payload capture is serialized; callers may prepare permissions in parallel.
+   * A failed/cancelled collection drains and removes all partial captures before
+   * rejecting. Call close() when its actual owner ends.
    */
   static async capture<T>(collect: (writer: RetainedFileCapture) => Promise<T>, signal?: AbortSignal): Promise<{ files: RetainedFileBytes; value: T }> {
     signal?.throwIfAborted();
@@ -53,6 +54,7 @@ export class RetainedFileBytes {
     const ranges = new WeakMap<RetainedFileSlice, Range>();
     const collection = new AbortController();
     const pending = new Set<Promise<RetainedFileSlice>>();
+    let tail: Promise<void> = Promise.resolve();
     let offset = 0, capturing = false, collecting = true;
     try {
       signal?.throwIfAborted();
@@ -67,7 +69,7 @@ export class RetainedFileBytes {
       const capture = async (source: string, current?: AbortSignal): Promise<RetainedFileSlice> => {
         const active = AbortSignal.any([collection.signal, ...[signal, current].filter((value): value is AbortSignal => value !== undefined)]);
         active.throwIfAborted();
-        if (!collecting || capturing) throw new Error('File snapshots must be collected sequentially');
+        if (!collecting || capturing) throw new Error('File snapshot collection ended');
         capturing = true;
         try {
           const input = await open(source, READ_FLAGS);
@@ -94,7 +96,8 @@ export class RetainedFileBytes {
         } finally { capturing = false; }
       };
       const value = await collect(Object.freeze({ capture(source: string, current?: AbortSignal) {
-        const work = capture(source, current);
+        const work = tail.then(() => capture(source, current));
+        tail = work.then(() => {}, error => { collection.abort(error); });
         pending.add(work);
         void work.then(() => pending.delete(work), () => pending.delete(work));
         return work;
@@ -180,6 +183,8 @@ export class RetainedFileBytes {
     const { fd, range } = this.selected(slice);
     const output = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK, mode);
     try {
+      const target = await output.stat({ bigint: true });
+      if (!target.isFile() || target.nlink !== 1n) throw new Error('File snapshot destination is not an ordinary owned file');
       const chunk = Buffer.allocUnsafe(Math.min(CHUNK_BYTES, range.length));
       let offset = 0;
       while (offset < range.length) {
@@ -193,6 +198,72 @@ export class RetainedFileBytes {
       this.assertSelected(slice, fd, signal);
       await output.chmod(mode);
     } finally { await output.close(); }
+  }
+
+  /** Final publication brackets cannot await between comparison and effects. */
+  matchesFileSync(slice: RetainedFileSlice, path: string): boolean {
+    const { fd, range } = this.selected(slice);
+    const candidate = openSync(path, READ_FLAGS);
+    try {
+      const before = fstatSync(candidate, { bigint: true });
+      if (!before.isFile() || before.size !== BigInt(range.length)) return false;
+      const expected = Buffer.allocUnsafe(Math.min(CHUNK_BYTES, range.length));
+      const actual = Buffer.allocUnsafe(expected.length);
+      let offset = 0;
+      while (offset < range.length) {
+        this.assertSelected(slice, fd);
+        const length = Math.min(expected.length, range.length - offset);
+        let a = 0, b = 0;
+        while (a < length) {
+          const count = readSync(fd, expected, a, length - a, range.offset + offset + a);
+          if (!count) throw new Error('Retained file bytes were truncated');
+          a += count;
+        }
+        while (b < length) {
+          const count = readSync(candidate, actual, b, length - b, offset + b);
+          if (!count) throw new Error('File changed while comparing bytes');
+          b += count;
+        }
+        if (!expected.subarray(0, length).equals(actual.subarray(0, length))) return false;
+        offset += length;
+      }
+      this.assertSelected(slice, fd);
+      if (!sameFile(before, fstatSync(candidate, { bigint: true })) || !sameFile(before, lstatSync(path, { bigint: true }))) throw new Error('File changed while comparing bytes');
+      return true;
+    } finally { closeSync(candidate); }
+  }
+
+  /** Explicit replacement is used only after the native publication owner has
+   * compared its original bytes and path topology. Writes read the retained
+   * snapshot, so a later mutation of the projected source cannot change them.
+   */
+  copyToSync(slice: RetainedFileSlice, path: string, mode: number, replace = false): void {
+    const { fd, range } = this.selected(slice);
+    const output = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | constants.O_NONBLOCK
+      | (replace ? 0 : constants.O_EXCL), mode);
+    try {
+      const target = fstatSync(output, { bigint: true });
+      if (!target.isFile() || target.nlink !== 1n) throw new Error('File snapshot destination is not an ordinary owned file');
+      this.assertSelected(slice, fd);
+      ftruncateSync(output, 0);
+      const chunk = Buffer.allocUnsafe(Math.min(CHUNK_BYTES, range.length));
+      let offset = 0;
+      while (offset < range.length) {
+        this.assertSelected(slice, fd);
+        const length = readSync(fd, chunk, 0, Math.min(chunk.length, range.length - offset), range.offset + offset);
+        if (!length) throw new Error('Retained file bytes were truncated');
+        let written = 0;
+        while (written < length) {
+          this.assertSelected(slice, fd);
+          const count = writeSync(output, chunk, written, length - written, offset + written);
+          if (!count) throw new Error('File snapshot write made no progress');
+          written += count;
+        }
+        offset += length;
+      }
+      this.assertSelected(slice, fd);
+      fchmodSync(output, mode);
+    } finally { closeSync(output); }
   }
 
   close(): void {

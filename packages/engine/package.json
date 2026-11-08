@@ -2399,6 +2399,11 @@
       "types": "./terminal-shell/dist/service-io.d.ts",
       "import": "./terminal-shell/dist/service-io.js"
     },
+    "./terminal-shell/selection-modal-queue": {
+      "bun": "./terminal-shell/src/selection-modal-queue.ts",
+      "types": "./terminal-shell/dist/selection-modal-queue.d.ts",
+      "import": "./terminal-shell/dist/selection-modal-queue.js"
+    },
     "./terminal-shell/card-field-prompts": {
       "bun": "./terminal-shell/src/card-field-prompts.ts",
       "types": "./terminal-shell/dist/card-field-prompts.d.ts",

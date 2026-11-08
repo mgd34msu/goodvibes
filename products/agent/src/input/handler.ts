@@ -37,6 +37,7 @@ import { AutocompleteEngine } from './autocomplete.ts';
 import { FilePickerModal } from './file-picker.ts';
 import { ModelPickerModal } from './model-picker.ts';
 import { SelectionModal } from './selection-modal.ts';
+import { attachSelectionModalQueue, type SelectionModalQueue } from '@goodvibes-jev/engine/terminal-shell/selection-modal-queue';
 import type { SelectionResult, SelectionAction } from './selection-modal.ts';
 import { SearchManager } from './search.ts';
 import { InputHistory } from './input-history.ts';
@@ -222,6 +223,7 @@ export class InputHandler extends TerminalInputHandlerState {
     this.bookmarkModal = new BookmarkModal(uiServices.shell.bookmarkManager);
     this.sessionPickerModal = new SessionPickerModal(uiServices.sessions.sessionManager);
     this.profilePickerModal = new ProfilePickerModal(uiServices.shell.profileManager);
+    this.selectionQueue = attachSelectionModalQueue(this);
     this.initFeedContext();
   }
 
@@ -296,6 +298,8 @@ export class InputHandler extends TerminalInputHandlerState {
    * openSelection - Open the generic selection modal with a callback.
    * The callback receives SelectionResult on selection, or null on cancel/escape.
    */
+  private readonly selectionQueue: SelectionModalQueue;
+
   public openSelection(
     title: string,
     items: import('./selection-modal.ts').SelectionItem[],
@@ -303,17 +307,14 @@ export class InputHandler extends TerminalInputHandlerState {
       | {
           preSelectId?: string;
           allowSearch?: boolean;
+          primaryVerbLabel?: string;
           customActions?: Map<string, SelectionAction>;
           onHighlight?: (item: import('./selection-modal.ts').SelectionItem | null) => void;
         }
       | undefined,
     callback: SelectionModalCallback,
   ): void {
-    this.modalOpened('selection');
-    this.selectionModal.open(title, items, opts);
-    this.selectionCallback = callback;
-    this.syncFeedSelectionCallback?.(callback);
-    this.requestRender();
+    this.selectionQueue.request({ title, items, opts, callback });
   }
 
   public registerPaste(content: string): string {

@@ -841,8 +841,7 @@ export class BrowserEngine {
 
   async closeTab(target: BrowserTarget, args: { readonly pageId: string }): Promise<Record<string, unknown>> {
     const sessionId = this.resolveSessionId(target);
-    const { page } = await this.sessions.page(sessionId, args.pageId);
-    await page.close();
+    await this.sessions.closePage(sessionId, args.pageId);
     this.snapshots.clear(sessionId, args.pageId);
     this.cardGuard?.disarm(sessionId, args.pageId);
     return { sessionId, closedPageId: args.pageId, pages: await this.sessions.pageList(sessionId) };

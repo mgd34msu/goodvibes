@@ -183,10 +183,14 @@ export interface BrowserSessionManagerDeps {
  */
 export class BrowserSessionManager {
   readonly #creations = new OwnedWork();
+  readonly #operations = new OwnedWork();
   readonly #retiring = new AbortController();
   #closing: Promise<void> | null = null;
   readonly #unpublishedContexts = new Set<BrowserContext>();
   readonly #unpublishedBrowsers = new Set<Browser>();
+  readonly #unpublishedPages = new Set<Page>();
+  readonly #pageClosures = new Map<Page, Promise<void>>();
+  readonly #contextClosures = new Map<BrowserContext, Promise<void>>();
   readonly #unpublishedHosts = new Set<BrowserHostClient>();
   readonly #hostRetirements = new Map<BrowserHostClient, Promise<void>>();
   private readonly sessions = new Map<string, TrackedSession>();
@@ -422,7 +426,7 @@ export class BrowserSessionManager {
       this.#unpublishedContexts.delete(context);
       return info;
     } catch (error) {
-      try { await context.close(); this.#unpublishedContexts.delete(context); }
+      try { await this.closeContext(context); }
       catch (cleanup) { throw new AggregateError([error, cleanup], 'The new browser could not be retired cleanly'); }
       throw error;
     }
@@ -632,17 +636,21 @@ export class BrowserSessionManager {
 
   private trackPage(session: TrackedSession, page: Page): void {
     if (this.#closing || this.sessions.get(session.sessionId) !== session) return;
+    for (const tracked of session.pages.values()) if (tracked.page === page) return;
     if (session.pageCounter >= Number.MAX_SAFE_INTEGER) throw new BrowserSessionError('Browser page references are exhausted.');
     session.pageCounter += 1;
     const pageId = `${session.sessionId}p${String(session.pageCounter)}`;
-    session.pages.set(pageId, { pageId, page });
+    const tracked = { pageId, page };
+    session.pages.set(pageId, tracked);
     session.activePageId ??= pageId;
-    page.on('close', () => {
-      session.pages.delete(pageId);
-      if (session.activePageId === pageId) {
-        session.activePageId = session.pages.keys().next().value ?? null;
-      }
-    });
+    try { page.on('close', () => { this.forgetPage(session, tracked); }); }
+    catch (error) { this.forgetPage(session, tracked); throw error; }
+  }
+
+  private forgetPage(session: TrackedSession, tracked: TrackedPage): void {
+    if (session.pages.get(tracked.pageId) !== tracked) return;
+    session.pages.delete(tracked.pageId);
+    if (session.activePageId === tracked.pageId) session.activePageId = session.pages.keys().next().value ?? null;
   }
 
   private describe(session: TrackedSession): BrowserSessionInfo {
@@ -695,13 +703,26 @@ export class BrowserSessionManager {
     return this.require(sessionId).context;
   }
 
+  private assertSessionCurrent(session: TrackedSession): void {
+    this.#assertOpen();
+    if (this.sessions.get(session.sessionId) !== session) throw new BrowserSessionError(
+      'The browser session was released or closed while this operation was pending.',
+      'Select a live browser session before starting another operation.',
+    );
+  }
+
   async page(sessionId: string, pageId?: string): Promise<{ readonly pageId: string; readonly page: Page }> {
     const session = this.require(sessionId);
+    return this.#operations.run(() => this.pageOwned(session, pageId));
+  }
+
+  private async pageOwned(session: TrackedSession, pageId?: string): Promise<TrackedPage> {
+    this.assertSessionCurrent(session);
     if (pageId) {
       const tracked = session.pages.get(pageId);
       if (!tracked) {
         throw new BrowserSessionError(
-          `Session ${sessionId} has no page ${pageId}.`,
+          `Session ${session.sessionId} has no page ${pageId}.`,
           'Call action:"tabs" to list the pages this session controls.',
         );
       }
@@ -711,29 +732,66 @@ export class BrowserSessionManager {
       const tracked = session.pages.get(session.activePageId);
       if (tracked) return { pageId: tracked.pageId, page: tracked.page };
     }
-    const created = await session.context.newPage();
-    const before = new Set(session.pages.keys());
-    const added = [...session.pages.values()].find((tracked) => !before.has(tracked.pageId) || tracked.page === created);
-    if (added) return { pageId: added.pageId, page: added.page };
-    this.trackPage(session, created);
-    const newest = [...session.pages.values()].pop();
-    if (!newest) throw new BrowserSessionError('The browser did not return a usable page.', null);
-    return { pageId: newest.pageId, page: newest.page };
+    return this.createPage(session, false);
   }
 
   async newPage(sessionId: string): Promise<{ readonly pageId: string; readonly page: Page }> {
     const session = this.require(sessionId);
+    return this.#operations.run(() => this.createPage(session, true));
+  }
+
+  private async createPage(session: TrackedSession, activate: boolean): Promise<TrackedPage> {
+    this.assertSessionCurrent(session);
     const page = await session.context.newPage();
-    const tracked = [...session.pages.values()].find((entry) => entry.page === page);
-    if (tracked) {
-      session.activePageId = tracked.pageId;
-      return tracked;
+    this.#unpublishedPages.add(page);
+    try {
+      this.assertSessionCurrent(session);
+      this.trackPage(session, page);
+      this.assertSessionCurrent(session);
+      const registered = [...session.pages.values()].find((entry) => entry.page === page);
+      if (!registered) throw new BrowserSessionError('The browser did not return a usable page.', null);
+      if (activate) session.activePageId = registered.pageId;
+      this.#unpublishedPages.delete(page);
+      return { pageId: registered.pageId, page: registered.page };
+    } catch (error) {
+      // This page was created by this exact pending operation. Never close
+      // another existing tab or the attached context/browser to clean it up.
+      try {
+        await this.retirePage(page);
+        for (const tracked of session.pages.values()) if (tracked.page === page) this.forgetPage(session, tracked);
+      }
+      catch (cleanup) { throw new AggregateError([error, cleanup], 'The unpublished browser page could not be retired cleanly'); }
+      throw error;
     }
-    this.trackPage(session, page);
-    const registered = [...session.pages.values()].find((entry) => entry.page === page);
-    if (!registered) throw new BrowserSessionError('The browser did not return a usable page.', null);
-    session.activePageId = registered.pageId;
-    return registered;
+  }
+
+  /** Close only the selected original tab; keep its actual native work owned. */
+  async closePage(sessionId: string, pageId: string): Promise<void> {
+    const session = this.require(sessionId);
+    return this.#operations.run(async () => {
+      this.assertSessionCurrent(session);
+      const tracked = session.pages.get(pageId);
+      if (!tracked) throw new BrowserSessionError(
+        `Session ${sessionId} has no page ${pageId}.`,
+        'Call action:"tabs" to list the pages this session controls.',
+      );
+      await this.retirePage(tracked.page);
+      this.forgetPage(session, tracked);
+    });
+  }
+
+  private retirePage(page: Page): Promise<void> {
+    const existing = this.#pageClosures.get(page);
+    if (existing) return existing;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    const closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    this.#unpublishedPages.add(page);
+    this.#pageClosures.set(page, closing);
+    const done = (): void => { this.#pageClosures.delete(page); this.#unpublishedPages.delete(page); resolve(); };
+    const failed = (error: unknown): void => { this.#pageClosures.delete(page); reject(error); };
+    try { void Promise.resolve(page.close()).then(done, failed); } catch (error) { failed(error); }
+    void closing.catch(() => {});
+    return closing;
   }
 
   setActivePage(sessionId: string, pageId: string): void {
@@ -749,21 +807,31 @@ export class BrowserSessionManager {
 
   async pageList(sessionId: string): Promise<readonly BrowserPageInfo[]> {
     const session = this.require(sessionId);
+    return this.#operations.run(() => this.pageListOwned(session));
+  }
+
+  private async pageListOwned(session: TrackedSession): Promise<readonly BrowserPageInfo[]> {
     const infos: BrowserPageInfo[] = [];
-    for (const tracked of session.pages.values()) {
+    for (const tracked of [...session.pages.values()]) {
+      this.assertSessionCurrent(session);
       let title = '';
       try {
         title = await tracked.page.title();
       } catch {
         title = '';
       }
+      this.assertSessionCurrent(session);
+      if (session.pages.get(tracked.pageId) !== tracked) continue;
+      const url = tracked.page.url();
+      this.assertSessionCurrent(session);
       infos.push({
         pageId: tracked.pageId,
-        url: tracked.page.url(),
+        url,
         title,
         active: tracked.pageId === session.activePageId,
       });
     }
+    this.assertSessionCurrent(session);
     return infos;
   }
 
@@ -782,8 +850,24 @@ export class BrowserSessionManager {
     }
     const info = this.describe(session);
     this.sessions.delete(sessionId);
-    await session.context.close();
-    return info;
+    return this.#operations.run(async () => { await this.closeContext(session.context); return info; });
+  }
+
+  /** Retain failures and coalesce actual native context closure across callers. */
+  private closeContext(context: BrowserContext): Promise<void> {
+    const existing = this.#contextClosures.get(context);
+    if (existing) return existing;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    const closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    this.#unpublishedContexts.add(context);
+    this.#contextClosures.set(context, closing);
+    const done = (): void => {
+      this.#contextClosures.delete(context); this.#unpublishedContexts.delete(context); resolve();
+    };
+    const failed = (error: unknown): void => { this.#contextClosures.delete(context); reject(error); };
+    try { void Promise.resolve(context.close()).then(done, failed); } catch (error) { failed(error); }
+    void closing.catch(() => {});
+    return closing;
   }
 
   /**
@@ -833,18 +917,32 @@ export class BrowserSessionManager {
       // A failed helper retirement must be reported without skipping cleanup
       // of other browsers already owned by the manager. Its unresolved work
       // and helper remain retained; failure never becomes successful drainage.
+      // Issue existing tab cleanup before disconnect, but do not join a close
+      // RPC before the disconnect that may be needed to settle that RPC.
+      // A failed first attempt stays in the set and is retried after admitted
+      // work settles; only unresolved cleanup makes shutdown fail.
+      const pageCleanups = [...this.#unpublishedPages].map(page => this.retirePage(page).catch(() => {}));
       for (const session of [...this.sessions.values()]) {
         this.sessions.delete(session.sessionId);
         try {
-          if (session.origin === 'launched') await session.context.close();
+          if (session.origin === 'launched') await this.closeContext(session.context);
           else if (session.browser) detachBrowser(session.browser);
         } catch (error) { errors.push(error); }
       }
       for (const context of this.#unpublishedContexts) {
-        try { await context.close(); this.#unpublishedContexts.delete(context); } catch (error) { errors.push(error); }
+        try { await this.closeContext(context); } catch (error) { errors.push(error); }
       }
       for (const browser of this.#unpublishedBrowsers) {
         try { detachBrowser(browser); this.#unpublishedBrowsers.delete(browser); } catch (error) { errors.push(error); }
+      }
+      await Promise.all(pageCleanups);
+      // Retiring the native connection/context interrupts its pending RPCs.
+      // Joining first could wait forever for a read that needs that disconnect.
+      if (!errors.length) await this.#operations.join();
+      // A dependency may ignore disconnect and still yield an owned new tab.
+      // Its creation callback cleans it; retry a failed cleanup before success.
+      for (const page of this.#unpublishedPages) {
+        try { await this.retirePage(page); } catch (error) { errors.push(error); }
       }
       if (errors.length) throw new AggregateError(errors, 'Browser ownership did not retire cleanly');
     }).then(resolve, reject);

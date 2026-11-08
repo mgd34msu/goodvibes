@@ -1,5 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type { JsonValue } from '@goodvibes-jev/judgment';
 import type { Contract } from './types.js';
@@ -50,7 +49,9 @@ function resultFile(root: string, head: string, path: string, identity: 'resultH
     throw new Error('publication result has an unsupported file kind or ambiguous path');
   const bytes = gitBytes(root, ['cat-file', 'blob', oid!]), text = bytes.toString('utf8');
   return [{ operation: 'read-publication-result', source: 'native-git-object', success: true, path, [identity]: head,
-    bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'),
+    // Git already identifies these immutable bytes. Do not manufacture a
+    // second content identity for the same selected publication object.
+    blobOid: oid!, mode: mode!, bytes: bytes.length,
     ...(bytes.includes(0) || !Buffer.from(text, 'utf8').equals(bytes) ? { binary: true } : { binary: false, text }) }];
 }
 

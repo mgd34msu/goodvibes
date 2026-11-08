@@ -100,6 +100,21 @@ test.each([['sha1', 1], ['sha1', 2], ['sha256', 2]] as const)('publication prese
     const head = git(setup.root, 'rev-parse', 'HEAD');
     const admission = await admitPublicationInput(setup.contract, async () => true, setup.signal, async evidence => {
       expect(JSON.stringify(evidence)).toContain('Later owner note.');
+      const state = evidence as unknown as { ownerChange: { observations: {
+        path: string;
+        acceptedResult: { resultHead?: string; blobOid?: string; mode?: string; bytes?: number; text?: string }[];
+        proposedPublication: { publicationTree?: string; blobOid?: string; mode?: string; bytes?: number; text?: string }[];
+      }[] } };
+      const report = state.ownerChange.observations.find(item => item.path === 'review.md');
+      if (!report) throw new Error('No publication report observation');
+      const accepted = report.acceptedResult[0], proposed = report.proposedPublication[0];
+      if (!accepted?.resultHead || !proposed?.publicationTree) throw new Error('No selected immutable publication trees');
+      expect(accepted).toMatchObject({ blobOid: git(setup.root, 'rev-parse', `${accepted.resultHead}:review.md`),
+        mode: '100644', bytes: Buffer.byteLength('Accepted report.\n'), binary: false, text: 'Accepted report.\n' });
+      expect(proposed).toMatchObject({ blobOid: git(setup.root, 'rev-parse', `${proposed.publicationTree}:review.md`),
+        mode: '100644', bytes: Buffer.byteLength('Accepted report.\n'), binary: false, text: 'Accepted report.\n' });
+      expect(accepted).not.toHaveProperty('sha256');
+      expect(proposed).not.toHaveProperty('sha256');
       return () => {};
     });
     expect(admission).not.toBeNull();

@@ -1,8 +1,12 @@
+import { cdpEndpointCandidates, cdpWebSocketHandshakeWorks, debuggerWebSocket, firstReachableCdpEndpoint, type ReachableCdpEndpoint } from './browser-cdp.js';
+export { cdpEndpointCandidates } from './browser-cdp.js';
+export type { ReachableCdpEndpoint } from './browser-cdp.js';
 import { assertProvisionCurrent, ownProvisionLifetime, type BrowserProvisionLifetime } from './browser-failure-reading.js';
 import { readBrowserLaunchCause } from './launch-reading.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { OwnedWork } from '../utils/owned-work.js';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { BrowserHostClient, remoteContext, type BrowserHostOptions } from './browser-host-client.js';
@@ -120,14 +124,6 @@ interface DriverApi {
   };
 }
 
-function debuggerWebSocket(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  try {
-    const url = new URL(value);
-    return (url.protocol === 'ws:' || url.protocol === 'wss:') && url.hostname && !url.hash ? value : null;
-  } catch { return null; }
-}
-
 /** Retire only our CDP client transport, never the user's browser/context. */
 function detachBrowser(browser: Browser): void {
   const connection = browser as unknown as { readonly _connection?: { close?: () => void } };
@@ -170,7 +166,7 @@ export interface BrowserSessionManagerDeps {
   /** Loads the Playwright driver. Injected so ownership rules are testable offline. */
   readonly loadDriver?: () => DriverApi | null;
   /** Finds which candidate endpoint has a browser behind it. */
-  readonly probeEndpoint?: (candidates: readonly string[]) => Promise<ReachableCdpEndpoint | null>;
+  readonly probeEndpoint?: (candidates: readonly string[], signal?: AbortSignal) => Promise<ReachableCdpEndpoint | null>;
   /** Home directory owning the managed browser cache. Defaults to the profile root's owner. */
   readonly homeDirectory?: string;
   /** Where the node-hosted browser host lives, for a build that stages it itself. */
@@ -186,6 +182,11 @@ export interface BrowserSessionManagerDeps {
  * launched. Ownership is recorded at connect time, not decided later.
  */
 export class BrowserSessionManager {
+  readonly #creations = new OwnedWork();
+  readonly #retiring = new AbortController();
+  #closing: Promise<void> | null = null;
+  readonly #unpublishedContexts = new Set<BrowserContext>();
+  readonly #unpublishedBrowsers = new Set<Browser>();
   private readonly sessions = new Map<string, TrackedSession>();
   /** Node-hosted driver processes, one per session that needed one. */
   private readonly hosts = new Map<string, BrowserHostClient>();
@@ -215,7 +216,7 @@ export class BrowserSessionManager {
   private readonly profileRoot: string;
   private readonly homeDirectory: string;
   private readonly loadDriver: () => DriverApi | null;
-  private readonly probeEndpoint: (candidates: readonly string[]) => Promise<ReachableCdpEndpoint | null>;
+  private readonly probeEndpoint: (candidates: readonly string[], signal?: AbortSignal) => Promise<ReachableCdpEndpoint | null>;
   private readonly hostOptions: BrowserHostOptions;
 
   constructor(deps: BrowserSessionManagerDeps) {
@@ -233,6 +234,18 @@ export class BrowserSessionManager {
     this.probeEndpoint = deps.probeEndpoint ?? firstReachableCdpEndpoint;
   }
 
+  #assertOpen(): void {
+    if (this.#closing) throw new BrowserSessionError('The browser service is shutting down.', 'Reconnect before starting new browser work.');
+  }
+
+  private ownLifetime<T extends BrowserProvisionLifetime>(input: T): T {
+    const original = Object.freeze({ ...input });
+    return ownProvisionLifetime(Object.freeze({ ...original,
+      signal: original.signal ? AbortSignal.any([original.signal, this.#retiring.signal]) : this.#retiring.signal,
+      assertCurrent: () => { this.#assertOpen(); assertProvisionCurrent(original); this.#assertOpen(); },
+    }));
+  }
+
   /** Install-kind-aware remediation, from the same injected IO the policy uses. */
   private driverFix(): string {
     return this.io.driverFix?.() ?? 'Install the browser driver beside the executable, or install bun or npm so it can be installed automatically.';
@@ -243,11 +256,16 @@ export class BrowserSessionManager {
   }
 
   async provision(options: BrowserProvisionLifetime & { readonly repair?: boolean | undefined; readonly allowDownload?: boolean | undefined } = {}): Promise<BrowserProvisionReport> {
-    const captured = ownProvisionLifetime(Object.freeze({ ...options }));
+    this.#assertOpen();
+    return this.#creations.run(() => this.provisionOwned(options));
+  }
+
+  private async provisionOwned(options: BrowserProvisionLifetime & { readonly repair?: boolean | undefined; readonly allowDownload?: boolean | undefined }): Promise<BrowserProvisionReport> {
+    const captured = this.ownLifetime(options);
     const { allowDownload, ...lifetime } = captured;
     const report = await ensureBrowserBinary(this.io, {
       ...lifetime,
-      forceReinstall: options.repair === true,
+      forceReinstall: captured.repair === true,
       ...(allowDownload === undefined ? {} : { allowDownload }),
     });
     assertProvisionCurrent(captured);
@@ -320,7 +338,12 @@ export class BrowserSessionManager {
    *      instead of opening one more window that will fail the same way.
    */
   async launch(options: BrowserLaunchOptions = {}): Promise<BrowserLaunchResult> {
-    options = ownProvisionLifetime(Object.freeze({ ...options }));
+    this.#assertOpen();
+    return this.#creations.run(() => this.launchOwned(options));
+  }
+
+  private async launchOwned(options: BrowserLaunchOptions): Promise<BrowserLaunchResult> {
+    options = this.ownLifetime(options);
     assertProvisionCurrent(options);
     const existing = this.liveLaunchedSession();
     if (existing) {
@@ -340,7 +363,9 @@ export class BrowserSessionManager {
       );
     }
 
-    const attempt = this.performLaunch(options)
+    // Publish single-flight ownership before a provision/driver callback can
+    // reenter launch or shutdown. All admitted callers remain in the drain.
+    const attempt = Promise.resolve().then(() => this.performLaunch(options))
       .then((info): BrowserLaunchResult => {
         this.consecutiveLaunchFailures = 0;
         return { ...info, reused: false };
@@ -350,7 +375,7 @@ export class BrowserSessionManager {
         throw error;
       })
       .finally(() => {
-        this.launchInFlight = null;
+        if (this.launchInFlight === attempt) this.launchInFlight = null;
       });
     this.launchInFlight = attempt;
     return attempt;
@@ -366,6 +391,7 @@ export class BrowserSessionManager {
     mkdirSync(profileDirectory, { recursive: true });
     const headless = options.headless ?? !hasDisplay();
     const driver = this.driver();
+    assertProvisionCurrent(options);
     let context: BrowserContext;
     try {
       context = await driver.chromium.launchPersistentContext(profileDirectory, {
@@ -378,17 +404,26 @@ export class BrowserSessionManager {
     } catch (error) {
       throw await describeLaunchFailure(error instanceof Error ? error.message : String(error), profileDirectory, options);
     }
-    try { assertProvisionCurrent(options); } catch (error) { await context.close(); throw error; }
-    return this.register({
-      origin: 'launched',
-      context,
-      browser: null,
-      profileDirectory,
-      cdpEndpoint: null,
-      executablePath: provision.executablePath,
-      source: provision.source,
-      headless,
-    });
+    this.#unpublishedContexts.add(context);
+    try {
+      assertProvisionCurrent(options);
+      const info = this.register({
+        origin: 'launched',
+        context,
+        browser: null,
+        profileDirectory,
+        cdpEndpoint: null,
+        executablePath: provision.executablePath,
+        source: provision.source,
+        headless,
+      });
+      this.#unpublishedContexts.delete(context);
+      return info;
+    } catch (error) {
+      try { await context.close(); this.#unpublishedContexts.delete(context); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], 'The new browser could not be retired cleanly'); }
+      throw error;
+    }
   }
 
   /**
@@ -396,10 +431,18 @@ export class BrowserSessionManager {
    * permanently marked attached, which is what makes closing it impossible.
    */
   async attach(options: BrowserAttachOptions): Promise<BrowserSessionInfo> {
+    this.#assertOpen();
     const requestedEndpoint = options.cdpEndpoint;
+    return this.#creations.run(() => this.attachOwned(requestedEndpoint));
+  }
+
+  private async attachOwned(requestedEndpoint: string): Promise<BrowserSessionInfo> {
+    this.#assertOpen();
     const driver = this.driver();
+    this.#assertOpen();
     const candidates = cdpEndpointCandidates(requestedEndpoint);
-    const reachable = await this.probeEndpoint(candidates);
+    const reachable = await this.probeEndpoint(candidates, this.#retiring.signal);
+    this.#assertOpen();
     if (!reachable) {
       throw new BrowserSessionError(
         `No browser is listening at ${requestedEndpoint} (tried ${candidates.join(', ')}).`,
@@ -418,11 +461,19 @@ export class BrowserSessionManager {
     let browser: Browser | null = null;
     let lastMessage = '';
     try {
+      this.#assertOpen();
       // The endpoint is already known to answer, so a long connect timeout only
       // delays an honest answer.
       browser = await driver.chromium.connectOverCDP(webSocket, { timeout: 8_000 });
+      this.#unpublishedBrowsers.add(browser);
     } catch (error) {
+      this.#assertOpen();
       lastMessage = error instanceof Error ? error.message : String(error);
+    }
+    try { this.#assertOpen(); }
+    catch (error) {
+      if (browser) { detachBrowser(browser); this.#unpublishedBrowsers.delete(browser); }
+      throw error;
     }
     if (!browser) {
       // This runtime cannot complete a CDP WebSocket handshake, so the
@@ -432,6 +483,7 @@ export class BrowserSessionManager {
         lastMessage = `${lastMessage} | host: ${error instanceof Error ? error.message : String(error)}`;
         return null;
       });
+      this.#assertOpen();
       if (hosted) return hosted;
     }
     if (!browser) {
@@ -440,6 +492,7 @@ export class BrowserSessionManager {
       // handshake" from a genuine connection problem, because the two have
       // completely different answers and only one of them is the user's doing.
       const handshake = await cdpWebSocketHandshakeWorks(webSocket);
+      this.#assertOpen();
       throw new BrowserSessionError(
         handshake
           ? `The browser at ${endpoint} is running and reachable, but this build cannot complete the debugger handshake: ${lastMessage.split('\n')[0]}`
@@ -449,25 +502,30 @@ export class BrowserSessionManager {
           : 'Restart the browser with --remote-debugging-port and try again, or use action:"launch".',
       );
     }
-    const contexts = browser.contexts();
-    const context = contexts[0];
-    if (!context) {
-      try { detachBrowser(browser); } catch { /* A failed attach still retires only its client transport. */ }
-      throw new BrowserSessionError(
+    try {
+      const contexts = browser.contexts();
+      const context = contexts[0];
+      if (!context) throw new BrowserSessionError(
         `The browser at ${requestedEndpoint} exposed no browsing context to attach to.`,
         'Open a tab in that browser and attach again.',
       );
+      const info = this.register({
+        origin: 'attached',
+        context,
+        browser,
+        profileDirectory: null,
+        cdpEndpoint: requestedEndpoint,
+        executablePath: null,
+        source: null,
+        headless: false,
+      });
+      this.#unpublishedBrowsers.delete(browser);
+      return info;
+    } catch (error) {
+      try { detachBrowser(browser); this.#unpublishedBrowsers.delete(browser); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], 'The attached browser client could not be retired cleanly'); }
+      throw error;
     }
-    return this.register({
-      origin: 'attached',
-      context,
-      browser,
-      profileDirectory: null,
-      cdpEndpoint: requestedEndpoint,
-      executablePath: null,
-      source: null,
-      headless: false,
-    });
   }
 
   /**
@@ -481,22 +539,25 @@ export class BrowserSessionManager {
     const client = new BrowserHostClient(this.hostOptions);
     await client.start();
     try {
+      this.#assertOpen();
       const attached = await client.call<{ pages: { pages: { pageId: string; url: string }[] } }>('attach', { endpoint });
+      this.#assertOpen();
       const pages = attached.pages.pages;
       if (pages.length === 0) {
         const created = await client.call<{ pageId: string }>('newPage');
+        this.#assertOpen();
         pages.push({ pageId: created.pageId, url: 'about:blank' });
       }
       const context = remoteContext(client, pages);
       const info = this.register({
-        origin: 'attached',
-        context,
-        browser: null,
-        profileDirectory: null,
-        cdpEndpoint: requestedEndpoint,
-        executablePath: null,
-        source: null,
-        headless: false,
+          origin: 'attached',
+          context,
+          browser: null,
+          profileDirectory: null,
+          cdpEndpoint: requestedEndpoint,
+          executablePath: null,
+          source: null,
+          headless: false,
       });
       this.hosts.set(info.sessionId, client);
       return info;
@@ -513,6 +574,7 @@ export class BrowserSessionManager {
     readonly source: BrowserProvisionReport['source'];
     readonly headless: boolean;
   }): BrowserSessionInfo {
+    this.#assertOpen();
     if (this.#sessionCounter >= Number.MAX_SAFE_INTEGER) throw new BrowserSessionError('Browser session references are exhausted.');
     this.#sessionCounter += 1;
     const sessionId = `b${this.#incarnation}.${String(this.#sessionCounter)}`;
@@ -532,14 +594,19 @@ export class BrowserSessionManager {
       pageCounter: 0,
     };
     this.sessions.set(sessionId, session);
-    for (const page of input.context.pages()) this.trackPage(session, page);
-    input.context.on('page', (page: Page) => {
-      this.trackPage(session, page);
-    });
-    return this.describe(session);
+    try {
+      for (const page of input.context.pages()) this.trackPage(session, page);
+      input.context.on('page', (page: Page) => { this.trackPage(session, page); });
+      this.#assertOpen();
+      return this.describe(session);
+    } catch (error) {
+      if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
+      throw error;
+    }
   }
 
   private trackPage(session: TrackedSession, page: Page): void {
+    if (this.#closing || this.sessions.get(session.sessionId) !== session) return;
     if (session.pageCounter >= Number.MAX_SAFE_INTEGER) throw new BrowserSessionError('Browser page references are exhausted.');
     session.pageCounter += 1;
     const pageId = `${session.sessionId}p${String(session.pageCounter)}`;
@@ -588,6 +655,7 @@ export class BrowserSessionManager {
   }
 
   private require(sessionId: string): TrackedSession {
+    this.#assertOpen();
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new BrowserSessionError(
@@ -719,127 +787,36 @@ export class BrowserSessionManager {
   }
 
   /** Closes only what this agent launched. Attached browsers are left running. */
-  async shutdown(): Promise<void> {
-    for (const [sessionId, host] of this.hosts) {
-      host.stop();
-      this.hosts.delete(sessionId);
-    }
-    for (const session of [...this.sessions.values()]) {
-      this.sessions.delete(session.sessionId);
-      if (session.origin !== 'launched') {
-        try { if (session.browser) detachBrowser(session.browser); } catch { /* An already disconnected transport needs no browser close. */ }
-        continue;
+  shutdown(): Promise<void> {
+    if (this.#closing) return this.#closing;
+    let resolve!: () => void, reject!: (error: unknown) => void;
+    // Publish retirement before cancellation can reenter this owner.
+    this.#closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+    this.#retiring.abort(new BrowserSessionError('The browser service is shutting down.'));
+    void this.#creations.join().then(async () => {
+      const errors: unknown[] = [];
+      for (const [sessionId, host] of this.hosts) {
+        try { host.stop(); } catch (error) { errors.push(error); }
+        this.hosts.delete(sessionId);
       }
-      try {
-        await session.context.close();
-      } catch {
-        // A browser that already exited is not an error during shutdown.
+      for (const session of [...this.sessions.values()]) {
+        this.sessions.delete(session.sessionId);
+        try {
+          if (session.origin === 'launched') await session.context.close();
+          else if (session.browser) detachBrowser(session.browser);
+        } catch (error) { errors.push(error); }
       }
-    }
-  }
-}
-
-/**
- * Endpoints to try for an attach, in order.
- *
- * A browser started with --remote-debugging-port may end up listening on IPv6
- * loopback only, in which case connecting to 127.0.0.1 hangs until it times
- * out. Accepting a bare port number and trying both loopback families turns a
- * confusing 30-second stall into a connection that just works.
- */
-export function cdpEndpointCandidates(endpoint: string): readonly string[] {
-  const trimmed = endpoint.trim();
-  const bare = /^\d+$/.test(trimmed) ? trimmed : null;
-  if (bare) return [`http://127.0.0.1:${bare}`, `http://[::1]:${bare}`];
-  if (trimmed.startsWith('ws://') || trimmed.startsWith('wss://')) return [trimmed];
-  let parsed: URL | null = null;
-  try {
-    parsed = new URL(trimmed.includes('://') ? trimmed : `http://${trimmed}`);
-  } catch {
-    return [trimmed];
-  }
-  // A proxy route, query capability or credentials select a specific debugger.
-  // Dropping them and probing only the origin could attach another browser.
-  if (parsed.pathname !== '/' || parsed.search || parsed.username || parsed.password) return [parsed.href];
-  const port = parsed.port || '9222';
-  const host = parsed.hostname;
-  const alternates = host === '127.0.0.1' || host === 'localhost'
-    ? [`http://127.0.0.1:${port}`, `http://[::1]:${port}`]
-    : host === '::1'
-      ? [`http://[::1]:${port}`, `http://127.0.0.1:${port}`]
-      : [parsed.origin];
-  return [...new Set([parsed.origin, ...alternates])];
-}
-
-export interface ReachableCdpEndpoint {
-  readonly endpoint: string;
-  readonly webSocketDebuggerUrl: string | null;
-}
-
-/** Finds which candidate endpoint actually has a browser behind it. */
-async function firstReachableCdpEndpoint(candidates: readonly string[]): Promise<ReachableCdpEndpoint | null> {
-  for (const candidate of candidates) {
-    if (candidate.startsWith('ws://') || candidate.startsWith('wss://')) {
-      const webSocketDebuggerUrl = debuggerWebSocket(candidate);
-      if (webSocketDebuggerUrl) return { endpoint: candidate, webSocketDebuggerUrl };
-      continue;
-    }
-    try {
-      const discovery = new URL(candidate);
-      discovery.pathname = `${discovery.pathname.replace(/\/$/, '')}/json/version`;
-      const response = await fetch(discovery, {
-        signal: AbortSignal.timeout(2_500),
-      });
-      if (!response.ok) continue;
-      const payload = await response.json() as { readonly webSocketDebuggerUrl?: unknown };
-      const webSocketDebuggerUrl = debuggerWebSocket(payload.webSocketDebuggerUrl);
-      if (!webSocketDebuggerUrl) continue;
-      return {
-        endpoint: candidate,
-        webSocketDebuggerUrl,
-      };
-    } catch {
-      // Try the next candidate.
-    }
-  }
-  return null;
-}
-
-/**
- * Whether a plain WebSocket can complete the debugger handshake this runtime's
- * HTTP client could not. When this succeeds and the driver still failed, the
- * browser is fine and the limitation is ours, which is what the caller is
- * told, instead of a message implying they set something up wrong.
- */
-async function cdpWebSocketHandshakeWorks(webSocketDebuggerUrl: string | null): Promise<boolean> {
-  if (!webSocketDebuggerUrl) return false;
-  return new Promise<boolean>((resolve) => {
-    let settled = false;
-    const finish = (value: boolean, socket?: WebSocket): void => {
-      if (settled) return;
-      settled = true;
-      try {
-        socket?.close();
-      } catch {
-        // Closing a socket that never opened is not an error.
+      for (const context of this.#unpublishedContexts) {
+        try { await context.close(); this.#unpublishedContexts.delete(context); } catch (error) { errors.push(error); }
       }
-      resolve(value);
-    };
-    try {
-      const socket = new WebSocket(webSocketDebuggerUrl);
-      socket.onopen = () => {
-        finish(true, socket);
-      };
-      socket.onerror = () => {
-        finish(false, socket);
-      };
-      setTimeout(() => {
-        finish(false, socket);
-      }, 3_000);
-    } catch {
-      resolve(false);
-    }
-  });
+      for (const browser of this.#unpublishedBrowsers) {
+        try { detachBrowser(browser); this.#unpublishedBrowsers.delete(browser); } catch (error) { errors.push(error); }
+      }
+      if (errors.length) throw new AggregateError(errors, 'Browser ownership did not retire cleanly');
+    }).then(resolve, reject);
+    void this.#closing.catch(() => {});
+    return this.#closing;
+  }
 }
 
 export function hasDisplay(): boolean {

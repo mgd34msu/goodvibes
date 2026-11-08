@@ -136,6 +136,15 @@ describe('synthesized knowledge serving authority', () => {
     expect((await reload()).getNode(original.id)).toEqual(original);
     expect(store.listNodeRevisions(original.id)).toHaveLength(1);
   });
+  test('metadata insertion order does not turn an unchanged activation replay into a new model reading', async () => {
+    const { store, dbPath } = await fixture(); const fake = reading();
+    const original = await store.upsertNode(input('ordered-replay', { metadata: { first: 'same', second: 'meaning' } }));
+    const bytes = readFileSync(dbPath);
+    const reordered = Object.fromEntries(Object.entries(original.metadata).reverse());
+    expect(await store.upsertNode({ ...original, metadata: reordered })).toEqual(original);
+    expect(fake.requests).toHaveLength(1);
+    expect(readFileSync(dbPath)).toEqual(bytes);
+  });
   test('a producer cannot hide replacement of served content inside a draft or stale status', async () => {
     const { store } = await fixture(); const fake = reading(); const original = await store.upsertNode(input());
     for (const status of ['draft', 'stale'] as const) await held(store.upsertNode({ ...original, status, summary: 'Unreviewed replacement' }), 'replacement-requires-review');

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { knowledgeDecisionStamp, knowledgeRawRepresentation } from './store-record-representation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
@@ -5,7 +6,7 @@ import { captureKnowledgeSourceReferences, retainKnowledgeNodeActivationReferenc
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { nodeServingWithoutReview } from './activation/battery.js';
-import { snapshotNodeInput, activationMeaning, activationSubjectIds, type ActivationSubject, activationContent, activationEvidenceHash, activationSourceIds, projectNodeActivation, type ActivationEvidence } from './activation/projection.js';
+import { snapshotNodeInput, activationMeaning, activationSubjectIds, type ActivationSubject, activationContent, activationSourceIds, projectNodeActivation, type ActivationEvidence } from './activation/projection.js';
 import { classicNodeActivation, readNodeActivations } from './activation/reader.js';
 import { KnowledgeNodeActivationHeldError as Held, NODE_ACTIVATION_LIMITS as LIMITS, type KnowledgeNodeActivationOptions } from './activation/types.js';
 import { supportHash } from './semantic/verification/projection.js';
@@ -44,8 +45,14 @@ function currentPort(): JudgmentPort | undefined { try { return judgmentPort(nod
 function evidenceFor(store: KnowledgeStore, record: KnowledgeNodeRecord): ActivationEvidence[] {
   return activationSourceIds(record).map((id) => ({ id, source: store.getSource(id), extraction: store.getExtractionBySourceId(id) }));
 }
+/** Live guards compare detached complete values. Persisted activation receipts
+ * retain their separate evidence format until its own durable migration.
+ */
+function sameActivationInput(left: unknown, right: unknown): boolean {
+  return isDeepStrictEqual(snapshotNodeInput(left), snapshotNodeInput(right));
+}
 function unchanged(draft: NodeMutationDraft): boolean {
-  return Boolean(draft.existing && supportHash(activationContent(draft.record)) === supportHash(activationContent(draft.existing)));
+  return Boolean(draft.existing && sameActivationInput(activationContent(draft.record), activationContent(draft.existing)));
 }
 function isRecord(value: unknown): value is Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value); }
 
@@ -85,7 +92,7 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
     const references = actualEvidence.map(({ source, extraction }) => captureKnowledgeSourceReferences(store, source, extraction));
     const evidence = snapshotNodeInput(actualEvidence);
     const changedEvidence = stage !== undefined
-      && (activationEvidenceHash(stage.evidenceFor(draft.record)) !== activationEvidenceHash(evidenceFor(store, draft.record))
+      && (!sameActivationInput(stage.evidenceFor(draft.record), evidenceFor(store, draft.record))
         || (stage.invalidatesRetainedObservations === true && draft.existing?.metadata.nodeObservation !== undefined));
     // Retained observations describe their original evidence, never a staged replacement.
     const observed = draft.authority || draft.observation || draft.restoration || changedEvidence ? undefined : getKnowledgeNodeObservation(draft.existing, draft.record);
@@ -107,7 +114,7 @@ async function prepareOwnedNodeActivationPass(store: KnowledgeStore, drafts: rea
       nodeObservation: { version: 1, origin: observation.origin },
       reviewProvenance: knowledgeDecisionStamp(draft.now, { state: 'explicit', reason: `Observed ${observation.origin} projection; untrusted origin retained; no synthesized claim or operator review` }) } }, record);
     if (input.status === 'stale' || input.status === 'draft' || (existing?.status === 'stale' && input.status !== 'active')) {
-      if (existing?.status === 'active' && supportHash(activationMeaning(existing)) !== supportHash(activationMeaning(record))) {
+      if (existing?.status === 'active' && !sameActivationInput(activationMeaning(existing), activationMeaning(record))) {
         throw new Held('replacement-requires-review');
       }
       if (existing?.status === record.status && unchanged(draft) && record.metadata.reviewProvenance !== undefined) return existing;
@@ -179,10 +186,10 @@ export function assertPreparedNodeWrites(store: KnowledgeStore, token: Knowledge
     const sameSlug = store.getNodeByKindAndSlug(draft.record.kind, draft.record.slug);
     if (sameSlug && sameSlug.id !== draft.record.id) throw new Held('stale');
     const current = draft.input.id ? store.getNode(draft.input.id) : store.getNodeByKindAndSlug(draft.input.kind, draft.input.slug);
-    if (supportHash(current ?? null) !== supportHash(pass.committed.get(draft.record.id) ?? draft.existing ?? null)
-      || (!draft.authority && !draft.observation && !draft.restoration && activationEvidenceHash(pass.stage?.evidenceFor(draft.record) ?? evidenceFor(store, draft.record)) !== activationEvidenceHash(draft.evidence))) throw new Held('stale');
+    if (!sameActivationInput(current ?? null, pass.committed.get(draft.record.id) ?? draft.existing ?? null)
+      || (!draft.authority && !draft.observation && !draft.restoration && !sameActivationInput(pass.stage?.evidenceFor(draft.record) ?? evidenceFor(store, draft.record), draft.evidence))) throw new Held('stale');
     for (const subject of draft.subjects) {
-      if (supportHash(store.getNode(subject.id)) !== supportHash(pass.committed.get(subject.id) ?? subject.node)) throw new Held('stale');
+      if (!sameActivationInput(store.getNode(subject.id), pass.committed.get(subject.id) ?? subject.node)) throw new Held('stale');
     }
     draft.restoration?.();
     draft.observed?.assertCurrent();
@@ -221,8 +228,8 @@ export function markPreparedNodeWritten(token: KnowledgePreparedNodeWrites, inde
     const sources = snapshotNodeInput(evidenceFor(pass.store, draft.record));
     const subjects = snapshotNodeInput(activationSubjectIds(draft.record).map((id) => ({ id, node: pass.store.getNode(id) })));
     retainedWrites.set(draft.record, { store: pass.store, scope: pass.scope, check: () => {
-      if (activationEvidenceHash(evidenceFor(pass.store, draft.record)) !== activationEvidenceHash(sources)
-        || subjects.some(({ id, node }) => supportHash(pass.store.getNode(id)) !== supportHash(node))) throw new Held('stale');
+      if (!sameActivationInput(evidenceFor(pass.store, draft.record), sources)
+        || subjects.some(({ id, node }) => !sameActivationInput(pass.store.getNode(id), node))) throw new Held('stale');
       draft.observation?.checkEvidence();
     } });
   } catch { /* This record cannot be used as a prepared compensation capability. */ }

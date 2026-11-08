@@ -3,7 +3,7 @@ import type { JsonValue } from '@goodvibes-jev/judgment';
 import { assertJudgmentInput, captureOwnedJson } from '../../gate/judgment-input.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import { isGeneratedKnowledgeSource } from '../generated-projections.js';
-import { freezeSupport, supportHash } from '../semantic/verification/projection.js';
+import { freezeSupport } from '../semantic/verification/projection.js';
 import type { KnowledgeExtractionRecord, KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import { KnowledgeNodeActivationHeldError as Held, NODE_ACTIVATION_LIMITS as LIMITS } from './types.js';
 
@@ -45,7 +45,6 @@ export interface ActivationEvidence {
   readonly source: KnowledgeSourceRecord | null;
   readonly extraction: KnowledgeExtractionRecord | null;
 }
-export function activationEvidenceHash(evidence: readonly ActivationEvidence[]): string { return supportHash(evidence); }
 /** Database IDs, timestamps and unrelated metadata are never transmitted or generically exempted from privacy checks. */
 export function projectNodeActivation(node: KnowledgeNodeRecord, evidence: readonly ActivationEvidence[], subjects: readonly ActivationSubject[] = [], observed?: { readonly record: KnowledgeNodeRecord; readonly origin: string }, references: readonly (object | undefined)[] = []): { readonly state: Record<string, JsonValue>; readonly reason?: 'missing-evidence' | 'foreign-space' } {
   const content: Record<string, unknown> = {};

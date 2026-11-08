@@ -33,6 +33,7 @@ import type { ContractIntegrationInspection } from './integration-inspection-wir
  */
 import { assertDurableCheckpoint, DurableContractAdmissions, DurableContractAdmissionError, durableKeyIdentity, durablePayloadRevision, sameDurableRequest, freezeDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractBoundary, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from './durable-admission.js';
 import { spawnSync } from 'node:child_process';
+import { resolveContractGitPlacement } from './git-placement.js';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ContractEvent } from '../../events/contract.js';
@@ -231,6 +232,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   const now = deps.now ?? Date.now;
   const durableAdmissions = new DurableContractAdmissions(deps.store.projectRoot);
   const durableLeases = new Map<string, () => void>();
+  // Placement is prepared before a ContractRun exists. Disposal still owns
+  // those children, and admission awaits their real close before releasing its lease.
+  const placementAbort = new AbortController();
   const listeners = new Set<(event: ContractEvent) => void>();
   const runs = new Map<string, ContractRun>();
   const settlements = new Map<string, { readonly promise: Promise<void>; readonly resolve: () => void }>();
@@ -663,7 +667,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       durableLeases.set(id, lease);
       try {
         requireDecisionFeature('autonomous contract planning and acceptance');
-        const execution = resolveExecution(frozen.input, id);
+        const execution = await resolveContractGitPlacement(frozen.input.isolation ?? env.config().isolation,
+          frozen.input.projectRoot, id, placementAbort.signal);
+        if (disposed) throw new Error('Contract runner is disposed');
+        requireDecisionFeature('autonomous contract planning and acceptance');
         const owner = spawnOwner(frozen.input, id);
         const admission = parseDurableAdmission({ ...frozen, schemaVersion: 2, execution, contractId: id,
           ownerAgentId: owner.id, payloadRevision: durablePayloadRevision(frozen) });
@@ -1258,6 +1265,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     dispose: () => {
       if (disposed) return;
       disposed = true;
+      placementAbort.abort(new Error('Contract runner is disposed'));
       for (const run of new Set([...runs.values(), ...settling.values()])) {
         const json = serializeContract(run.contract, now());
         disposalCheckpoints.set(run.id, json === null ? null : deserializeContract(json));

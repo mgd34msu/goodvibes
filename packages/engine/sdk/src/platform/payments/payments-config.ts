@@ -177,6 +177,7 @@ export function readPaymentsServiceConfig(config: PaymentsConfigReader): Payment
     approvalMinutes: readInteger(config, 'payments.windows.approvalMinutes', 60),
     // Design default: 10 minutes, enough time to just say so.
     vetoMinutes: readInteger(config, 'payments.windows.vetoMinutes', 10),
+    merchantPolicy: readMerchantPolicy(config),
   };
 }
 

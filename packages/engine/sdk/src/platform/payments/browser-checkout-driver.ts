@@ -95,6 +95,7 @@
  * budget reservation reflect which one actually happened.
  */
 import type { CardFieldKind } from './card-redaction.js';
+import { captureCheckoutOwnership } from './checkout-ownership.js';
 import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type PageIdentity } from './checkout-page.js';
 
 /**
@@ -139,7 +140,7 @@ export interface CheckoutBrowserEngine {
     args: { readonly fills: readonly { readonly ref: string; readonly value: string }[] },
     ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined },
   ) => Promise<Record<string, unknown>>;
-  select: (target: CheckoutEngineTarget, args: { readonly ref: string; readonly values: readonly string[] }) => Promise<Record<string, unknown>>;
+  select: (target: CheckoutEngineTarget, args: { readonly ref: string; readonly values: readonly string[] }, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }) => Promise<Record<string, unknown>>;
   click: (target: CheckoutEngineTarget, args: { readonly ref: string }, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }) => Promise<Record<string, unknown>>;
 }
 
@@ -264,9 +265,12 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     return engine;
   }
 
-  async url(): Promise<string> {
+  async url(ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<string> {
+    const owner = captureCheckoutOwnership(ownership);
     const engine = await this.engine();
+    owner.assertCurrent();
     const listing = await engine.tabs({ sessionId: this.sessionId });
+    owner.assertCurrent();
     const pages = listing['pages'];
     if (Array.isArray(pages)) {
       for (const entry of pages) {
@@ -285,9 +289,11 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
   }
 
   async fill(target: string, value: string, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<void> {
+    const owner = captureCheckoutOwnership(ownership);
     const engine = await this.engine();
-    ownership?.assertCurrent();
-    await engine.type(this.target, { ref: target, text: value }, ownership);
+    owner.assertCurrent();
+    await engine.type(this.target, { ref: target, text: value }, owner);
+    owner.assertCurrent();
   }
 
   async fillSecrets(
@@ -324,9 +330,12 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     };
   }
 
-  async choose(target: string, value: string): Promise<void> {
+  async choose(target: string, value: string, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<void> {
+    const owner = captureCheckoutOwnership(ownership);
     const engine = await this.engine();
-    await engine.select(this.target, { ref: target, values: [value] });
+    owner.assertCurrent();
+    await engine.select(this.target, { ref: target, values: [value] }, owner);
+    owner.assertCurrent();
   }
 
   async submitOrder(target: string, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<{
@@ -336,14 +345,18 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     readonly verified: boolean;
   }> {
     let result: Record<string, unknown>;
+    let enteredClick = false;
     try {
+      const owner = captureCheckoutOwnership(ownership);
       const engine = await this.engine();
-      try { ownership?.assertCurrent(); } catch { throw new CheckoutSubmitRefused('The stored address changed before submission.'); }
-      const current = ownership && { ...ownership, assertCurrent: () => {
-        try { ownership.assertCurrent(); } catch { throw new CheckoutSubmitRefused('The stored address changed before submission.'); }
+      owner.assertCurrent();
+      const current = { ...owner, assertCurrent: () => {
+        try { owner.assertCurrent(); } catch { throw new CheckoutSubmitRefused('The original purchase owner or stored address changed before submission.'); }
       } };
+      enteredClick = true;
       result = await engine.click(this.target, { ref: target }, current);
     } catch (error) {
+      if (!enteredClick) throw new CheckoutSubmitRefused('The original checkout owner or browser became unavailable before submission.');
       throw asSubmitFailure(error);
     }
     const url = readUrl(result) ?? await this.url();

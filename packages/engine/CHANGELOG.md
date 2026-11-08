@@ -4,6 +4,15 @@
 
 ### Fixed
 
+- Retain original checkout inputs and current transport/payment/page ownership
+  through asynchronous readings and execution. Stop new parallel readings on
+  failure, drain admitted siblings, release known pre-submit holds and preserve
+  uncertain submits. Finish accounting for observed completed charges after
+  caller cancellation. Keep card redaction bound to exact session/page identities
+  until the page owner clears the material.
+- Pass merchant additions, exclusions and seller thresholds from live settings
+  into the actual checkout service.
+
 - Keep checkout-owned budget reservations across expiry, day rollover and restart
   until explicit settlement. Preserve damaged accounting and disable payment
   budget operations instead of reopening empty pools. Upgrade existing holds

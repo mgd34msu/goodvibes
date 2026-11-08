@@ -185,7 +185,7 @@ export async function fillCard(
   assertCheckout();
 
   // ── 2. The page must still be the merchant the purchase was decided for ──
-  const pageUrl = await driver.url();
+  const pageUrl = await driver.url({ signal, assertCurrent: assertCheckout });
   assertCheckout();
   const validation = await validateLinkTarget(pageUrl, checkout.merchantDomain, signal);
   assertCheckout();

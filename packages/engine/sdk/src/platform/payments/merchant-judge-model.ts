@@ -37,7 +37,8 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  *
  * An empty domain is not asked about; there is nothing to read.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { merchantReading, merchantView, type RecourseKind } from './batteries/merchant.js';
 import type { MarketplaceKind, MerchantJudgeInput, MerchantJudgePort, MerchantJudgement } from './merchant-recourse.js';
 
@@ -60,13 +61,16 @@ const MARKETPLACE_KINDS: Readonly<Record<RecourseKind, MarketplaceKind>> = {
 };
 
 /** Judge one validated registrable domain through the installed judgment port. */
-export async function judgeMerchant(input: MerchantJudgeInput): Promise<MerchantJudgement> {
+export async function judgeMerchant(input: MerchantJudgeInput, ownership: CheckoutOperationOwnership = {}): Promise<MerchantJudgement> {
   requireDecisionFeature('merchant reputation and recourse assessment');
+  const current = captureCheckoutOwnership(ownership);
   const domain = input.registrableDomain.trim().toLowerCase();
   if (domain.length === 0) {
     return { qualifies: false, confident: false, recourse: 'I could not establish which domain this checkout is on' };
   }
-  const run = await merchantReading.run(judgmentPort(MERCHANT_SITE), merchantView(domain), { site: MERCHANT_SITE });
+  const owner = captureJudgmentPort(MERCHANT_SITE, current);
+  const run = await merchantReading.run(owner.port, merchantView(domain), { site: MERCHANT_SITE, signal: owner.signal });
+  owner.assertCurrent();
   const { qualifies, recourse } = run.readings;
   const recourseKind = recourse.choice as RecourseKind;
   const bothAct = qualifies.outcome === 'act' && recourse.outcome === 'act';

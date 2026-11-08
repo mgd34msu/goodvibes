@@ -34,6 +34,8 @@ export type {
 } from './types.js';
 
 export { dayKey, sameDay, isValidTimezone, resolveTimezone } from './day.js';
+export { CheckoutOwnershipError } from './checkout-ownership.js';
+export type { CheckoutOperationOwnership } from './checkout-ownership.js';
 export type { DayKey } from './day.js';
 
 export { BudgetLedger, RESERVATION_TTL_MS, MAX_RESERVATIONS } from './budget.js';

@@ -59,6 +59,7 @@
  * their explicit instructions, not a cache of someone's guesses.
  */
 import { registrableDomain } from '../security/public-suffix.js';
+import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import {
   DEFAULT_MARKETPLACE_LISTING_THRESHOLDS,
   evaluateMarketplaceListing,
@@ -122,7 +123,7 @@ export interface MerchantJudgement {
  * Tests supply doubles.
  */
 export interface MerchantJudgePort {
-  judge(input: MerchantJudgeInput): Promise<MerchantJudgement>;
+  judge(input: MerchantJudgeInput, ownership?: CheckoutOperationOwnership): Promise<MerchantJudgement>;
 }
 
 export type MarketplacePolicy = 'major' | 'requires-approval' | 'first-party-only';
@@ -212,7 +213,9 @@ export async function classifyMerchant(
   merchant: MerchantIdentity,
   judge: MerchantJudgePort,
   policy: MerchantPolicy = {},
+  ownership: CheckoutOperationOwnership = {},
 ): Promise<MerchantVerdict> {
+  const owner = captureCheckoutOwnership(ownership);
   const registrable = registrableDomain(merchant.checkoutHost.trim().toLowerCase());
   if (registrable === null) {
     return {
@@ -252,7 +255,8 @@ export async function classifyMerchant(
 
   let judgement: MerchantJudgement | null = null;
   if (!ownerAdded) {
-    judgement = await judge.judge({ registrableDomain: registrable });
+    judgement = await judge.judge({ registrableDomain: registrable }, owner);
+    owner.assertCurrent();
   }
 
   // 4. Marketplace policy, when the judgement says this is one.

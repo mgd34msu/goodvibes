@@ -1694,6 +1694,34 @@ tool-permission cards continue to answer their own broker.
 Full operation status across disconnect/restart and a detached checkout start
 remain unfinished (§8.6).
 
+### 10.3.1 Checkout ownership while a request is running
+
+The flow captures the original request, checkout reading, controls, limits and
+merchant policy before its first asynchronous step. Changing a borrowed input
+does not replace the purchase that was admitted. The daemon's begin and card-fill
+handlers retain the original transport authorization, payment configuration,
+browser composition and cancellation signal. A change stops further execution.
+Cart, recurring-charge, merchant and shipping readings receive that owning signal;
+parallel readings stop admitting work on failure and drain admitted siblings.
+
+Known failures before submission release the checkout's journal and held budget.
+After the native click actuator has been entered, a later cancellation or stale
+source error is an uncertain outcome. It cannot be relabelled as a pre-click
+refusal to free the hold or permit a retry. Accounting for an observed completed
+submission still finishes if its original caller is cancelled. New notifications
+require current authority.
+
+A submit does not establish that card fields disappeared from the page. Card
+redaction remains bound to the exact session/page until its page owner clears
+the material on navigation or close. Abandoning an operation keeps protection
+for any values still present, including a partial fill.
+
+Merchant additions, exclusions and seller thresholds from the payment settings
+are passed into the service's actual checkout policy. Exclusions make an
+otherwise established merchant require approval; additions establish recourse
+without another merchant reading. The budget and other unconditional refusals
+still apply.
+
 ### 10.4 The master switch is a plain config key, not the SDK's flag registry
 
 **Correction (2026-08-21, v2.0.19):** this section previously said the

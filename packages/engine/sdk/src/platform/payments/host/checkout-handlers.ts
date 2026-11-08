@@ -1,4 +1,7 @@
 import { PostalAddressHeldError } from '../../config/postal-address.js';
+import { mapLimit } from '@goodvibes-jev/judgment';
+import { retainCheckoutInvocation } from './checkout-invocation.js';
+import type { CheckoutOperationOwnership } from '../checkout-ownership.js';
 /**
  * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
  *
@@ -270,17 +273,23 @@ function fillCardResultView(result: Awaited<ReturnType<PaymentsGatewayServiceImp
  * `PaymentsGatewayServiceImpl`, because `GateInput` is a plain synchronous
  * record and this daemon's card-material check is async.
  */
-async function hasUsableCard(cards: DaemonCardStore, cardId: string): Promise<boolean> {
+async function hasUsableCard(cards: DaemonCardStore, cardId: string, owner: CheckoutOperationOwnership): Promise<boolean> {
+  owner.assertCurrent?.();
   if (cardId.length === 0) return false;
   const metadata = await cards.metadata(cardId);
+  owner.assertCurrent?.();
   if (metadata === null) return false;
-  return cards.materialComplete(cardId);
+  const complete = await cards.materialComplete(cardId);
+  owner.assertCurrent?.();
+  return complete;
 }
 
 /** Same reasoning as `hasUsableCard`: an async read, resolved before `GateInput` is built. */
-async function hasShippingAddress(addresses: AddressStore, signal?: AbortSignal): Promise<boolean> {
+async function hasShippingAddress(addresses: AddressStore, owner: CheckoutOperationOwnership): Promise<boolean> {
   try {
-    const stored = await addresses.read('shipping', { signal });
+    owner.assertCurrent?.();
+    const stored = await addresses.read('shipping', { signal: owner.signal });
+    owner.assertCurrent?.();
     return checkAddress(stored, 'shipping').ok;
   } catch (error) {
     if (error instanceof PostalAddressHeldError) throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
@@ -597,33 +606,39 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
       throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
     }
 
+    const isOwnerDirectRequest = context.explicitUserRequest === true;
+    const signal = context.signal;
+    const owner = isOwnerDirectRequest ? retainCheckoutInvocation(deps, seam, context)
+      : { signal, assertCurrent: () => signal?.throwIfAborted() };
+
     // The approval is only consulted INSIDE the outer explicitUserRequest
     // layer: a call that never claimed to be owner-direct falls through to
     // the service, whose own gate refuses it `refused:not-owner-request`
     // exactly as before this record existed. Consuming an approval for a
     // call that outer layer was always going to refuse would spend the
     // owner's answer on nothing.
-    if (context.explicitUserRequest) {
+    if (isOwnerDirectRequest) {
       consumeCheckoutApproval(deps.checkout.approvals, input);
     }
 
-    const [usableCard, shippingAddress] = await Promise.all([
-      hasUsableCard(deps.cards, input.cardId),
-      hasShippingAddress(deps.checkout.addresses, context.signal),
-    ]);
+    const [usableCard, shippingAddress] = await mapLimit([
+      () => hasUsableCard(deps.cards, input.cardId, owner),
+      () => hasShippingAddress(deps.checkout.addresses, owner),
+    ], 2, read => read());
+    owner.assertCurrent();
 
     // Written immediately before the call it applies to, with no `await`
     // between: see `CheckoutGateInputsCell`'s own doc comment for why that
     // ordering is what keeps this safe under concurrent calls.
     holder.gateInputs.current = {
-      hasUsableCard: usableCard,
-      hasShippingAddress: shippingAddress,
-      isOwnerDirectRequest: context.explicitUserRequest,
+      hasUsableCard: usableCard === true,
+      hasShippingAddress: shippingAddress === true,
+      isOwnerDirectRequest,
     };
     const service = holder.serviceFor(seam);
 
     try {
-      const result = await service.beginCheckout(input, { signal: context.signal });
+      const result = await service.beginCheckout(input, owner);
       return beginResultView(result);
     } catch (error) {
       // `CheckoutRegistryError` (a second `begin` finding one already in
@@ -662,10 +677,11 @@ export function checkoutFillCardHandler(deps: PaymentsHandlerDeps, holder: Check
       throw new HandlerError(CHECKOUT_UNAVAILABLE_MESSAGE, 'FAILED_PRECONDITION', 409);
     }
 
+    const owner = retainCheckoutInvocation(deps, seam, context);
     const service = holder.serviceFor(seam);
 
     try {
-      const result = await service.fillCardIntoCheckout(input, { signal: context.signal });
+      const result = await service.fillCardIntoCheckout(input, owner);
       return fillCardResultView(result);
     } catch (error) {
       // A `FillCardRefusal` is the owner's business and carries no material

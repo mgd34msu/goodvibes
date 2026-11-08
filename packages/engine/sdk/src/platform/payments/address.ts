@@ -1,4 +1,6 @@
 import type { PostalReadOptions } from '../config/postal-address.js';
+import { captureOwnedJson } from '../gate/judgment-input.js';
+import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 /**
  * address.ts, the address on the order is the one the owner stored.
  *
@@ -126,7 +128,7 @@ export function checkAddress(address: PostalAddress | null, kind: AddressKind): 
   };
 }
 
-export interface AddressFillDeps {
+export interface AddressFillDeps extends CheckoutOperationOwnership {
   readonly store: AddressStore;
   readonly fill: (target: string, value: string) => Promise<void>;
 }
@@ -149,14 +151,19 @@ export async function fillAddresses(
   targets: readonly AddressFieldTarget[],
   deps: AddressFillDeps,
 ): Promise<AddressFillResult> {
+  deps = { ...deps };
+  targets = targets.map(target => Object.freeze({ ...target }));
+  const owner = captureCheckoutOwnership(deps);
+  const storedOwner = captureCheckoutOwnership({ signal: owner.signal, assertCurrent: deps.store.assertCurrent?.bind(deps.store) });
+  const current = () => { owner.assertCurrent(); storedOwner.assertCurrent(); };
   const kinds = [...new Set(targets.map((entry) => entry.kind))];
   const resolved = new Map<AddressKind, PostalAddress>();
 
   try {
     for (const kind of kinds) {
-      deps.store.assertCurrent?.();
-      const address = await deps.store.read(kind);
-      deps.store.assertCurrent?.();
+      current();
+      const address = captureOwnedJson(await deps.store.read(kind, { signal: owner.signal })) as PostalAddress | null;
+      current();
       const check = checkAddress(address, kind);
       if (!check.ok || address === null) {
         return { ok: false, filled: 0, failedField: `${kind}.${check.missing[0] ?? 'address'}`, reason: check.reason };
@@ -174,9 +181,9 @@ export async function fillAddresses(
     // clear whatever the page had rather than leaving it alone.
     if (value.trim().length === 0 && entry.field === 'line2') continue;
     try {
-      deps.store.assertCurrent?.();
+      current();
       await deps.fill(entry.target, value);
-      deps.store.assertCurrent?.();
+      current();
     } catch {
       return {
         ok: false,

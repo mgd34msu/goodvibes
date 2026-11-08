@@ -67,6 +67,8 @@
 import { assertCartMatchesRequest, detectRecurringCharge, type RequestedLine } from './cart.js';
 import { checkPaymentGates, type GateInput } from './gates.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { captureOwnedJson } from '../gate/judgment-input.js';
+import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { decidePurchase, type BudgetDraw } from './decide.js';
 import { readShippingTiers } from './shipping.js';
 import { evaluatePaymentTaint, type OwnerOriginIntent } from './taint-gate.js';
@@ -161,8 +163,7 @@ export type { PurchaseRecord } from './purchase-record.js';
 export type { PurchaseLedger, PaymentNotifier } from './payment-ports.js';
 import type { PurchaseLedger, PaymentNotifier } from './payment-ports.js';
 
-export interface CheckoutFlowDeps {
-  readonly signal?: AbortSignal | undefined;
+export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
   readonly registry: CheckoutRegistry;
   readonly cards: CardMaterialStore;
   /**
@@ -261,13 +262,56 @@ export async function runCheckout(
   deps: CheckoutFlowDeps,
 ): Promise<CheckoutOutcome> {
   requireDecisionFeature('automated checkout cart and merchant interpretation');
+  deps = { ...deps };
+  const input = captureOwnedJson({ request, reading, controls, gates: deps.gates, limits: deps.limits,
+    merchantPolicy: deps.merchantPolicy }) as {
+    request: PurchaseRequest; reading: RawCheckoutReading; controls: CheckoutControls;
+    gates: GateInput; limits: BudgetLimits; merchantPolicy: MerchantPolicy | undefined;
+  };
+  const owner = captureCheckoutOwnership(deps);
+  const lifecycle: CheckoutExecutionLifetime = { current: owner.assertCurrent, submitMayHaveHappened: false };
+  try {
+    return await runOwnedCheckout(input.request, input.reading, input.controls,
+      { ...deps, gates: input.gates, limits: input.limits, merchantPolicy: input.merchantPolicy }, lifecycle);
+  } catch (error) {
+    if (lifecycle.release && !lifecycle.submitMayHaveHappened) {
+      try { await lifecycle.release(); }
+      catch { throw new Error('Checkout stopped before submission, but its journal or budget hold could not be released. Inspect this purchase before retrying.'); }
+    }
+    throw error;
+  }
+}
+
+interface CheckoutExecutionLifetime {
+  readonly current: () => void;
+  release?: (() => Promise<void>) | undefined;
+  submitMayHaveHappened: boolean;
+}
+
+async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutReading, controls: CheckoutControls,
+  deps: CheckoutFlowDeps, lifecycle: CheckoutExecutionLifetime): Promise<CheckoutOutcome> {
   const { registry, driver, ledger, notifier, now } = deps;
   const signal = deps.signal;
-  signal?.throwIfAborted();
+  let originalPage: ReturnType<CheckoutPageDriver['identity']> | undefined;
+  let identityReader: CheckoutPageDriver['identity'] | undefined;
+  const current = (): void => {
+    lifecycle.current();
+    if (originalPage && identityReader) {
+      if (driver.identity !== identityReader) throw new CheckoutOwnershipError();
+      const page = identityReader.call(driver);
+      if (page.sessionId !== originalPage.sessionId || page.pageId !== originalPage.pageId) throw new CheckoutOwnershipError();
+    }
+  };
+  const ownership = { signal, assertCurrent: current };
+  current();
 
   // ── 0. Terminal gates ───────────────────────────────────────────────────
   const gateRefusal = checkPaymentGates(deps.gates);
   if (gateRefusal !== null) return refused(gateRefusal.code, gateRefusal.reason);
+  identityReader = driver.identity;
+  const identity = Object.freeze({ ...identityReader.call(driver) });
+  originalPage = identity;
+  current();
 
   // ── 0b. Taint: what is named must trace back to the owner ───────────────
   //
@@ -289,13 +333,15 @@ export async function runCheckout(
     item: request.item,
     requestedMax: request.requestedMax,
   };
-  const taint = await evaluatePaymentTaint({ intent, ledger: deps.untrusted });
+  const taint = await evaluatePaymentTaint({ intent, ledger: deps.untrusted, signal });
+  current();
   if (!taint.allowed) {
     return refused('derived-from-untrusted-content', taint.reason ?? 'Refused: this purchase derives from page content.');
   }
 
   // ── 0c. The checkout url must resolve, and must be the domain claimed ───
-  const link = await validateLinkTarget(request.checkoutUrl, request.merchantDomain);
+  const link = await validateLinkTarget(request.checkoutUrl, request.merchantDomain, signal);
+  current();
   if (!link.ok) return refused('link-validation-failed', link.message);
   // The identity the owner is shown is computed by us from the validated url,
   // never a name the page claimed for itself.
@@ -319,7 +365,9 @@ export async function runCheckout(
     },
     deps.merchantJudge,
     deps.merchantPolicy ?? {},
+    ownership,
   );
+  current();
   if (merchantVerdict.refused === true) {
     // Terminal, and deliberately not an approval: there is no final total to
     // show the owner, so the flow the owner authorised has nothing to run on.
@@ -332,18 +380,21 @@ export async function runCheckout(
   const checkout: ExtractedCheckout = extraction.checkout;
 
   // ── 2. The cart holds what the owner asked for and nothing else ─────────
-  const cartCheck = await assertCartMatchesRequest(checkout.lines, request.requestedLines);
+  const cartCheck = await assertCartMatchesRequest(checkout.lines, request.requestedLines, ownership);
+  current();
   if (!cartCheck.ok) return refused('cart-mismatch', cartCheck.reason ?? 'Refused: the cart does not match the request.');
 
   // ── 3. A recurring charge is refused outright ───────────────────────────
-  const recurring = await detectRecurringCharge(checkout.orderSummaryText);
+  const recurring = await detectRecurringCharge(checkout.orderSummaryText, ownership);
+  current();
   if (recurring.recurring) {
     return refused('recurring-charge', recurring.reason ?? 'Refused: this checkout sets up a recurring charge.');
   }
 
   // ── 4. The decision, on OUR integers ────────────────────────────────────
   // Which offered option is each shipping tier is read (shipping.ts); the ladder is arithmetic.
-  const shippingTiers = await readShippingTiers(checkout.shippingOptions, checkout.currency);
+  const shippingTiers = await readShippingTiers(checkout.shippingOptions, checkout.currency, ownership);
+  current();
   const pools = ledger.snapshot(deps.limits, now(), deps.timezone);
   const decision = decidePurchase({
     quoted: {
@@ -381,7 +432,7 @@ export async function runCheckout(
   const reservationLimits = decision.kind === 'needs-approval'
     ? admitApprovedItemOverdraw(deps.limits, draw.itemMinorUnits, pools.item.remaining)
     : deps.limits;
-  const identity = driver.identity();
+  current();
   const reservation = ledger.reserve({
     id: request.purchaseId,
     itemMinorUnits: draw.itemMinorUnits,
@@ -442,7 +493,10 @@ export async function runCheckout(
   const release = async (): Promise<void> => {
     await registry.close(request.purchaseId);
     ledger.release(reservation.id);
+    lifecycle.release = undefined;
   };
+  lifecycle.release = release;
+  current();
 
   // ── The address goes on the order, and it is the one the owner stored ───
   //
@@ -454,10 +508,11 @@ export async function runCheckout(
   let addresses: AddressStore;
   try {
     addresses = deps.addresses.prepare ? await deps.addresses.prepare(addressKinds, { signal }) : deps.addresses;
+    current();
     addresses.assertCurrent?.();
     for (const kind of addressKinds) {
-      const stored = await addresses.read(kind);
-      addresses.assertCurrent?.();
+      const stored = await addresses.read(kind, { signal });
+      current(); addresses.assertCurrent?.();
       const check = checkAddress(stored, kind);
       if (!check.ok) {
         await release();
@@ -468,13 +523,15 @@ export async function runCheckout(
     await release();
     return refused('no-shipping-address', 'The stored address could not be verified for this purchase. Nothing was submitted.');
   }
-  const addressCurrent = () => { signal?.throwIfAborted(); addresses.assertCurrent?.(); };
+  const retainedAddress = captureCheckoutOwnership({ signal, assertCurrent: addresses.assertCurrent?.bind(addresses) });
+  const addressCurrent = () => { current(); retainedAddress.assertCurrent(); };
   const addressStillCurrent = () => { try { addressCurrent(); return true; } catch { return false; } };
   let shippingAddress;
-  try { shippingAddress = addressKinds.includes('shipping') ? await addresses.read('shipping') : null; addressCurrent(); }
+  try { shippingAddress = addressKinds.includes('shipping') ? await addresses.read('shipping', { signal }) : null; addressCurrent(); }
   catch { await release(); return refused('no-shipping-address', 'The stored address changed before this purchase could proceed.'); }
 
   const metadata = await deps.cards.metadata(request.cardId);
+  current();
   const cardLast4 = metadata?.last4 ?? '????';
   const poolsAfter = ledger.snapshot(deps.limits, now(), deps.timezone);
 
@@ -501,6 +558,7 @@ export async function runCheckout(
   // cost. Earlier would be a message without a total; a second message later
   // would restore the two-step flow this design deliberately collapsed into one.
   await registry.advance(request.purchaseId, 'awaiting-window', {}, now());
+  addressCurrent();
 
   const aboveBudget = decision.kind === 'needs-approval';
   const windowKind: 'approval' | 'veto' = windowForPurchase({
@@ -526,6 +584,7 @@ export async function runCheckout(
     const deadlineMs = windowDeadlineMs(now(), deps.approvalMinutes);
     // Persisted so a restart can apply the delivery-keyed recovery rules.
     await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
+    addressCurrent();
     let state: ApprovalState = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
     if (state === 'awaiting-approval') {
       let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
@@ -596,6 +655,7 @@ export async function runCheckout(
     const deadlineMs = windowDeadlineMs(now(), deps.vetoMinutes);
     // Persisted so a restart can apply the delivery-keyed recovery rules.
     await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
+    addressCurrent();
     let state: VetoState = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
     if (state === 'open') {
       let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
@@ -638,7 +698,9 @@ export async function runCheckout(
   const shippingTarget = chosenIndex === -1 ? undefined : controls.shippingTargets[chosenIndex];
   if (shippingTarget !== undefined) {
     try {
-      await driver.choose(shippingTarget, shipping.option.rawLabel);
+      addressCurrent();
+      await driver.choose(shippingTarget, shipping.option.rawLabel, { signal, assertCurrent: addressCurrent });
+      addressCurrent();
     } catch {
       await release();
       return refused('total-changed', 'Refused: the delivery option I chose could not be selected on this checkout.');
@@ -652,9 +714,10 @@ export async function runCheckout(
   // material has been typed anywhere.
   if (addressFields.length > 0) {
     const addressFill = await fillAddresses(addressFields, {
-      store: addresses,
+      store: addresses, signal, assertCurrent: addressCurrent,
       fill: (target, value) => driver.fill(target, value, { assertCurrent: addressCurrent, signal }),
     });
+    addressCurrent();
     if (!addressFill.ok) {
       await release();
       return refused(
@@ -666,6 +729,7 @@ export async function runCheckout(
 
   if (!addressStillCurrent()) { await release(); return refused('no-shipping-address', 'The stored address changed before payment entry. Nothing was submitted.'); }
   await registry.advance(request.purchaseId, 'arming-payment', {}, now());
+  addressCurrent();
   let fill: Awaited<ReturnType<typeof fillCard>>;
   try {
     fill = await fillCard(
@@ -679,6 +743,7 @@ export async function runCheckout(
       { registry, cards: deps.cards, redactor: deps.redactor, driver, signal, assertCurrent: addressCurrent },
     );
   } catch (error) { await release(); throw error; }
+  addressCurrent();
   if (!fill.ok) {
     await release();
     return refused(
@@ -703,9 +768,11 @@ export async function runCheckout(
   };
   try {
     try { addressCurrent(); } catch { throw new CheckoutSubmitRefused('The stored address changed before submission.'); }
+    lifecycle.submitMayHaveHappened = true;
     submission = await driver.submitOrder(controls.placeOrderTarget, { assertCurrent: addressCurrent, signal });
   } catch (error) {
     if (error instanceof CheckoutSubmitRefused) {
+      lifecycle.submitMayHaveHappened = false;
       // Refused BEFORE the click reached the merchant (a typed refusal, the
       // untrusted-effect guard, a stale ref): nothing was sent, so `release`
       // gives the reservation back and closes the journal rather than
@@ -744,9 +811,9 @@ export async function runCheckout(
     };
   }
 
-  // No challenge: the submit ran its course. The card's usefulness to us on
-  // this page ends here, whatever the merchant's response actually was.
-  deps.redactor.disarm(identity.sessionId, identity.pageId);
+  // Submission alone cannot prove the page no longer contains card material.
+  // Only the actual page owner disarms on navigation/close. Keep redaction
+  // armed when a non-navigating submit leaves those fields in the DOM.
 
   // ── 10. Record it ───────────────────────────────────────────────────────
   //
@@ -797,6 +864,7 @@ export async function runCheckout(
   await deps.purchases.record(record);
   await registry.advance(request.purchaseId, 'submitted', {}, now());
   await registry.close(request.purchaseId);
+  lifecycle.release = undefined;
 
   // ── 11. Tell the owner it happened ──────────────────────────────────────
   //
@@ -809,9 +877,11 @@ export async function runCheckout(
   // an exception thrown after the money moved would leave the ledger and the
   // world disagreeing about whether it did.
   try {
+    addressCurrent();
     await notifier.deliver({
       kind: 'veto',
       message: renderPurchaseReport({ facts, merchantOrderId: submission.orderId, verified: submission.verified }),
+      signal, assertCurrent: addressCurrent,
     });
   } catch {
     // Nothing to unwind and nothing to retry. The purchase is recorded, and

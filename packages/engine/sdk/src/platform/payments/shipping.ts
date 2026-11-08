@@ -40,7 +40,9 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * buying something on their behalf to make a number look better. `assertCartMatchesRequest`
  * in cart.ts is the enforcement; its absence here is the design.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
+import { mapLimit } from '@goodvibes-jev/judgment';
+import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import type { JsonValue, Selection, Selector } from '@goodvibes-jev/judgment';
 import { fastContext, shippingCandidates, shippingFast, shippingFastest, shippingOptionId, shippingStandard } from './batteries/shipping-tier.js';
 import type { MinorUnits, ShippingOption, ShippingStepDown, ShippingTier } from './types.js';
@@ -71,9 +73,12 @@ async function pick(
   indexes: readonly number[],
   currency: string,
   context: JsonValue = CHECKOUT_CONTEXT,
+  ownership: CheckoutOperationOwnership = {},
 ): Promise<TierPick> {
+  const owner = captureJudgmentPort(SHIPPING_TIER_SITE, ownership);
   const offered = shippingCandidates(indexes.map((index) => [options[index]!.rawLabel, options[index]!.costMinorUnits] as const), currency);
-  const selection = await selector.select(judgmentPort(SHIPPING_TIER_SITE), context, offered, { site: SHIPPING_TIER_SITE });
+  const selection = await selector.select(owner.port, context, offered, { site: SHIPPING_TIER_SITE, signal: owner.signal });
+  owner.assertCurrent();
   const picked = actedPick(selection, offered);
   const result = typeof picked === 'number' ? indexes[picked]! : picked;
   selection.recordAction(typeof result === 'number' ? `option ${shippingOptionId(result)}` : result === 'none' ? 'no option is this tier' : 'tier left unread');
@@ -86,8 +91,9 @@ async function pick(
  * `options` are the checkout's options in the order it listed them;
  * `currency` is what their costs are in.
  */
-export async function readShippingTiers(options: readonly ShippingOption[], currency: string): Promise<ShippingTiers> {
+export async function readShippingTiers(options: readonly ShippingOption[], currency: string, ownership: CheckoutOperationOwnership = {}): Promise<ShippingTiers> {
   requireDecisionFeature('semantic checkout shipping-tier selection');
+  const owner = captureCheckoutOwnership(ownership);
   const tiers = new Map<ShippingTier, ShippingOption>();
   const only = options.length === 1 ? options[0] : undefined;
   if (only !== undefined) {
@@ -97,10 +103,9 @@ export async function readShippingTiers(options: readonly ShippingOption[], curr
   if (options.length === 0) return tiers;
 
   const all = options.map((_, index) => index);
-  const [standardPick, fastestPick] = await Promise.all([
-    pick(shippingStandard, options, all, currency),
-    pick(shippingFastest, options, all, currency),
-  ]);
+  const [standardPick, fastestPick] = await mapLimit([shippingStandard, shippingFastest], 2,
+    selector => pick(selector, options, all, currency, CHECKOUT_CONTEXT, owner));
+  owner.assertCurrent();
   const standard = typeof standardPick === 'number' ? standardPick : undefined;
   // The fastest option is a tier only when it is not the standard one.
   const fastest = typeof fastestPick === 'number' && fastestPick !== standard ? fastestPick : undefined;
@@ -119,7 +124,8 @@ export async function readShippingTiers(options: readonly ShippingOption[], curr
   }
   if (standard === undefined) return tiers;
   const whole = options.map((option) => [option.rawLabel, option.costMinorUnits] as const);
-  const fast = await pick(shippingFast, options, between, currency, fastContext(whole, standard, fastest));
+  const fast = await pick(shippingFast, options, between, currency, fastContext(whole, standard, fastest), owner);
+  owner.assertCurrent();
   if (fast === 'unread') return tiers;
   tiers.set('fast', options[fast === 'none' ? fastest : fast]!);
   return tiers;

@@ -31,6 +31,7 @@
  */
 import { BudgetLedger, type BudgetLimits } from './budget.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
+import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { CheckoutRegistry, describeInterruption, type CheckoutJournal, type InFlightCheckout, type InterruptedVerdict } from './checkout-registry.js';
 import { recoverInterruptedWindow, type WindowRecovery } from './windows.js';
 import { CardMaterialRedactor } from './card-redaction.js';
@@ -48,7 +49,7 @@ const ADDRESS_FIELDS: readonly AddressFieldName[] = [
 import type { CardMaterialStore } from './card-material.js';
 import type { CheckoutPageDriver } from './checkout-page.js';
 import type { GateInput } from './gates.js';
-import type { MerchantJudgePort } from './merchant-recourse.js';
+import type { MerchantJudgePort, MerchantPolicy } from './merchant-recourse.js';
 import type { PaymentNotifier } from './checkout-flow.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
 import type { CurrencyCode, ShippingTier } from './types.js';
@@ -148,6 +149,7 @@ export interface PaymentsServiceConfig {
   readonly preferredTier: ShippingTier;
   readonly approvalMinutes: number;
   readonly vetoMinutes: number;
+  readonly merchantPolicy?: MerchantPolicy | undefined;
 }
 
 export interface PaymentsServiceDeps {
@@ -261,7 +263,7 @@ export class PaymentsGatewayServiceImpl {
    * rather than captured at construction. A budget raised five minutes ago
    * should apply to this purchase.
    */
-  async beginCheckout(input: BeginCheckoutInput, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<PaymentBeginResult> {
+  async beginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership = {}): Promise<PaymentBeginResult> {
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
@@ -317,6 +319,7 @@ export class PaymentsGatewayServiceImpl {
 
     const outcome = await runCheckout(request, input.reading, controls, {
       signal: options.signal,
+      assertCurrent: options.assertCurrent,
       registry: this.registry,
       cards: this.deps.cards,
       addresses: this.deps.addresses,
@@ -327,6 +330,7 @@ export class PaymentsGatewayServiceImpl {
       notifier: this.deps.notifier,
       untrusted: this.deps.untrusted,
       merchantJudge: this.deps.merchantJudge,
+      merchantPolicy: config.merchantPolicy,
       limits: config.limits,
       budgetCurrency: config.budgetCurrency,
       timezone: config.timezone,
@@ -578,9 +582,9 @@ export class PaymentsGatewayServiceImpl {
     readonly targets: readonly { readonly field: string; readonly ref: string }[];
     readonly expirySeparator: string | undefined;
     readonly twoDigitYear: boolean | undefined;
-  }, options: { readonly signal?: AbortSignal | undefined } = {}): Promise<PaymentFillCardResult> {
-    const signal = options.signal;
-    signal?.throwIfAborted();
+  }, options: CheckoutOperationOwnership = {}): Promise<PaymentFillCardResult> {
+    const owner = captureCheckoutOwnership(options);
+    const signal = owner.signal;
     const targets: CardFieldTarget[] = [];
     for (const entry of input.targets) {
       if (!isCardFieldName(entry.field)) {
@@ -606,6 +610,7 @@ export class PaymentsGatewayServiceImpl {
         redactor: this.redactor,
         driver: this.deps.driverFor(input.sessionId, input.pageId),
         signal,
+        assertCurrent: owner.assertCurrent,
       },
     );
     return {

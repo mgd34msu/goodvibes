@@ -576,16 +576,9 @@ describe('a snapshot after the fill', () => {
       const outcome = await runOn(harness, merchant);
       expect(outcome.kind).toBe('purchased');
 
-      // The material is disarmed after a successful submit, which is correct
-      // and would also make this assertion trivially pass. So the snapshot is
-      // taken against a page that is STILL holding it: re-arm from the driver's
-      // own form state, which is what the browser would still be showing.
-      harness.redactor.arm('session-1', 'page-1', [
-        { kind: 'number', value: SENTINEL.number },
-        { kind: 'cvv', value: SENTINEL.cvv },
-        { kind: 'cardholder', value: SENTINEL.cardholderName },
-        { kind: 'expiry', value: `${SENTINEL.expiryMonth}/${SENTINEL.expiryYear}` },
-      ]);
+      // This fixture's form still holds the values. A submit does not prove
+      // they disappeared; only the actual page owner may retire redaction.
+      expect(harness.redactor.hasLiveMaterial('session-1', 'page-1')).toBe(true);
 
       const html = await merchant.checkoutHtml();
       const elements = await collectFixtureControls(html, harness.driver.formState);

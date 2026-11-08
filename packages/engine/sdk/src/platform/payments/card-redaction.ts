@@ -152,15 +152,11 @@ function digitRuns(text: string): { readonly run: string; readonly digits: strin
  *
  * The values live in this process's memory for as long as they are on the page
  * in front of them, which is exactly as long as the browser itself holds them.
- * `disarm` is called when the form is submitted, when the purchase is abandoned,
- * and when the page or session closes.
+ * Only the page owner disarms when navigation or close removes the material.
+ * A submit or abandonment can leave filled fields in the DOM.
  */
 export class CardMaterialRedactor {
-  private readonly live = new Map<string, LiveSecret[]>();
-
-  private static key(sessionId: string, pageId: string): string {
-    return `${sessionId}:${pageId}`;
-  }
+  private readonly live = new Map<string, Map<string, LiveSecret[]>>();
 
   /**
    * Register material as live on a page.
@@ -170,11 +166,11 @@ export class CardMaterialRedactor {
    * success would be material that leaks precisely when something went wrong.
    */
   arm(sessionId: string, pageId: string, secrets: readonly { kind: CardFieldKind; value: string }[]): void {
-    const key = CardMaterialRedactor.key(sessionId, pageId);
-    const existing = this.live.get(key) ?? [];
+    const pages = this.live.get(sessionId) ?? new Map<string, LiveSecret[]>();
+    const existing = pages.get(pageId) ?? [];
     for (const secret of secrets) {
       const literal = secret.value.trim();
-      if (literal.length < MIN_MATCHABLE_LENGTH) continue;
+      if (literal.length < MIN_MATCHABLE_LENGTH || existing.some(entry => entry.kind === secret.kind && entry.literal === literal)) continue;
       existing.push({
         kind: secret.kind,
         literal,
@@ -183,25 +179,25 @@ export class CardMaterialRedactor {
     }
     // Longest first, so a full number is removed before a substring of it is.
     existing.sort((left, right) => right.literal.length - left.literal.length);
-    this.live.set(key, existing);
+    pages.set(pageId, existing);
+    this.live.set(sessionId, pages);
   }
 
-  /** Forget a page's material: submitted, abandoned, or the page closed. */
+  /** Page-owner acknowledgement that its material is gone. */
   disarm(sessionId: string, pageId: string): void {
-    this.live.delete(CardMaterialRedactor.key(sessionId, pageId));
+    const pages = this.live.get(sessionId);
+    pages?.delete(pageId);
+    if (pages?.size === 0) this.live.delete(sessionId);
   }
 
   /** Forget every page in a session. Called when a session ends. */
   disarmSession(sessionId: string): void {
-    const prefix = `${sessionId}:`;
-    for (const key of [...this.live.keys()]) {
-      if (key.startsWith(prefix)) this.live.delete(key);
-    }
+    this.live.delete(sessionId);
   }
 
   /** Whether this page is currently holding material that has not been cleared. */
   hasLiveMaterial(sessionId: string, pageId: string): boolean {
-    const secrets = this.live.get(CardMaterialRedactor.key(sessionId, pageId));
+    const secrets = this.live.get(sessionId)?.get(pageId);
     return secrets !== undefined && secrets.length > 0;
   }
 
@@ -214,7 +210,7 @@ export class CardMaterialRedactor {
    * when a page holds no material this returns the input unchanged.
    */
   redact(sessionId: string, pageId: string, text: string): string {
-    const secrets = this.live.get(CardMaterialRedactor.key(sessionId, pageId));
+    const secrets = this.live.get(sessionId)?.get(pageId);
     if (secrets === undefined || secrets.length === 0) return text;
     return redactWithSecrets(text, secrets);
   }
@@ -227,7 +223,7 @@ export class CardMaterialRedactor {
    * followed by an action is one refactor away from the check being dropped.
    */
   containsLiveMaterial(sessionId: string, pageId: string, text: string): boolean {
-    const secrets = this.live.get(CardMaterialRedactor.key(sessionId, pageId));
+    const secrets = this.live.get(sessionId)?.get(pageId);
     if (secrets === undefined || secrets.length === 0) return false;
     return redactWithSecrets(text, secrets) !== text;
   }

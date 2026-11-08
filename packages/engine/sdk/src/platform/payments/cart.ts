@@ -34,12 +34,13 @@ import { requireDecisionFeature } from '../runtime/decision-policy.js';
  * Jev (`engine.payments.recurring-charge`) in place of a keyword list.
  * Quantities are compared in code: two counts.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { sanitizeNoticeField } from '../security/notice-text.js';
 import { cartLine, requestedLineId } from './batteries/cart-line.js';
 import { orderSummaryView, recurringCharge } from './batteries/recurring-charge.js';
 import type { MinorUnits } from './types.js';
+import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
 
 /** The decision sites the cart readings are logged under. */
 export const CART_LINE_SITE = 'payments.cart-line';
@@ -73,9 +74,11 @@ export interface CartCheck {
  * Which requested item this cart line is, or null. A line is that item only
  * when the reading acts; anything less is a line the owner did not ask for.
  */
-async function requestedIndexOf(line: CartLine, requested: readonly RequestedLine[]): Promise<number | null> {
+async function requestedIndexOf(line: CartLine, requested: readonly RequestedLine[], options: CheckoutOperationOwnership): Promise<number | null> {
+  const owner = captureJudgmentPort(CART_LINE_SITE, options);
   const candidates = requested.map((entry, index) => ({ id: requestedLineId(index), content: { requested_item: entry.label } }));
-  const selection = await cartLine.select(judgmentPort(CART_LINE_SITE), { cart_line: line.label }, candidates, { site: CART_LINE_SITE });
+  const selection = await cartLine.select(owner.port, { cart_line: line.label }, candidates, { site: CART_LINE_SITE, signal: owner.signal });
+  owner.assertCurrent();
   const index = selection.outcome === 'act' && selection.chosen !== undefined
     ? candidates.findIndex((candidate) => candidate.id === selection.chosen)
     : -1;
@@ -93,11 +96,14 @@ async function requestedIndexOf(line: CartLine, requested: readonly RequestedLin
 export async function assertCartMatchesRequest(
   cart: readonly CartLine[],
   requested: readonly RequestedLine[],
+  options: CheckoutOperationOwnership = {},
 ): Promise<CartCheck> {
   requireDecisionFeature('automated checkout cart comparison');
+  const owner = captureCheckoutOwnership(options);
   const matches = requested.length === 0
     ? cart.map(() => null)
-    : await mapLimit(cart, CART_LINE_CONCURRENCY, (line) => requestedIndexOf(line, requested));
+    : await mapLimit(cart, CART_LINE_CONCURRENCY, (line) => requestedIndexOf(line, requested, owner));
+  owner.assertCurrent();
 
   const unexpected: CartLine[] = [];
   const seen = new Set<number>();
@@ -156,10 +162,12 @@ export interface RecurringCheck {
  * find a reason to stop is the safe direction of that asymmetry, and it is why
  * anything but a confident no refuses.
  */
-export async function detectRecurringCharge(orderSummaryText: string): Promise<RecurringCheck> {
+export async function detectRecurringCharge(orderSummaryText: string, options: CheckoutOperationOwnership = {}): Promise<RecurringCheck> {
   requireDecisionFeature('checkout recurring-charge interpretation');
+  const owner = captureJudgmentPort(RECURRING_CHARGE_SITE, captureCheckoutOwnership(options));
   const state = orderSummaryView(orderSummaryText);
-  const run = await recurringCharge.run(judgmentPort(RECURRING_CHARGE_SITE), state, { site: RECURRING_CHARGE_SITE });
+  const run = await recurringCharge.run(owner.port, state, { site: RECURRING_CHARGE_SITE, signal: owner.signal });
+  owner.assertCurrent();
   const reading = run.readings.recurring;
   const oneOff = reading.verdict === 'no' && reading.outcome === 'act';
   run.recordAction(oneOff ? 'one-off charge' : 'refused as recurring');

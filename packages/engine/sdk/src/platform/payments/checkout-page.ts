@@ -35,7 +35,7 @@ export interface CheckoutPageDriver {
   identity(): PageIdentity;
 
   /** The page's current url, for the merchant-origin check. */
-  url(): Promise<string>;
+  url(ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<string>;
 
   /**
    * Type a value into a field.
@@ -78,7 +78,7 @@ export interface CheckoutPageDriver {
   }>;
 
   /** Choose one of a set of options, a delivery tier, usually. */
-  choose(target: string, value: string): Promise<void>;
+  choose(target: string, value: string, ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<void>;
 
   /**
    * Submit the order. The one outward act in the whole flow.

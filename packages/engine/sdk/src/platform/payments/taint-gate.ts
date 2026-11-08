@@ -128,7 +128,10 @@ export function describeContentInitiatedRefusal(): string {
 export async function evaluatePaymentTaint(input: {
   readonly intent: PaymentIntent;
   readonly ledger: UntrustedContentLedger;
+  readonly signal?: AbortSignal | undefined;
 }): Promise<PaymentTaintDecision> {
+  const signal = input.signal;
+  signal?.throwIfAborted();
   // ── The line that does not move ─────────────────────────────────────────
   if (input.intent.origin === 'content') {
     return {
@@ -162,7 +165,8 @@ export async function evaluatePaymentTaint(input: {
 
   const checkedFields = Object.keys(fields).filter((key) => fields[key] !== undefined);
 
-  const assessment = await assessOutwardContent(input.ledger, fields, { exactMatchFields });
+  const assessment = await assessOutwardContent(input.ledger, fields, { exactMatchFields, signal });
+  signal?.throwIfAborted();
   if (assessment.kind === 'clean') {
     return { allowed: true, findings: [], reason: null, checkedFields };
   }

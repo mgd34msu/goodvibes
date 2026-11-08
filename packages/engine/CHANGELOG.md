@@ -41,8 +41,16 @@
 - Bind browser code and speech readings to canonical message revisions and
   refresh history after a stream reconnect, including error-state reconnects.
 
+- Persist cron staggering phases for automation jobs and knowledge schedules,
+  preserve pending due times during migration, and share concurrent load migration.
+
 ### SDK changes
 
+- `getNextAutomationOccurrence` reads an optional persisted `staggerPhase` from
+  cron schedules; it no longer takes a job-ID argument. Use
+  `ensureAutomationCronPhase` before persisting a new schedule and
+  `resolveAutomationCronOffsetMs` for phase-based offset calculation. Native stores
+  adopt phases automatically. The job-ID hashing helper is removed.
 - Browser code-language and speech-seam requests use battery wire version 2 and
   `contentRevision` from canonical chat history instead of `contentDigest`. Other
   browser batteries retain wire version 1. Chat history exposes owner-issued

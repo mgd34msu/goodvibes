@@ -31,7 +31,7 @@ export type { DaemonPurchaseLedgerOptions, PurchaseListQuery, StoredPurchase } f
 
 export { DurableBudgetLedger } from './budget-store.js';
 
-export { DaemonApprovalStore } from './approval-store.js';
+export { DaemonApprovalStore, PaymentApprovalStoreError } from './approval-store.js';
 export type { ApprovalTakeHit, ApprovalTakeMiss } from './approval-store.js';
 
 export { DurableCheckoutJournal, PaymentCheckoutJournalUnavailableError } from './checkout-journal-store.js';

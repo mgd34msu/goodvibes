@@ -502,12 +502,11 @@ function consumeCheckoutApproval(
       }),
     });
   } catch (error) {
-    // A store that could not persist the removal rolled it back and threw
-    // (approval-store.ts): the approval is still on file and nothing was
-    // submitted. Contained: the raw error can name the store path.
+    // A failed confirmation may follow publication. Never claim the grant
+    // is unspent or restore an in-memory copy over the actual file.
     void error;
     throw new HandlerError(
-      'Recording the spent approval failed. The approval was not consumed and nothing was submitted.',
+      'Spending the approval could not be confirmed. This request did not submit a purchase. Inspect its original status and approval evidence before trying again.',
       'INTERNAL_ERROR',
       500,
     );
@@ -545,11 +544,10 @@ export function checkoutApproveHandler(deps: PaymentsHandlerDeps): TypedHandler<
         content: checkoutApprovalContent({ merchantDomain, item, amount }),
       });
     } catch (error) {
-      // Contained for the same reason as `consumeCheckoutApproval`: the raw
-      // write failure can name the store path, and an approval that never
-      // reached disk was deliberately rolled back rather than left spendable.
+      // A write error may follow rename. Report uncertainty without claiming
+      // that no approval exists or echoing raw filesystem diagnostics.
       void error;
-      throw new HandlerError('Recording the approval failed. Nothing was approved.', 'INTERNAL_ERROR', 500);
+      throw new HandlerError('Recording the approval could not be confirmed. Inspect the original purchase and approval evidence before trying again.', 'INTERNAL_ERROR', 500);
     }
     // Named fields, never a spread, the same containment rule as every other
     // response in this family.

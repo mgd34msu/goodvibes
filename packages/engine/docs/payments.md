@@ -1677,6 +1677,14 @@ A live-window answer is distinct from the pre-checkout purchase authorization:
 `payments.checkout.approve` authorizes the initial merchant/item/amount request;
 the final-price window asks about the decision reached for that checkout.
 
+The pre-checkout approval store refreshes under a shared file lock for every
+grant and spend, including when two daemon instances have already opened it.
+Removal is durably confirmed before the grant is handed to checkout. Existing
+v1 approval records retain their content binding and expiry. Damaged, unsupported
+or deleted-after-observation evidence makes approvals unavailable and remains
+preserved for repair. A write whose confirmation failed is uncertain; the host
+does not restore a cached grant over the file or silently try the spend again.
+
 **Surface work is UI only:** a payments settings section (budgets, toggles,
 timezone picker, shipping preference, channel order), a card entry form that
 posts to `payments.cards.create` through a masked input and never echoes or logs,

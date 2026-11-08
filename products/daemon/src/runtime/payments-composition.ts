@@ -132,9 +132,9 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     merchantJudge: createJevMerchantJudge(),
     untrusted: getProcessUntrustedContentLedger(),
     // The persisted owner approvals `payments.checkout.approve` mints and
-    // `begin` spends, beside the other payments stores. Constructing it reads
-    // the file once, synchronously, the same one-touch boot cost the budget
-    // ledger already pays.
+    // `begin` spends, beside the other payments stores. Each access refreshes
+    // the actual file under the shared mutation lock; another daemon's spent
+    // grant cannot remain spendable in this composition's memory.
     approvals: new DaemonApprovalStore(
       controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-approvals.json'),
     ),

@@ -14,15 +14,55 @@ import type { UpdateFileIo } from './self-update.js';
 export const NATIVE_READER_REQUIREMENT_FILE = '.goodvibes-reader-requirements.json';
 export type NativeDataFormat = 'payment-retained-holds-v2';
 const requirements: Readonly<Record<NativeDataFormat, string>> = { 'payment-retained-holds-v2': '3.1.2' };
+export interface NativeReaderCapabilities {
+  readonly schema: 1;
+  readonly version: string;
+  readonly formats: readonly string[];
+}
+
+/** Compiled into the same program as its actual readers; never inferred from
+ * a candidate's version or filled in when opening an older artifact. */
+export function nativeReaderCapabilities(readerVersion: string): NativeReaderCapabilities {
+  version(readerVersion);
+  return Object.freeze({ schema: 1, version: readerVersion, formats: Object.freeze(Object.keys(requirements).sort()) });
+}
+
+export function parseNativeReaderCapabilities(value: unknown): NativeReaderCapabilities {
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new NativeDataCompatibilityError('unavailable');
+    const prototype: unknown = Object.getPrototypeOf(value);
+    const keys = Reflect.ownKeys(value);
+    if ((prototype !== Object.prototype && prototype !== null) || keys.length !== 3
+      || keys.some(key => key !== 'schema' && key !== 'version' && key !== 'formats')) throw new NativeDataCompatibilityError('unavailable');
+    const ownData = (object: object, key: PropertyKey): unknown => {
+      const descriptor = Object.getOwnPropertyDescriptor(object, key);
+      if (!descriptor || !('value' in descriptor)) throw new NativeDataCompatibilityError('unavailable');
+      return descriptor.value;
+    };
+    const schema = ownData(value, 'schema'), readerVersion = ownData(value, 'version'), input = ownData(value, 'formats');
+    if (schema !== 1 || typeof readerVersion !== 'string' || !Array.isArray(input) || Object.getPrototypeOf(input) !== Array.prototype) throw new NativeDataCompatibilityError('unavailable');
+    const length = ownData(input, 'length');
+    if (typeof length !== 'number' || length > 256 || Reflect.ownKeys(input).length !== length + 1) throw new NativeDataCompatibilityError('unavailable');
+    const formats: string[] = [];
+    for (let index = 0; index < length; index++) {
+      const item = ownData(input, index);
+      if (typeof item !== 'string' || !/^[a-z][a-z0-9-]{0,95}$/.test(item) || formats.includes(item)) throw new NativeDataCompatibilityError('unavailable');
+      formats.push(item);
+    }
+    version(readerVersion);
+    return Object.freeze({ schema: 1, version: readerVersion, formats: Object.freeze(formats) });
+  } catch { throw new NativeDataCompatibilityError('unavailable'); }
+}
 interface ReaderRequirements { readonly schema: 1; readonly minimumReader: string; readonly formats: readonly NativeDataFormat[] }
 export interface NativeDataWriteOwner { declare(format: NativeDataFormat): void }
 export interface AdmittedNativeDataPublisher { readonly execPath: string; readonly version: string; readonly assertCurrent: () => void }
 
 export class NativeDataCompatibilityError extends Error {
   override readonly name = 'NativeDataCompatibilityError';
-  constructor(readonly kind: 'unavailable' | 'incompatible' | 'busy', minimum?: string) {
+  constructor(readonly kind: 'unavailable' | 'incompatible' | 'busy' | 'unconfirmed-reader', minimum?: string) {
     super(kind === 'incompatible' && minimum
       ? `Saved application data requires GoodVibes ${minimum} or newer. The previous reader cannot be installed or restored.`
+      : kind === 'unconfirmed-reader' ? 'This candidate build does not confirm support for the saved data formats. Keep the current installation and select a build with verified reader capabilities.'
       : kind === 'busy' ? 'Another native owner is publishing data-reader requirements. Retry after that operation settles.'
       : 'The installed data-reader requirements could not be confirmed. Keep the current installation and inspect its original compatibility evidence.');
   }
@@ -122,14 +162,19 @@ export function createNativeDataWriteOwner(publisher: AdmittedNativeDataPublishe
 /** Call inside the existing native swap claims, using its captured filesystem.
  * A requirement is established before its data write. A publisher checks those
  * same claims through its installation guard, so a downgrade cannot race it. */
-export function assertNativeReaderCompatible(execPath: string, proposedVersion: string, io: Pick<UpdateFileIo, 'observe' | 'readFile'>): void {
+export function assertNativeReaderCompatible(execPath: string, proposedVersion: string, io: Pick<UpdateFileIo, 'observe' | 'readFile'>,
+  capabilities?: NativeReaderCapabilities): void {
   try {
     const proposed = version(proposedVersion);
+    const readers = capabilities === undefined ? undefined : parseNativeReaderCapabilities(capabilities);
     const path = pathFor(execPath);
     if (!io.observe || !io.readFile) throw new Error();
     const observed = io.observe(path); if (observed === null) return;
     const bytes = io.readFile(path), required = parse(bytes), after = io.observe(path);
     if (after === null || observed.identity !== after.identity || observed.ownerIdentity !== after.ownerIdentity) throw new Error();
     if (compareSemanticVersions(proposed, version(required.minimumReader)) < 0) throw new NativeDataCompatibilityError('incompatible', required.minimumReader);
+    if (!readers) throw new NativeDataCompatibilityError('unconfirmed-reader');
+    if (readers.version.replace(/^v/i, '') !== proposedVersion.replace(/^v/i, '')
+      || required.formats.some(format => !readers.formats.includes(format))) throw new NativeDataCompatibilityError('unconfirmed-reader');
   } catch (error) { throw error instanceof NativeDataCompatibilityError ? error : new NativeDataCompatibilityError('unavailable'); }
 }

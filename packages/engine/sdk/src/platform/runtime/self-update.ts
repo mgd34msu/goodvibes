@@ -12,12 +12,12 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
 import { assertDaemonNativePayloadBytes, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard } from './daemon-native-cohort.js';
-import { assertNativeReaderCompatible } from './native-reader-compatibility.js';
+import { assertNativeReaderCompatible, type NativeReaderCapabilities } from './native-reader-compatibility.js';
 export { DAEMON_NATIVE_TARGETS, DAEMON_INSTALLATION_RECEIPT, assertDaemonNativePayloadBytes, inspectDaemonNativeInstallation,
   parseDaemonCiArtifact, parseDaemonInstallationReceipt, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles,
   type DaemonNativeTarget, type DaemonNativePayload, type DaemonArtifactSource, type DaemonCiArtifact, type DaemonInstallationReceipt } from './daemon-native-cohort.js';
-export { createNativeDataWriteOwner, assertNativeReaderCompatible, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from './native-reader-compatibility.js';
-export type { NativeDataFormat, NativeDataWriteOwner, AdmittedNativeDataPublisher } from './native-reader-compatibility.js';
+export { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, parseNativeReaderCapabilities, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from './native-reader-compatibility.js';
+export type { NativeDataFormat, NativeDataWriteOwner, AdmittedNativeDataPublisher, NativeReaderCapabilities } from './native-reader-compatibility.js';
 
 /**
  * The cadence half of the same mechanism, re-exported here so every consumer
@@ -564,6 +564,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     targets: options.targets.map((target) => ({ ...target })), ...(options.daemonNative ? { daemonNative: { ...options.daemonNative } } : {}) };
   validateTargets(options.targets);
   const native = options.daemonNative;
+  let nativeReaders: NativeReaderCapabilities | undefined;
   let assertNativeCurrent: (() => void) | undefined;
   if (native) {
     const expected = resolveDaemonNativeTargets(native.execPath, native.platform, native.arch);
@@ -585,7 +586,8 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     const manifestResponse = await options.fetchImpl(manifestUrl, { signal });
     signal.throwIfAborted();
     if (!manifestResponse.ok) throw new Error(`download failed (${manifestResponse.status}) for ${manifestUrl}`);
-    const checksums = parseChecksumFile(await manifestResponse.text());
+    const checksumText = await manifestResponse.text();
+    const checksums = parseChecksumFile(checksumText);
     signal.throwIfAborted();
     const verified: StagedUpdate[] = [];
     for (const target of options.targets) {
@@ -602,7 +604,28 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
       const descriptor = verified[verified.length - 1];
       if (!descriptor) throw new Error('Native daemon source manifest is missing');
       const target: DaemonNativeTarget = native.arch === 'x64' ? 'linux-x64' : 'linux-arm64';
-      const artifact = parseDaemonCiArtifact(JSON.parse(descriptor.buffer.toString('utf8')), target);
+      let artifact = parseDaemonCiArtifact(JSON.parse(descriptor.buffer.toString('utf8')), target);
+      const readerAsset = descriptor.target.assetName.replace(/\.ci-artifact\.json$/, '.reader-ci-artifact.json');
+      const readerPin = checksums.get(readerAsset);
+      const readerEntries = checksumText.split(/\r?\n/).filter(line => line.trim().split(/\s+/).some(token => token === readerAsset || token === '*' + readerAsset));
+      if ((readerPin !== undefined || readerEntries.length !== 0) && (readerPin === undefined || readerEntries.length !== 1)) throw new Error('Native daemon reader artifact checksum is missing or ambiguous');
+      if (readerPin !== undefined) {
+        const response = await options.fetchImpl(`${options.downloadBaseUrl}/${readerAsset}`, { signal });
+        signal.throwIfAborted();
+        if (!response.ok) throw new Error('Native daemon reader artifact download failed');
+        const bytes = Buffer.from(new Uint8Array(await response.arrayBuffer())); signal.throwIfAborted();
+        verifyChecksum(readerAsset, sha256(bytes), readerPin);
+        const candidate = parseDaemonCiArtifact(JSON.parse(bytes.toString('utf8')), target);
+        if (candidate.schema !== 2 || candidate.sourceCommit !== artifact.sourceCommit || candidate.sourceTree !== artifact.sourceTree
+          || candidate.headCommit !== artifact.headCommit || candidate.target !== artifact.target
+          || candidate.files.some((file, index) => {
+            const original = artifact.files[index];
+            return !original || file.path !== original.path || file.sha256 !== original.sha256 || file.mode !== original.mode || file.size !== original.size;
+          }) || (artifact.schema === 2 && JSON.stringify(artifact.readers) !== JSON.stringify(candidate.readers))) throw new Error('Native daemon reader artifact does not match the verified payload cohort');
+        artifact = candidate;
+      }
+      if (artifact.schema === 2 && artifact.readers.version !== normalizeVersion(native.version)) throw new Error('Native daemon reader version differs from the requested release');
+      nativeReaders = artifact.readers;
       assertDaemonNativePayloadBytes(artifact, verified.slice(0, -1).map(member => member.buffer));
       verified[verified.length - 1] = { target: descriptor.target, buffer: Buffer.from(JSON.stringify({ schema: 1,
         packageName: '@goodvibes-jev/daemon', version: normalizeVersion(native.version), artifact }, null, 2) + '\n') };
@@ -628,7 +651,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     }
     assertCurrent();
     assertNativeCurrent?.();
-    if (native) assertNativeReaderCompatible(native.execPath, native.version, options.io ?? realUpdateFileIo);
+    if (native) assertNativeReaderCompatible(native.execPath, native.version, options.io ?? realUpdateFileIo, nativeReaders);
   }, { current: assertCurrent, ...(native || options.native ? { prepareNativeGuard: () => {
     const io = options.io ?? realUpdateFileIo;
     if (!io.readFile || !io.observe) throw new Error('Native daemon staged owner is unavailable');

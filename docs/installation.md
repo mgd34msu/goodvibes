@@ -53,6 +53,8 @@ installer checks an existing installation’s reader requirements with the stage
 verified release before replacing programs. An incompatible or unreadable
 requirement keeps the installed programs in place. Do not delete compatibility
 evidence to force a downgrade. The evidence survives data-preserving uninstall.
+Native build admission also checks explicit saved-data reader support: two
+builds with the same version number need not support the same formats.
 
 Installation holds transaction claims beside the three executables while suite
 files are replaced. A competing updater is refused. If replacement is interrupted

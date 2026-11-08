@@ -3,17 +3,20 @@ import { createHash } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { parseSemanticVersion } from './semantic-version.js';
 import type { UpdateFileIo, UpdateTarget } from './self-update.js';
+import { parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
 
 export const DAEMON_NATIVE_TARGETS = ['linux-x64', 'linux-arm64'] as const;
 export type DaemonNativeTarget = typeof DAEMON_NATIVE_TARGETS[number];
 export const DAEMON_INSTALLATION_RECEIPT = 'daemon-installation.json';
 export interface DaemonNativePayload { readonly relativePath: string; readonly assetName: string; readonly executable: boolean; }
 export interface DaemonArtifactSource { sourceCommit: string; sourceTree: string; headCommit: string; target?: DaemonNativeTarget; }
-export interface DaemonCiArtifact extends DaemonArtifactSource {
-  schema: 1;
+interface DaemonCiArtifactBase extends DaemonArtifactSource {
   target: DaemonNativeTarget;
   files: Array<{ path: string; sha256: string; mode: number; size: number }>;
 }
+export type DaemonCiArtifact = DaemonCiArtifactBase & (
+  { schema: 1; readers?: never } | { schema: 2; readers: NativeReaderCapabilities }
+);
 export interface DaemonInstallationReceipt {
   schema: 1;
   packageName: '@goodvibes-jev/daemon';
@@ -48,8 +51,10 @@ export function resolveDaemonNativeTargets(execPath: string, platform: string, a
 }
 export function parseDaemonCiArtifact(value: unknown, target: DaemonNativeTarget): DaemonCiArtifact {
   const payloads = resolveDaemonNativePayloads('linux', target.slice('linux-'.length));
-  if (!payloads || !record(value) || !exact(value, ['schema', 'sourceCommit', 'sourceTree', 'headCommit', 'target', 'files'])
-    || value.schema !== 1 || value.target !== target || !Array.isArray(value.files) || value.files.length !== payloads.length) throw new Error('Native daemon artifact identity is invalid');
+  if (!payloads || !record(value) || (value.schema !== 1 && value.schema !== 2)
+    || !exact(value, value.schema === 1 ? ['schema', 'sourceCommit', 'sourceTree', 'headCommit', 'target', 'files']
+      : ['schema', 'sourceCommit', 'sourceTree', 'headCommit', 'target', 'files', 'readers'])
+    || value.target !== target || !Array.isArray(value.files) || value.files.length !== payloads.length) throw new Error('Native daemon artifact identity is invalid');
   const { sourceCommit, sourceTree, headCommit } = value;
   if (typeof sourceCommit !== 'string' || typeof sourceTree !== 'string' || typeof headCommit !== 'string'
     || ![sourceCommit, sourceTree, headCommit].every(sha => /^[a-f0-9]{40}$/.test(sha))) throw new Error('Native daemon artifact requires exact source identities');
@@ -60,12 +65,15 @@ export function parseDaemonCiArtifact(value: unknown, target: DaemonNativeTarget
       || typeof file.size !== 'number' || !Number.isSafeInteger(file.size) || file.size <= 0) throw new Error('Native daemon artifact has an incomplete or invalid payload');
     return { path: file.path, sha256: file.sha256, mode: file.mode, size: file.size };
   });
-  return { schema: 1, sourceCommit, sourceTree, headCommit, target, files };
+  const base = { sourceCommit, sourceTree, headCommit, target, files };
+  return value.schema === 1 ? { schema: 1, ...base } : { schema: 2, ...base, readers: parseNativeReaderCapabilities(value.readers) };
 }
 export function parseDaemonInstallationReceipt(value: unknown, target: DaemonNativeTarget): DaemonInstallationReceipt {
   if (!record(value) || !exact(value, ['schema', 'packageName', 'version', 'artifact']) || value.schema !== 1 || value.packageName !== '@goodvibes-jev/daemon'
     || typeof value.version !== 'string' || !parseSemanticVersion(value.version)) throw new Error('Native daemon installation receipt is invalid');
-  return { schema: 1, packageName: '@goodvibes-jev/daemon', version: value.version, artifact: parseDaemonCiArtifact(value.artifact, target) };
+  const artifact = parseDaemonCiArtifact(value.artifact, target);
+  if (artifact.schema === 2 && artifact.readers.version !== value.version) throw new Error('Native daemon reader version differs from its installed product');
+  return { schema: 1, packageName: '@goodvibes-jev/daemon', version: value.version, artifact };
 }
 export function assertDaemonNativePayloadBytes(artifact: DaemonCiArtifact, buffers: readonly Buffer[]): void {
   if (buffers.length !== artifact.files.length) throw new Error('Native daemon payload set is incomplete');

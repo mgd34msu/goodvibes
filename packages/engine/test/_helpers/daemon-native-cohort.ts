@@ -1,5 +1,5 @@
 import { dirname, join } from 'node:path';
-import { resolveDaemonNativePayloads, sha256, type DaemonCiArtifact, type UpdateFileIo } from '../../sdk/src/platform/runtime/self-update.ts';
+import { resolveDaemonNativePayloads, sha256, type DaemonCiArtifact, type NativeReaderCapabilities, type UpdateFileIo } from '../../sdk/src/platform/runtime/self-update.ts';
 
 export function nativeCohortFixture(options: {
   readonly version: string;
@@ -7,6 +7,7 @@ export function nativeCohortFixture(options: {
   readonly bunBytes?: string;
   readonly addonBytes?: string;
   readonly arch?: 'x64' | 'arm64';
+  readonly readers?: NativeReaderCapabilities;
 }) {
   const arch = options.arch ?? 'x64';
   const payloads = resolveDaemonNativePayloads('linux', arch);
@@ -28,15 +29,17 @@ export function nativeCohortFixture(options: {
     if (!bytes) throw new Error('Native fixture payload count changed');
     return { ...payload, bytes, mode: payload.executable ? 0o755 : 0o644 };
   });
-  const artifact = {
+  const base = {
     schema: 1,
     sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40),
     target: `linux-${arch}`,
     files: members.map(member => ({ path: member.relativePath, sha256: sha256(member.bytes), mode: member.mode, size: member.bytes.length })),
   } satisfies DaemonCiArtifact;
+  const artifact: DaemonCiArtifact = options.readers === undefined ? base : { ...base, schema: 2, readers: options.readers };
   const receipt = Buffer.from(JSON.stringify({ schema: 1, packageName: '@goodvibes-jev/daemon', version: options.version, artifact }));
   const assets = Object.fromEntries(members.map(member => [member.assetName, member.bytes]));
-  assets[`${daemonAsset}.ci-artifact.json`] = Buffer.from(JSON.stringify(artifact));
+  assets[`${daemonAsset}.ci-artifact.json`] = Buffer.from(JSON.stringify(base));
+  if (artifact.schema === 2) assets[`${daemonAsset}.reader-ci-artifact.json`] = Buffer.from(JSON.stringify(artifact));
   return {
     members, artifact, receipt, assets,
     installation(execPath: string, suffix = ''): Record<string, Buffer> {

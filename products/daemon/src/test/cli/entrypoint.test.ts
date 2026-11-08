@@ -12,7 +12,7 @@ import { prepareDaemonCliServe } from '../../cli/serve.js';
 import * as shell from '@goodvibes-jev/engine/terminal-shell';
 import * as serviceCommands from '../../daemon/service-commands.js';
 import * as wakeCommand from '../../daemon/provision-wake-model.js';
-import { NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 
 const entrypoint = fileURLToPath(new URL('../../../dist/cli/entrypoint.js', import.meta.url));
 const packageVersion = (JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
@@ -94,6 +94,13 @@ test('emitted staged-reader command refuses incompatible data without initializi
   expect(result.code).toBe(2); expect(result.stdout).toBe(''); expect(result.stderr).toContain('requires GoodVibes 3.2.0');
   expect(readFileSync(floor, 'utf8')).toBe(original); expect(existsSync(join(root, 'daemon'))).toBe(false);
   expect(existsSync(join(result.home, '.goodvibes'))).toBe(false);
+});
+
+test('emitted reader description identifies this binary without bootstrapping database or home storage', async () => {
+  const result = await oneShot(['check-install-reader', '--describe']);
+  expect(result.code).toBe(0); expect(result.stderr).toBe('');
+  expect(JSON.parse(result.stdout)).toEqual(nativeReaderCapabilities(packageVersion));
+  expect(existsSync(join(result.root, 'daemon'))).toBe(false); expect(existsSync(join(result.home, '.goodvibes'))).toBe(false);
 });
 
 test('emitted package entry retains the Bun shebang and canonical bin path', () => {

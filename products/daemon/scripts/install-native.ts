@@ -71,6 +71,7 @@ export async function installDaemonNative(options: InstallDaemonNativeOptions): 
   const retainedDirectories = retainInstallDirectories([artifactRoot, prefix, ...sourceTargets.map(target => dirname(target.path)), ...targets.map(target => dirname(target.path))]);
   const assertSourceCurrent = () => { signal?.throwIfAborted(); retainedDirectories(); retainedSource(); };
   const artifact = await readVerifiedDaemonCiArtifact(artifactRoot, owner);
+  if (artifact.schema === 2 && artifact.readers.version !== owner.version) throw new Error('Native reader version differs from the selected source product');
   assertSourceCurrent(); retainedTargets();
   expectedModes(artifact);
   // Snapshot after verification; canonical checksum verification below catches
@@ -94,7 +95,7 @@ export async function installDaemonNative(options: InstallDaemonNativeOptions): 
       assertCurrent: assertSourceCurrent,
       beforeCommit: () => {
         assertSourceCurrent(); retainedTargets();
-        assertNativeReaderCompatible(join(prefix, 'goodvibes-daemon'), owner.version, io);
+        assertNativeReaderCompatible(join(prefix, 'goodvibes-daemon'), owner.version, io, artifact.readers);
         const current = inspectInstallation(prefix, '', owner.target);
         const previous = inspectInstallation(prefix, '.previous', owner.target);
         if (!current && previous) throw new Error('Previous daemon cohort exists without a current installation');
@@ -123,7 +124,7 @@ export function rollbackDaemonNative(prefix: string, io?: UpdateFileIo): void {
     if (!inspectInstallationIdentity(prefix, '')) throw new Error('No owned current daemon cohort is available');
     const previous = inspectInstallation(prefix, '.previous');
     if (!previous) throw new Error('No complete previous daemon cohort is available');
-    assertNativeReaderCompatible(join(prefix, 'goodvibes-daemon'), previous.version, filesystem);
+    assertNativeReaderCompatible(join(prefix, 'goodvibes-daemon'), previous.version, filesystem, previous.artifact.readers);
   }, { requireComplete: true, native: true });
   if (result.skipped.length) throw new Error('Previous native cohort changed before rollback completed');
 }

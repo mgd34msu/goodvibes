@@ -3,13 +3,13 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSy
 import { dirname, join } from 'node:path';
 import { DAEMON_NATIVE_TARGETS, daemonCiPayloads, daemonNativeHost, type DaemonNativeTarget } from '../../cli/native-artifact.ts';
 import { assertNativeInstallHost, expectedModes, inspectInstallation, targetPaths, type DaemonInstallOwner } from '../../cli/native-installation.ts';
-import { recordDaemonCiArtifact, readVerifiedDaemonCiArtifact } from '../../../scripts/ci-artifact.ts';
+import { readVerifiedDaemonCiArtifact } from '../../../scripts/ci-artifact.ts';
 import { packDaemonNative, verifyDaemonNativePackage } from '../../../scripts/package-native.ts';
 import { acquireDaemonNative, assertQualifiedDaemonAcquisitionTarget, stageDaemonCiArchive } from '../../../scripts/acquire-native.ts';
 import { installDaemonNative, rollbackDaemonNative } from '../../../scripts/install-native.ts';
 import { verifiedDaemonNativePath } from '../../cli/native-launch.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
-import { nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
+import { nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
 import { assertDaemonNativePayloadBytes } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 
 // These are inert fixture bytes. Nothing here claims execution of an ARM64 binary.
@@ -20,7 +20,7 @@ async function fixture(target: DaemonNativeTarget) {
     const file = join(source, 'native', path); mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, index === 3 ? nativeRuntimeProvenance(`${target} fixture 1`, target) : `${target} fixture ${index}`); chmodSync(file, index < 2 ? 0o755 : 0o644);
   }
-  await recordDaemonCiArtifact(source, owner);
+  writeV1NativeArtifactFixture(source, owner);
   const artifact = await readVerifiedDaemonCiArtifact(source, owner);
   const prefix = join(root, 'prefix'); mkdirSync(prefix);
   const writeReceipt = (suffix: '' | '.previous' = '') => {

@@ -7,7 +7,7 @@ import { WEBUI_BINDING_QUERY, WEBUI_BINDING_RESULT } from '../../cli/machine-con
 import { parseDaemonCli } from '../../cli/parser.ts';
 import { runDaemonCli } from '../../cli/run.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
-import { NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { NATIVE_READER_REQUIREMENT_FILE, nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { VERSION } from '../../version.js';
 
 async function invoke(args: string[], env: NodeJS.ProcessEnv = {}, cwd?: string) {
@@ -62,6 +62,11 @@ describe('machine help is the canonical CLI capability contract', () => {
 });
 
 describe('release reader inspection never initializes settings or a runtime', () => {
+  test('the capability description comes from this compiled reader without selecting any installation', async () => {
+    const root = makeOwnedTempDir('daemon-reader-describe'); const output = await invoke(['check-install-reader', '--describe'], { HOME: root }, root);
+    expect(output).toEqual({ code: 0, stdout: [JSON.stringify(nativeReaderCapabilities(VERSION))], stderr: [] });
+    expect(readdirSync(root)).toEqual([]);
+  });
   test('an installation without new data requirements permits its early reader without creating files', async () => {
     const root = makeOwnedTempDir('daemon-reader-inspect-empty'); const before = files(root);
     let constructions = 0; const stdout: string[] = []; const stderr: string[] = [];

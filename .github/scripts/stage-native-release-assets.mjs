@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readTarGzEntries } from '../../packages/engine/sdk/dist/platform/browser/index.js';
-import { assertDaemonNativePayloadBytes, parseDaemonCiArtifact, resolveDaemonNativePayloads, resolveSqliteVecAsset } from '../../packages/engine/sdk/dist/platform/runtime/self-update.js';
+import { assertDaemonNativePayloadBytes, nativeReaderCapabilities, parseDaemonCiArtifact, resolveDaemonNativePayloads, resolveSqliteVecAsset } from '../../packages/engine/sdk/dist/platform/runtime/self-update.js';
 import { verifyAgentCiArtifact } from '../../products/agent/scripts/ci-artifact.ts';
 import { resolveSqliteVecArchive } from '../../products/agent/src/runtime/release-artifacts.ts';
 import { readVerifiedDaemonCiArtifact } from '../../products/daemon/scripts/ci-artifact.ts';
@@ -32,6 +32,17 @@ export function admitNativeReleaseArchive(bytes, members) {
     assert(member && entry.kind === 'file' && entry.mode === member.mode, 'Unexpected native archive path, type or mode');
   }
   return entries;
+}
+
+/** Keep the released v1 updater protocol while preserving the original richer
+ * CI evidence for new clients. Both descriptors name the exact same cohort. */
+export function daemonReleaseArtifactDescriptors(artifact, capabilityBytes) {
+  const captured = parseDaemonCiArtifact(JSON.parse(Buffer.from(capabilityBytes).toString('utf8')), artifact.target);
+  assert.equal(captured.schema, 2, 'Native release reader evidence is missing');
+  assert.deepEqual(captured, artifact, 'Native release reader evidence changed');
+  const compatible = { schema: 1, sourceCommit: artifact.sourceCommit, sourceTree: artifact.sourceTree,
+    headCommit: artifact.headCommit, target: artifact.target, files: artifact.files };
+  return { compatible: Buffer.from(JSON.stringify(compatible, null, 2) + '\n'), capable: Buffer.from(capabilityBytes) };
 }
 
 async function archiveCommand(args, cwd) {
@@ -66,6 +77,8 @@ async function main() {
   assert.equal(git('rev-parse', 'HEAD'), sourceCommit, 'Release checkout must match the admitted producer');
   git('diff', '--exit-code', 'HEAD');
   const sourceTree = git('rev-parse', 'HEAD^{tree}');
+  const suiteVersion = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8')).version;
+  assert.equal(typeof suiteVersion, 'string', 'Release suite version is missing');
   const inputRoot = mkdtempSync(join(tmpdir(), 'goodvibes-native-release-'));
   let ownsOutput = false;
   const retained = [];
@@ -146,16 +159,26 @@ async function main() {
       ].map(member => ({ ...member, path: 'products/daemon/native/' + member.path })));
       const daemon = join(restored.root, 'products/daemon');
       const source = { sourceCommit, sourceTree, headCommit: sourceCommit, target };
-      const artifact = parseDaemonCiArtifact(await readVerifiedDaemonCiArtifact(daemon, source), target);
+      // restore() admitted this exact native CI run/source/target archive.
+      // The coordinator retains its recorded compiled-reader evidence; it
+      // cannot execute an ARM64 daemon on the x64 release host.
+      const artifact = parseDaemonCiArtifact(await readVerifiedDaemonCiArtifact(daemon, source, { readerEvidence: 'recorded-ci' }), target);
+      assert.equal(artifact.schema, 2, 'Current native release requires compiled reader capability evidence');
+      assert.deepEqual(artifact.readers, nativeReaderCapabilities(suiteVersion), 'Compiled daemon reader profile differs from the admitted release source');
       const native = join(daemon, 'native');
       const owner = retainNativeExecutionFiles(native, [...artifact.files, { path: 'ci-artifact.json', mode: 0o644 }]);
-      retained.push(owner); await readVerifiedDaemonCiArtifact(daemon, source);
+      retained.push(owner); await readVerifiedDaemonCiArtifact(daemon, source, { readerEvidence: 'recorded-ci' });
       assertDaemonNativePayloadBytes(artifact, owner.files.slice(0, -1).map(file => file.bytes)); assertCurrent();
       for (const payload of payloads) {
         const file = owner.files.find(file => file.path === payload.relativePath); assert(file, 'Daemon native companion is absent');
         put(payload.assetName, file.bytes, file.mode);
       }
-      put(payloads[0].assetName + '.ci-artifact.json', owner.files.at(-1).bytes, 0o644);
+      // Released v3.1.1 updaters accept only the original exact schema. Keep
+      // that descriptor for their forward upgrade, and publish the richer
+      // candidate evidence separately for readers that understand it.
+      const descriptors = daemonReleaseArtifactDescriptors(artifact, owner.files.at(-1).bytes);
+      put(payloads[0].assetName + '.ci-artifact.json', descriptors.compatible, 0o644);
+      put(payloads[0].assetName + '.reader-ci-artifact.json', descriptors.capable, 0o644);
       put('daemon-native-' + target + '.tgz', restored.archive.bytes, 0o644);
     }
     for (const target of ['darwin-x64', 'darwin-arm64']) {

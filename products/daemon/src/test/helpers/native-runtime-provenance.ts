@@ -1,11 +1,28 @@
-import { mkdirSync, chmodSync, writeFileSync } from 'node:fs';
+import { mkdirSync, chmodSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { resolveDaemonNativePayloads, resolveDaemonNativeTargets, sha256, type DaemonInstallationReceipt } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { resolveDaemonNativePayloads, resolveDaemonNativeTargets, sha256, type DaemonInstallationReceipt, type DaemonArtifactSource, type DaemonCiArtifact } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import type { DaemonNativeTarget } from '../../cli/native-artifact.ts';
 /** Metadata fixture for inert/synthetic interpreters; it does not claim actual ELF execution. */
 export function nativeRuntimeProvenance(runtime: string, target: DaemonNativeTarget = 'linux-x64'): string {
   return JSON.stringify({ version: '1.3.14', target, source: 'build-interpreter', sha256: sha256(Buffer.from(runtime)),
     upstreamSource: 'https://github.com/oven-sh/bun/tree/bun-v1.3.14' });
+}
+
+/** Explicit old-format inert fixture. It certifies no execution or reader
+ * capabilities and must never be used as v2 capability evidence. */
+export function writeV1NativeArtifactFixture(root: string, source: DaemonArtifactSource): DaemonCiArtifact {
+  const target = source.target ?? 'linux-x64'; const payloads = resolveDaemonNativePayloads('linux', target.slice('linux-'.length));
+  if (!payloads) throw new Error('Unsupported fixture target');
+  const artifact: DaemonCiArtifact = { schema: 1, sourceCommit: source.sourceCommit, sourceTree: source.sourceTree, headCommit: source.headCommit, target,
+    files: payloads.map(payload => { const path = join(root, 'native', payload.relativePath); const stat = lstatSync(path);
+      return { path: payload.relativePath, sha256: sha256(readFileSync(path)), mode: stat.mode & 0o777, size: stat.size };
+    }) };
+  writeFileSync(join(root, 'native/ci-artifact.json'), JSON.stringify(artifact)); return artifact;
+}
+
+/** Executable shell fixture of the compiled read-only capability protocol. */
+export function nativeReaderProbeScript(version: string, fallback = ''): string {
+  return `#!/bin/sh\nif [ "$1" = check-install-reader ] && [ "$2" = --describe ]; then\n  printf '%s\\n' '${JSON.stringify({ schema: 1, version, formats: ['payment-retained-holds-v2'] })}'\n  exit 0\nfi\n${fallback}\n`;
 }
 
 /** Complete inert native metadata; no fixture payload is executed. */

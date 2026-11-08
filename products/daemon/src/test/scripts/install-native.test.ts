@@ -7,7 +7,7 @@ import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE, realUpdateF
 import { DAEMON_CI_PAYLOADS, recordDaemonCiArtifact } from '../../../scripts/ci-artifact.ts';
 import { assertNativeInstallHost, installDaemonNative, parseNativeInstallArgs, readDaemonInstallOwner, rollbackDaemonNative, type DaemonInstallOwner } from '../../../scripts/install-native.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
-import { nativeRuntimeProvenance } from '../helpers/native-runtime-provenance.ts';
+import { nativeReaderProbeScript, nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
 
 const nativeTest = process.platform === 'linux' && process.arch === 'x64' ? test : test.skip;
 const shellTest = process.platform === 'win32' ? test.skip : test;
@@ -15,7 +15,7 @@ const shellTest = process.platform === 'win32' ? test.skip : test;
 const first: DaemonInstallOwner = { target: 'linux-x64', sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40), version: '1.2.3' };
 const second: DaemonInstallOwner = { target: 'linux-x64', sourceCommit: 'd'.repeat(40), sourceTree: 'e'.repeat(40), headCommit: 'f'.repeat(40), version: '1.2.4' };
 async function artifact(root: string, owner = first): Promise<void> {
-  const runtime = `#!/bin/sh\necho goodvibes-daemon ${owner.version}\n`;
+  const runtime = nativeReaderProbeScript(owner.version, `echo goodvibes-daemon ${owner.version}`);
   const payloads = [
     '#!/bin/sh\nexec "$(dirname "$0")/goodvibes-daemon-linux-x64.bun" "$@"\n',
     runtime,
@@ -83,6 +83,20 @@ nativeTest('offline downgrade and explicit rollback preserve every native file a
   await expect(f.install(old)).rejects.toThrow('requires GoodVibes 3.1.2');
   expect(state(f.prefix)).toEqual(before); expect(transientFiles(f.prefix)).toEqual([]);
   expect(readFileSync(join(f.prefix, NATIVE_READER_REQUIREMENT_FILE))).toEqual(floor);
+});
+
+nativeTest('an unconfirmed same-version cohort cannot replace or roll back a capable native installation', async () => {
+  const f = await fixture(); const old = { ...first, version: '3.1.2' }; const current = { ...second, version: '3.1.2' };
+  await artifact(f.source, old); writeV1NativeArtifactFixture(f.source, old); await f.install(old);
+  await artifact(f.source, current); await f.install(current); const before = state(f.prefix);
+  createNativeDataWriteOwner({ execPath: join(f.prefix, 'goodvibes-daemon'), version: current.version,
+    assertCurrent: () => { expect(state(f.prefix)).toEqual(before); },
+  }).declare('payment-retained-holds-v2');
+  expect(() => rollbackDaemonNative(f.prefix)).toThrow('does not confirm support');
+  expect(state(f.prefix)).toEqual(before); expect(transientFiles(f.prefix)).toEqual([]);
+  await artifact(f.source, old); writeV1NativeArtifactFixture(f.source, old);
+  await expect(f.install(old)).rejects.toThrow('does not confirm support');
+  expect(state(f.prefix)).toEqual(before); expect(transientFiles(f.prefix)).toEqual([]);
 });
 
 nativeTest('changed/missing/symlink source bytes and mismatched expected source identity refuse before prefix writes', async () => {
@@ -224,7 +238,7 @@ nativeTest('the actual product install CLI consumes a selected source revision i
   writeFileSync(join(root, '.gitignore'), 'node_modules/\nartifacts/\nprefix/\n');
   writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'goodvibes-jev', private: true, version: '9.0.0', workspaces: ['products/*'] }));
   writeFileSync(join(product, 'package.json'), JSON.stringify({ name: '@goodvibes-jev/daemon', private: true, version: '1.2.3', type: 'module', scripts: { 'native:install': 'sh scripts/install-native.sh install' } }));
-  for (const file of ['install-native.ts', 'ci-artifact.ts', 'install-native.sh', 'check-bun.sh']) writeFileSync(join(product, 'scripts', file), readFileSync(resolve(import.meta.dir, '../../../scripts', file)));
+  for (const file of ['install-native.ts', 'ci-artifact.ts', 'native-execution-process.mjs', 'install-native.sh', 'check-bun.sh']) writeFileSync(join(product, 'scripts', file), readFileSync(resolve(import.meta.dir, '../../../scripts', file)));
   mkdirSync(join(product, 'src/cli'), { recursive: true });
   for (const name of ['native-artifact.ts', 'native-installation.ts']) writeFileSync(join(product, 'src/cli', name), readFileSync(resolve(import.meta.dir, '../../cli', name)));
   const git = (...args: string[]) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: root, encoding: 'utf8', stdio: 'pipe', env: Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_'))) }).trim();

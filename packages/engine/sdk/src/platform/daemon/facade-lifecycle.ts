@@ -405,7 +405,7 @@ export class DaemonLifecycleRuntime {
         current();
         const previous = inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io);
         if (!previous) throw new Error('Previous native reader is unavailable');
-        assertNativeReaderCompatible(execPath, previous.version, io);
+        assertNativeReaderCompatible(execPath, previous.version, io, previous.artifact.readers);
       }, { requireComplete: true, native: true, assertCurrent: () => {
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
       } });

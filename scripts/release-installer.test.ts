@@ -8,6 +8,13 @@ import { join, resolve } from 'node:path';
 let root: string, assets: string, home: string;
 const version = '3.1.2';
 const digest = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+function writeChecksums() {
+  writeFileSync(join(assets, 'SHA256SUMS.txt'), readdirSync(assets).filter(name => name !== 'SHA256SUMS.txt').map(name => `${digest(join(assets, name))}  ${name}\n`).join(''));
+}
+function readerArtifact() {
+  const base = JSON.parse(readFileSync(join(assets, 'goodvibes-daemon-linux-x64.ci-artifact.json'), 'utf8'));
+  return { ...base, schema: 2, readers: { schema: 1, version, formats: ['payment-retained-holds-v2'] } };
+}
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'goodvibes-release-install-'));
   assets = join(root, 'assets'); home = join(root, 'home with spaces');
@@ -16,7 +23,7 @@ beforeEach(() => {
     const binary = `${command}-linux-x64`;
     const retire = command === 'goodvibes' ? 'if [ "$FIXTURE_RETIRE_PREFIX" = 1 ]; then mv "$HOME/bin" "$HOME/retired-bin"; mkdir "$HOME/bin"; printf foreign > "$HOME/bin/foreign"; fi; ' : '';
     writeFileSync(join(assets, binary), `#!/bin/sh\ncase "$1" in --version) ${retire}echo '${command} ${version}' ;; webui) echo 'http://127.0.0.1:3421' ;; check-install-reader) exec "$FIXTURE_REAL_BUN" "$FIXTURE_READER_CLI" "$@" ;; esac\n`);
-    writeFileSync(join(assets, binary + '.bun'), '#!/bin/sh\n[ "$1" = -e ] || exit 77\ncp "$FIXTURE_RECEIPT" "$5"\n');
+    writeFileSync(join(assets, binary + '.bun'), '#!/bin/sh\n[ "$1" = -e ] || exit 77\nexec "$FIXTURE_REAL_BUN" "$@"\n');
     writeFileSync(join(assets, binary + '.bun.json'), JSON.stringify({ version: '1.3.14', target: 'linux-x64', source: 'build-interpreter', sha256: digest(join(assets, binary + '.bun')), upstreamSource: 'https://github.com/oven-sh/bun/tree/bun-v1.3.14' }));
     writeFileSync(join(assets, binary + '.bun.LICENSE.md'), 'Fixture runtime notice');
   }
@@ -27,13 +34,12 @@ beforeEach(() => {
       return { path, sha256: digest(file), mode: i < 2 ? 0o755 : 0o644, size: statSync(file).size };
     }) };
   writeFileSync(join(assets, 'goodvibes-daemon-linux-x64.ci-artifact.json'), JSON.stringify(artifact));
-  writeFileSync(join(root, 'receipt.json'), JSON.stringify({schema:1,packageName:'@goodvibes-jev/daemon',version,artifact}));
   const stage = join(root, 'stage'); mkdirSync(join(stage, 'playwright-core'), { recursive: true });
   for (const name of ['package.json', 'index.js', 'cli.js']) writeFileSync(join(stage, 'playwright-core', name), '{}');
   execFileSync('tar', ['-czf', join(assets, 'browser-driver.tar.gz'), '-C', stage, 'playwright-core']);
   mkdirSync(join(stage, 'goodvibes-webui')); writeFileSync(join(stage, 'goodvibes-webui/index.html'), '<title>Fixture WebUI</title>');
   execFileSync('tar', ['-czf', join(assets, `goodvibes-webui-bundle-${version}.tar.gz`), '-C', stage, 'goodvibes-webui']);
-  writeFileSync(join(assets, 'SHA256SUMS.txt'), readdirSync(assets).map(name => `${digest(join(assets, name))}  ${name}\n`).join(''));
+  writeChecksums();
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 function run(uninstall = false, fault?: 'agent' | 'prefix') {
@@ -54,7 +60,7 @@ function run(uninstall = false, fault?: 'agent' | 'prefix') {
       GOODVIBES_INSTALL_DIR: join(home, 'bin'), GOODVIBES_WAKE_MODEL: '0', GOODVIBES_DAEMON_SERVICE: '0', GOODVIBES_RESTART_DAEMON: '0',
       GOODVIBES_UNINSTALL: uninstall ? '1' : '0', FIXTURE_REAL_BUN: process.execPath, FIXTURE_READER_CLI: resolve(import.meta.dir, 'test-helpers/check-install-reader.ts'),
       FIXTURE_FAIL_AFTER_PROGRAMS: fault === 'agent' ? '1' : '0', FIXTURE_RETIRE_PREFIX: fault === 'prefix' ? '1' : '0',
-      FIXTURE_RECEIPT: join(root, 'receipt.json'), FIXTURE_ASSETS: assets, FETCH_TRACE: join(root, 'fetches') } });
+      FIXTURE_ASSETS: assets, FETCH_TRACE: join(root, 'fetches') } });
 }
 test('released suite installs all products, companions and native receipt without a build', () => {
   const result = run(); expect(result.status, result.stderr).toBe(0);
@@ -106,6 +112,26 @@ test('saved reader requirements reject an incompatible release before replacing 
   expect(readdirSync(join(home, 'bin')).filter(name => /update-transaction|install-claim/.test(name))).toEqual([]);
 });
 
+test('compatible published descriptors preserve the old protocol and install the matching compiled reader evidence', () => {
+  const candidate = readerArtifact();
+  writeFileSync(join(assets, 'goodvibes-daemon-linux-x64.reader-ci-artifact.json'), JSON.stringify(candidate)); writeChecksums();
+  const result = run(); expect(result.status, result.stderr).toBe(0);
+  expect(JSON.parse(readFileSync(join(assets, 'goodvibes-daemon-linux-x64.ci-artifact.json'), 'utf8')).schema).toBe(1);
+  expect(JSON.parse(readFileSync(join(home, 'bin/daemon-installation.json'), 'utf8')).artifact).toEqual(candidate);
+});
+
+test.each(['source', 'version', 'formats'] as const)('independently pinned conflicting reader %s evidence refuses before replacing programs', field => {
+  mkdirSync(join(home, 'bin')); writeFileSync(join(home, 'bin/goodvibes'), 'original program');
+  const candidate = readerArtifact();
+  if (field === 'source') candidate.sourceTree = 'f'.repeat(40);
+  if (field === 'version') candidate.readers.version = '3.1.3';
+  if (field === 'formats') candidate.readers.formats = [];
+  writeFileSync(join(assets, 'goodvibes-daemon-linux-x64.reader-ci-artifact.json'), JSON.stringify(candidate)); writeChecksums();
+  const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('release metadata could not be confirmed');
+  expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('original program');
+  expect(existsSync(join(home, 'bin/goodvibes-daemon'))).toBe(false);
+});
+
 test('compatible reader evidence permits reinstall and survives data-preserving uninstall and a fresh reinstall', () => {
   expect(run().status).toBe(0);
   const floor = join(home, 'bin/.goodvibes-reader-requirements.json');
@@ -155,7 +181,7 @@ test.each(['browser', 'webui'] as const)('an independently pinned but incomplete
   const archive = kind === 'browser' ? 'browser-driver.tar.gz' : `goodvibes-webui-bundle-${version}.tar.gz`;
   const empty = join(root, 'empty-archive'); mkdirSync(empty);
   execFileSync('tar', ['-czf', join(assets, archive), '-C', empty, '.']);
-  writeFileSync(join(assets, 'SHA256SUMS.txt'), readdirSync(assets).filter(name => name !== 'SHA256SUMS.txt').map(name => `${digest(join(assets, name))}  ${name}\n`).join(''));
+  writeChecksums();
   const result = run(); expect(result.status).not.toBe(0); expect(result.stderr).toContain('missing');
   expect(readFileSync(join(home, 'bin/goodvibes'), 'utf8')).toBe('original program');
   expect(existsSync(join(home, 'bin/goodvibes-daemon'))).toBe(false);

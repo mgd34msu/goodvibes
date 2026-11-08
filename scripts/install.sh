@@ -354,6 +354,60 @@ prepare_release() {
     tar -xzf "$WORKDIR/goodvibes-webui-bundle-${VERSION#v}.tar.gz" -C "$WORKDIR/webui-staging" || fail 'Could not extract the verified WebUI.'
     [ -f "$WORKDIR/webui-staging/goodvibes-webui/index.html" ] || fail 'The verified WebUI is missing goodvibes-webui/index.html.'
   fi
+  if [ "$os_tag" = linux ]; then prepare_daemon_receipt; fi
+}
+
+prepare_daemon_receipt() {
+  _receipt_asset="goodvibes-daemon-$PLATFORM_SUFFIX"
+  _reader_asset="$_receipt_asset.reader-ci-artifact.json"
+  _reader_source=""
+  _compiled_readers=null
+  chmod 755 "$WORKDIR/$_receipt_asset.bun"
+  if awk -v name="$_reader_asset" '$2 == name || $2 == "*"name { found=1 } END { exit !found }' "$WORKDIR/SHA256SUMS.txt"; then
+    fetch_release_asset "$_reader_asset"
+    _reader_source="$WORKDIR/$_reader_asset"
+    chmod 755 "$WORKDIR/$_receipt_asset"
+    _compiled_readers=$("$WORKDIR/$_receipt_asset" check-install-reader --describe) || fail 'The verified daemon did not confirm its compiled readers. No installed program was replaced.'
+  fi
+  # The ordinary released Bun prepares metadata in private staging. Older
+  # updaters still consume the original descriptor; richer evidence must name
+  # precisely the same source and payloads and match the actual staged reader.
+  "$WORKDIR/$_receipt_asset.bun" -e '
+    try {
+      const [primaryFile, readerFile, compiledJson, version, output] = process.argv.slice(1);
+      const primary = JSON.parse(await Bun.file(primaryFile).text());
+      const binary = primaryFile.slice(primaryFile.lastIndexOf("/")+1).replace(/\.ci-artifact\.json$/,""), target = binary.slice("goodvibes-daemon-".length);
+      const exact = (a, keys) => a && typeof a === "object" && !Array.isArray(a) && Object.keys(a).length === keys.length && keys.every(k => Object.hasOwn(a,k));
+      const paths = [binary,binary+".bun",binary+".bun.LICENSE.md",binary+".bun.json",`lib/sqlite-vec-${target}/vec0.so`];
+      const validate = (a, schema) => {
+        const keys = ["schema","sourceCommit","sourceTree","headCommit","target","files",...(schema === 2 ? ["readers"] : [])];
+        if (!exact(a,keys) || a.schema !== schema || a.target !== target || !Array.isArray(a.files) || a.files.length !== paths.length
+          || [a.sourceCommit,a.sourceTree,a.headCommit].some(v => typeof v !== "string" || !/^[a-f0-9]{40}$/.test(v))) throw new Error();
+        a.files.forEach((f,i) => {
+          if (!exact(f,["path","sha256","mode","size"]) || f.path !== paths[i] || f.mode !== (i < 2 ? 0o755 : 0o644)
+            || typeof f.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(f.sha256) || !Number.isSafeInteger(f.size) || f.size <= 0) throw new Error();
+        });
+      };
+      validate(primary,1);
+      const identity = a => [a.sourceCommit,a.sourceTree,a.headCommit,a.target,a.files.map(f => [f.path,f.sha256,f.mode,f.size])];
+      let artifact = primary;
+      if (readerFile) {
+        const candidate = JSON.parse(await Bun.file(readerFile).text());
+        const compiled = JSON.parse(compiledJson);
+        validate(candidate,2);
+        const profile = r => [r.schema,r.version,r.formats];
+        if (!exact(candidate.readers,["schema","version","formats"]) || !exact(compiled,["schema","version","formats"])
+          || JSON.stringify(identity(candidate)) !== JSON.stringify(identity(primary))
+          || candidate.readers.schema !== 1 || candidate.readers.version !== version
+          || !Array.isArray(candidate.readers.formats) || candidate.readers.formats.length > 256
+          || candidate.readers.formats.some(v => typeof v !== "string" || !/^[a-z][a-z0-9-]{0,95}$/.test(v))
+          || new Set(candidate.readers.formats).size !== candidate.readers.formats.length
+          || JSON.stringify(profile(candidate.readers)) !== JSON.stringify(profile(compiled))) throw new Error();
+        artifact = candidate;
+      }
+      await Bun.write(output, JSON.stringify({schema:1,packageName:"@goodvibes-jev/daemon",version,artifact},null,2)+"\n");
+    } catch { process.exitCode = 1; }
+  ' "$WORKDIR/$_receipt_asset.ci-artifact.json" "$_reader_source" "$_compiled_readers" "${VERSION#v}" "$WORKDIR/daemon-installation.json" || fail 'The verified daemon release metadata could not be confirmed. No installed program was replaced.'
 }
 
 release_install_claims() {
@@ -484,12 +538,9 @@ install_release_binary() {
   assert_install_claims
   mv -f "$INSTALL_DIR/$_installed_binary.incoming" "$INSTALL_DIR/$_installed_binary"
   if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = linux ]; then
-    "${INSTALL_DIR}/${_installed_binary}.bun" -e '
-      const artifact = JSON.parse(await Bun.file(process.argv[1]).text());
-      const receipt = {schema:1,packageName:"@goodvibes-jev/daemon",version:process.argv[2],artifact};
-      await Bun.write(process.argv[3], JSON.stringify(receipt,null,2)+"\n");
-    ' "$WORKDIR/$_binary_asset.ci-artifact.json" "${VERSION#v}" "$INSTALL_DIR/daemon-installation.json.incoming"
+    cp "$WORKDIR/daemon-installation.json" "$INSTALL_DIR/daemon-installation.json.incoming"
     chmod 644 "$INSTALL_DIR/daemon-installation.json.incoming"
+    assert_install_claims
     mv -f "$INSTALL_DIR/daemon-installation.json.incoming" "$INSTALL_DIR/daemon-installation.json"
   fi
 }

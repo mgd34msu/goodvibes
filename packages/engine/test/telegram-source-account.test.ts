@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.js';
@@ -171,6 +171,7 @@ function pollingHarness(options: { readonly secrets?: SecretsManager; readonly r
   const registrationStarted = deferred<void>();
   const registrations: Array<{ readonly secret: string; readonly signal: RequestInit['signal'] }> = [];
   const calls: string[] = [];
+  const pollOffsets: unknown[] = [];
   const supervisor = new TelegramIngressSupervisor({
     configManager: { get: (key: string) => config[key], set: (key: string, value: unknown) => { config[key] = value; } } as never,
     secretsManager: options.secrets ?? { get: () => null, getGlobalHome: () => undefined,
@@ -191,21 +192,51 @@ function pollingHarness(options: { readonly secrets?: SecretsManager; readonly r
         registrationStarted.resolve();
         return ok(pendingRegistration ? await pendingRegistration : registrationResult);
       }
-      if (method === 'getUpdates') return new Promise<Response>((_resolve, reject) => {
+      if (method === 'getUpdates') {
+        pollOffsets.push((JSON.parse(String(init.body)) as Record<string, unknown>)['offset']);
+        return new Promise<Response>((_resolve, reject) => {
         const abort = () => reject(new DOMException('aborted', 'AbortError'));
         if (init.signal?.aborted) abort(); else init.signal?.addEventListener('abort', abort, { once: true });
-      });
+        });
+      }
       return ok(true);
     }),
   });
   cleanups.push(async () => { await supervisor.stop(); rmSync(directory, { recursive: true, force: true }); });
-  return { owner, supervisor, config, calls, registrations, registrationStarted: registrationStarted.promise,
+  return { owner, supervisor, config, calls, pollOffsets, registrations, directory, registrationStarted: registrationStarted.promise,
     setRegistrationResult: (value: unknown) => { registrationResult = value; },
     setPendingRegistration: (value: Promise<unknown> | null) => { pendingRegistration = value; },
     setIdentity: (value: Record<string, unknown>) => { result = value; },
     setPendingIdentity: (value: Promise<Record<string, unknown>> | null) => { pendingIdentity = value; },
     setRegistryToken: (value: string | null) => { registryToken = value; for (const listener of secretListeners) listener('SYNTHETIC_TELEGRAM_TOKEN'); } };
 }
+
+test('actual polling migration verifies the bot, keeps the saved offset and restarts from that offset', async () => {
+  const f = pollingHarness(), path = join(f.directory, 'offset.json');
+  const original = JSON.stringify({ version: 1, offset: 501, updatedAt: '2026-11-08T12:00:00.000Z' });
+  writeFileSync(path, original);
+  expect((await f.supervisor.start()).mode).toBe('inactive'); expect(f.pollOffsets).toEqual([]);
+  const preview = await f.supervisor.previewCursorMigration(); if (preview.state !== 'unbound') throw new Error();
+  expect(preview).toMatchObject({ accountId: '123', username: 'verified_bot', offset: 501 });
+  expect(readFileSync(path, 'utf8')).toBe(original);
+  // The migration's getMe read establishes only which queue is selected;
+  // it cannot manufacture the native ingress account capability.
+  expect(f.owner.reader.current()).toBeNull();
+  const result = await f.supervisor.commitCursorMigration({ previewId: preview.previewId, confirm: true });
+  expect(result).toMatchObject({ state: 'migrated', accountId: '123', offset: 501, running: true });
+  expect(f.pollOffsets).toEqual([501]);
+  expect(JSON.parse(readFileSync(path, 'utf8'))).toMatchObject({ version: 2, accounts: [{ accountId: '123', offset: 501 }] });
+});
+
+test('a changed actual bot credential cannot adopt an older cursor preview', async () => {
+  const f = pollingHarness(), path = join(f.directory, 'offset.json');
+  const original = JSON.stringify({ version: 1, offset: 501, updatedAt: '2026-11-08T12:00:00.000Z' }); writeFileSync(path, original);
+  await f.supervisor.start();
+  const preview = await f.supervisor.previewCursorMigration(); if (preview.state !== 'unbound') throw new Error();
+  f.config['surfaces.telegram.botToken'] = '456:replacement-credential';
+  await expect(f.supervisor.commitCursorMigration({ previewId: preview.previewId, confirm: true })).rejects.toThrow();
+  expect(readFileSync(path, 'utf8')).toBe(original); expect(f.pollOffsets).toEqual([]);
+});
 
 function localCredentials() {
   const directory = mkdtempSync(join(tmpdir(), 'telegram-local-credentials-'));

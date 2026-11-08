@@ -38,6 +38,7 @@ import {
 import { runHomeAssistantOperatorAction } from './builtin/homeassistant.js';
 import { getBuiltinSetupSchema } from './builtin/setup-schema.js';
 import { TelegramIngressSupervisor, type TelegramIngressStatus } from './telegram/ingress.js';
+import { TelegramOffsetStoreError } from './telegram/offset-store.js';
 import { logger } from '../utils/logger.js';
 import { registerBuiltinChannelPlugins } from './builtin/plugins.js';
 import type { BuiltinChannelRuntimeDeps, ManagedSurface } from './builtin/shared.js';
@@ -411,6 +412,14 @@ export class BuiltinChannelRuntime {
     actionId: string,
     input?: Record<string, unknown>,
   ): Promise<unknown> {
+    if (surface === 'telegram' && (actionId === 'cursor-migration-preview' || actionId === 'cursor-migration-commit')) {
+      if (!this.telegramIngress) throw new TelegramOffsetStoreError('unavailable');
+      if (actionId === 'cursor-migration-preview') return this.telegramIngress.previewCursorMigration();
+      if (input?.confirm !== true || typeof input.previewId !== 'string' || Object.keys(input).some(key => key !== 'confirm' && key !== 'previewId')) {
+        throw new TelegramOffsetStoreError('invalid-request');
+      }
+      return this.telegramIngress.commitCursorMigration({ previewId: input.previewId, confirm: true });
+    }
     if (surface === 'homeassistant') {
       const homeAssistantResult = await runHomeAssistantOperatorAction({ deps: this.deps }, actionId, input);
       if (homeAssistantResult.handled) return homeAssistantResult.result;

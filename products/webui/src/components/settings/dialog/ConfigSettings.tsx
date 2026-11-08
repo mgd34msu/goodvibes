@@ -45,6 +45,7 @@ import { SettingsHeadingLevel } from './parts';
 import { FeatureUnitCard } from '../FeatureUnitCard';
 import { PaymentCardEntry } from '../PaymentCardEntry';
 import { PaymentWindows } from '../PaymentWindows';
+import { TelegramCursorRecovery } from '../TelegramCursorRecovery';
 import { displayConfigValue, isUnresolvedConfigKey, SECRET_CONFIG_KEYS } from '../../../lib/config-redaction';
 import {
   buildSettingsModel,
@@ -275,6 +276,7 @@ export function ConfigGroupList({
           */}
           {group.id === 'payments' && <PaymentCardEntry currency={currency} />}
           {group.id === 'payments' && <PaymentWindows />}
+          {group.id === 'surfaces' && <TelegramCursorRecovery />}
           {group.featureUnits.map((unit) => (
             <FeatureUnitCard
               key={unit.feature.id}

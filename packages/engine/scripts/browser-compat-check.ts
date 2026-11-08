@@ -16,6 +16,7 @@ const runtimeNeutralEntries = [
   'sdk/dist/browser-knowledge.js',
   'sdk/dist/browser-decision-router.js',
   'sdk/dist/platform/gate/presets.js',
+  'sdk/dist/platform/channels/telegram/cursor-migration-data.js',
   'sdk/dist/react-native.js',
   'sdk/dist/expo.js',
   // /auth subpath is used by RN consumers for token helpers, must be node:-free

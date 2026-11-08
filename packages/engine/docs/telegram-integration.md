@@ -315,9 +315,21 @@ The daemon does not jump to the newest message or discard the backlog. A failed
 cursor save also stops polling before the next request can confirm that offset.
 The channel's status gives the recovery reason. Restore the original state and
 inspect missed messages before restarting ingress; do not delete the cursor to
-hide the failure. Version 1 cursors have no bot binding and require explicit
-migration after their original bot is established; automatic migration is not
-implemented yet. Native installs publish the new reader requirement before
+hide the failure. Version 1 cursors have no bot binding. In WebUI, open
+**Settings → Surfaces → Telegram cursor recovery** and choose **Review saved
+Telegram cursor**. TUI and Agent provide the same confirmation at
+**`/channels telegram-cursor`**. With polling enabled and a locally stored bot
+credential, the daemon verifies the selected bot through Telegram. Confirm only
+if that saved position belongs to the displayed bot: choosing the wrong bot
+can skip its waiting messages. Confirmation preserves the saved offset and
+restarts polling. It never moves the cursor to the newest message.
+
+The preview expires after five minutes and is invalidated by changes to the
+saved file, selected bot, credentials or serving runtime. A failed or lost
+confirmation requires a fresh review; the interfaces do not retry it. Damaged
+or unsupported records remain blocked for inspection.
+
+Native installs publish the new reader requirement before
 writing account-bound cursors, so an incompatible binary cannot be restored.
 
 A cursor is not a durable message archive or proof that replies are available

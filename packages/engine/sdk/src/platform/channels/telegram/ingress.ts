@@ -37,6 +37,8 @@ import { IngressProcessingHealth, type ChannelIngressAlarm } from '../ingress-al
 import { TelegramApiError, TelegramBotApi, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
 import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramOffsetStart } from './offset-store.js';
 import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './conflict-policy.js';
+import { TelegramCursorMigration } from './cursor-migration.js';
+import type { TelegramCursorPreview, TelegramCursorMigrationResult } from './cursor-migration-data.js';
 import type { TelegramSourceAccountLease, TelegramSourceAccountOwner } from './source-account.js';
 
 /** Telegram holds the request open this long when there is nothing to report. */
@@ -146,6 +148,8 @@ export class TelegramIngressSupervisor {
   private abort: AbortController | null = null;
   private loop: Promise<void> | null = null;
   private webhookSetup: Promise<TelegramIngressStatus> | null = null;
+  private cursorMigration: TelegramCursorMigration | undefined;
+  private readonly cursorMigrations = new Set<TelegramCursorMigration>();
   /** Who this bot is, per getMe, see resolveBotIdentity. */
   private botIdentity: TelegramBotIdentity | null = null;
   private currentStatus: TelegramIngressStatus = {
@@ -229,6 +233,24 @@ export class TelegramIngressSupervisor {
 
     const mode = String(config.get('surfaces.telegram.mode') ?? 'webhook');
     const api = this.deps.createApi?.(token) ?? new TelegramBotApi(token);
+    const migration = new TelegramCursorMigration({ filePath: this.deps.offsetFilePath, beforeWrite: this.beforeCursorWrite,
+      identity: async owner => {
+        const incarnation = typeof config.getConfigurationIncarnation === 'function' ? config.getConfigurationIncarnation() : undefined;
+        const current = () => {
+          owner.assertCurrent();
+          if (generation !== this.generation || this.stopped || !config.get('surfaces.telegram.enabled')
+            || config.get('surfaces.telegram.mode') !== 'polling' || this.credentialRevision !== credentialRevision
+            || credentialSnapshot === null || this.sourceCredentialSnapshot() !== credentialSnapshot || this.resolveSourceTokenSync() !== token
+            || incarnation !== (typeof config.getConfigurationIncarnation === 'function' ? config.getConfigurationIncarnation() : undefined)) {
+            throw new TelegramOffsetStoreError('unavailable');
+          }
+        };
+        current(); const identity = await api.getVerifiedIdentity(owner.signal); current();
+        if (!identity) throw new TelegramOffsetStoreError('unavailable');
+        return Object.freeze({ id: identity.id, username: identity.username, assertCurrent: current });
+      },
+    });
+    this.cursorMigration = migration; this.cursorMigrations.add(migration);
 
     // Learn who this bot is before arming ingress, so the very first message is
     // matched against a real handle rather than an empty string.
@@ -250,6 +272,10 @@ export class TelegramIngressSupervisor {
    */
   async stop(): Promise<void> {
     const generation = ++this.generation;
+    this.cursorMigration = undefined;
+    const retiringMigrations = [...this.cursorMigrations];
+    const migrationClose = Promise.allSettled(retiringMigrations.map(async owner => { await owner.close(); this.cursorMigrations.delete(owner); }))
+      .then(results => { if (results.some(result => result.status === 'rejected')) throw new Error('Telegram cursor recovery did not retire cleanly'); });
     this.deps.telegramSourceAccounts?.invalidate();
     this.credentialUnsubscribe?.();
     this.credentialUnsubscribe = null;
@@ -261,10 +287,31 @@ export class TelegramIngressSupervisor {
     const webhookSetup = this.webhookSetup;
     if (loop) await loop.catch(() => { /* loop reports its own failures */ });
     if (webhookSetup) await webhookSetup.catch(() => { /* setup reports its own failures */ });
+    await migrationClose;
     if (this.abort === abort) this.abort = null;
     if (generation === this.generation && this.currentStatus.running) {
       this.currentStatus = { ...this.currentStatus, running: false };
     }
+  }
+
+  previewCursorMigration(): Promise<TelegramCursorPreview> {
+    return this.cursorMigration?.preview() ?? Promise.reject(new TelegramOffsetStoreError('unavailable'));
+  }
+
+  async commitCursorMigration(input: { readonly previewId: string; readonly confirm: true }): Promise<TelegramCursorMigrationResult> {
+    const owner = this.cursorMigration, generation = this.generation;
+    if (!owner) throw new TelegramOffsetStoreError('unavailable');
+    const result = await owner.commit(input);
+    // The write may be complete when shutdown wins the next microtask. Never
+    // restart a retired serving owner or call the saved write a failure.
+    let running = false;
+    if (this.cursorMigration === owner && generation === this.generation) {
+      try { const status = await this.start(); running = status.mode === 'polling' && status.running; }
+      catch { /* Saved migration stands; channel status can be inspected. */ }
+    }
+    return Object.freeze({ state: 'migrated', ...result, running,
+      message: running ? 'The saved cursor is bound to this bot and polling has restarted.'
+        : 'The saved cursor is bound to this bot. Check channel status before restarting polling.' });
   }
 
   // ── mode setup ────────────────────────────────────────────────────────────

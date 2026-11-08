@@ -1,3 +1,4 @@
+import { openTelegramCursorRecovery } from './telegram-cursor.ts';
 import type { CommandRegistry } from '../command-registry.ts';
 import type { CommandContext } from '../command-registry.ts';
 import type { AgentWorkspaceChannelSetupGuide, AgentWorkspaceChannelStatus } from '../agent-workspace-channels.ts';
@@ -379,9 +380,10 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
     aliases: ['channel'],
     description: 'Inspect Agent channel readiness or send an explicitly confirmed delivery message',
     hidden: true,
-    usage: '[list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>]',
-    argsHint: 'list|readiness|ready|attention|triage|guide|show|deliveries|send|accounts|policies|status|doctor|setup',
+    usage: '[list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]',
+    argsHint: 'list|readiness|ready|attention|triage|guide|show|deliveries|send|accounts|policies|status|doctor|setup|telegram-cursor',
     async handler(args, ctx) {
+      if (args[0]?.trim().toLowerCase() === 'telegram-cursor') { await openTelegramCursorRecovery(ctx); return; }
       const channels = buildAgentWorkspaceChannels(ctx);
       const subcommand = (args[0] ?? 'readiness').trim().toLowerCase();
 
@@ -506,7 +508,7 @@ export function registerChannelsRuntimeCommands(registry: CommandRegistry): void
         return;
       }
 
-      ctx.print('Usage: /channels [list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>]');
+      ctx.print('Usage: /channels [list|readiness|ready|attention|triage [limit]|guide [id]|show <id>|deliveries [limit]|send --channel <id> --message <text> --yes|accounts|policies|status|doctor <id>|setup <id>|telegram-cursor]');
     },
   });
 }

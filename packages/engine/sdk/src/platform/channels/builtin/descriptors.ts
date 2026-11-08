@@ -132,7 +132,7 @@ export function listBuiltinCapabilities(
 }
 
 export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOperatorActionDescriptor[] {
-  const actions = [
+  const actions: ChannelOperatorActionDescriptor[] = [
     {
       id: 'inspect-account',
       surface,
@@ -346,6 +346,14 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
       metadata: {},
     },
   ];
+  if (surface === 'telegram') actions.push(
+    { id: 'cursor-migration-preview', surface, label: 'Review previous Telegram cursor',
+      description: 'Verify the selected bot and review its unbound saved position before explicit migration.', dangerous: false, metadata: {} },
+    { id: 'cursor-migration-commit', surface, label: 'Bind previous Telegram cursor',
+      description: 'Confirm that the reviewed saved position belongs to this bot, preserve that position and restart polling.', dangerous: true,
+      inputSchema: { type: 'object', properties: { previewId: { type: 'string' }, confirm: { const: true } },
+        required: ['previewId', 'confirm'], additionalProperties: false }, metadata: {} },
+  );
   return surface === HOME_ASSISTANT_SURFACE
     ? [...actions, ...listHomeAssistantOperatorActions()]
     : actions;

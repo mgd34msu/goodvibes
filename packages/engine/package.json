@@ -629,6 +629,11 @@
       "types": "./sdk/dist/platform/channels/index.d.ts",
       "import": "./sdk/dist/platform/channels/index.js"
     },
+    "./sdk/platform/channels/telegram-cursor": {
+      "bun": "./sdk/src/platform/channels/telegram/cursor-migration-data.ts",
+      "types": "./sdk/dist/platform/channels/telegram/cursor-migration-data.d.ts",
+      "import": "./sdk/dist/platform/channels/telegram/cursor-migration-data.js"
+    },
     "./sdk/platform/cloudflare": {
       "bun": "./sdk/src/platform/cloudflare/index.ts",
       "types": "./sdk/dist/platform/cloudflare/index.d.ts",
@@ -2408,6 +2413,11 @@
       "bun": "./terminal-shell/src/payment-window-command.ts",
       "types": "./terminal-shell/dist/payment-window-command.d.ts",
       "import": "./terminal-shell/dist/payment-window-command.js"
+    },
+    "./terminal-shell/telegram-cursor-command": {
+      "bun": "./terminal-shell/src/telegram-cursor-command.ts",
+      "types": "./terminal-shell/dist/telegram-cursor-command.d.ts",
+      "import": "./terminal-shell/dist/telegram-cursor-command.js"
     },
     "./terminal-shell/card-field-prompts": {
       "bun": "./terminal-shell/src/card-field-prompts.ts",

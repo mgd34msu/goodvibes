@@ -91,6 +91,9 @@ export async function listBuiltinRepairActions(
       : undefined,
     metadata: { actionId: action.id, available: action.available },
   }));
+  if (surface === 'telegram') actions.push({ id: 'cursor-migration-preview', label: 'Review previous Telegram cursor',
+    description: 'Open Settings → Surfaces → Telegram cursor recovery, or /channels telegram-cursor in an owner terminal. Verify the bot before preserving the saved position.',
+    dangerous: false, metadata: { actionId: 'cursor-migration-preview' } });
   return actions;
 }
 

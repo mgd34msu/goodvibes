@@ -9,6 +9,7 @@ import { getClientLifetime, isClientLifetimeCurrent, tokenStore, WEBUI_TOKEN_STO
 export { tokenStore, WEBUI_TOKEN_STORE_KEY } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes-jev/engine/contracts';
 import { routedFetch } from './relay-connection';
+import { readTelegramCursorPreview, readTelegramCursorMigrationResult, type TelegramCursorPreview } from '@goodvibes-jev/engine/sdk/platform/channels/telegram-cursor';
 import { resolveDaemonRefusal } from './daemon-refusal';
 import { DecisionModelsDisabledError } from '@goodvibes-jev/engine/sdk/browser/decision-policy';
 import { browserDecisionPolicy } from './decision-policy';
@@ -560,6 +561,16 @@ async function stopPurchaseOperation(input: Pick<PaymentOperationView, 'purchase
     body: { purchaseId, operationId, confirm: true }, explicitUserRequest: true, interpretRefusal: false, signal }));
   if (result.purchaseId !== purchaseId || result.operationId !== operationId) throw new Error('The stop acknowledgement did not match the selected purchase. Refresh its status.');
   return result;
+}
+
+async function telegramCursorAction(actionId: 'cursor-migration-preview' | 'cursor-migration-commit', body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+  const route = EXTRA_METHOD_ROUTES['channels.actions.invoke'];
+  if (!route || route.method !== 'POST') throw new Error('The connected client does not provide channel recovery actions.');
+  const { path } = interpolateRoute(route, { surface: 'telegram', actionId });
+  const result = await requestJson(path, { method: 'POST', body, signal, explicitUserRequest: true, interpretRefusal: false });
+  if (!result || typeof result !== 'object' || Array.isArray(result) || !('actionId' in result) || result.actionId !== actionId
+    || !('surface' in result) || result.surface !== 'telegram' || !('result' in result)) throw new Error('The channel recovery response did not match this request.');
+  return result.result;
 }
 
 // ---------------------------------------------------------------------------
@@ -2127,6 +2138,15 @@ export const sdk = {
     // Channel profiles (channels.profiles.*, SDK 1.6.1). Real generated I/O maps
     // throughout, no bridge overrides needed, unlike Approvals/Tasks above.
     channels: {
+      telegramCursor: {
+        preview: async (signal?: AbortSignal) => readTelegramCursorPreview(await telegramCursorAction('cursor-migration-preview', {}, signal)),
+        commit: async (preview: Extract<TelegramCursorPreview, { readonly state: 'unbound' }>, signal?: AbortSignal) => {
+          const { previewId, accountId, offset } = preview;
+          const result = readTelegramCursorMigrationResult(await telegramCursorAction('cursor-migration-commit', { previewId, confirm: true }, signal));
+          if (result.accountId !== accountId || result.offset !== offset) throw new Error('The cursor acknowledgement did not match the selected preview. Refresh its status.');
+          return result;
+        },
+      },
       profiles: {
         list: () => invokeOperator('channels.profiles.list', {}),
         get: (surfaceKind: string, channelId?: string) =>

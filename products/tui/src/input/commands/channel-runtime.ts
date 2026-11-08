@@ -1,3 +1,4 @@
+import { openTelegramCursorRecovery } from './telegram-cursor.ts';
 import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes-jev/engine/sdk/platform/gate/presets';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireIntegrationHelpers } from './runtime-services.ts';
@@ -145,8 +146,8 @@ export function registerChannelRuntimeCommands(registry: CommandRegistry): void 
     name: 'channel',
     aliases: ['channels'],
     description: 'Pair channels and inspect routes, delivery strategies, ingress policies, and per-channel profile bindings',
-    usage: '[pair [surface]|status|routes|delivery|policy|profiles [list|get|set|delete]] [--json]',
-    argsHint: 'pair | status | routes | delivery | policy | profiles',
+    usage: '[pair [surface]|telegram-cursor|status|routes|delivery|policy|profiles [list|get|set|delete]] [--json]',
+    argsHint: 'pair | telegram-cursor | status | routes | delivery | policy | profiles',
     async handler(args, ctx) {
       const sub = args[0];
       const asJson = args.includes('--json');
@@ -155,6 +156,8 @@ export function registerChannelRuntimeCommands(registry: CommandRegistry): void 
         ctx.openView?.('routes');
         return;
       }
+
+      if (sub === 'telegram-cursor') { await openTelegramCursorRecovery(ctx); return; }
 
       if (sub === 'pair') {
         await runChannelPairing(args.slice(1), ctx);
@@ -275,6 +278,7 @@ export function registerChannelRuntimeCommands(registry: CommandRegistry): void 
       ctx.print(
         'Usage: /channel <subcommand>\n'
         + '  (no args)  — open Agents (where routes live now)\n'
+        + '  telegram-cursor — review and bind a previous saved Telegram cursor\n'
         + '  pair [surface] — guided channel pairing: list adapters, enter declared credentials, verify\n'
         + '  status     — channel overview: routes, sessions, tasks, pending approvals\n'
         + '  routes     — active route binding snapshot\n'

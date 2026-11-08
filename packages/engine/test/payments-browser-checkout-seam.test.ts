@@ -326,6 +326,39 @@ function arm(guard: CardMaterialRedactor, sessionId = 'session-1', pageId = 'pag
 
 // ── The adapter ─────────────────────────────────────────────────────────────
 
+test('restored driver retains its exact snapshot binding across fills, terms and submit, while page ownership outlives cleared refs', async () => {
+  const guard = new CardMaterialRedactor(), scripted = new ScriptedEngine({ guard });
+  const observed: string[] = [];
+  const check = (method: string, owner: Parameters<CheckoutBrowserEngine['type']>[2]) => {
+    expect(owner?.snapshotId).toBe('restored-snapshot'); owner?.assertCurrent(); observed.push(method);
+  };
+  const engine: CheckoutBrowserEngine = {
+    cardFieldGuard: () => guard, tabs: target => scripted.tabs(target),
+    type: async (target, args, owner) => { check('fill', owner); return scripted.type(target, args); },
+    select: async (target, args, owner) => { check('choose', owner); return scripted.select(target, args); },
+    fillSecretBatch: async (target, args, owner) => { check('secret-batch', owner); return scripted.fillSecretBatch(target, args); },
+    observeCheckoutTerms: async (target, owner, ref) => { check('terms', owner); return scripted.observeCheckoutTerms(target, owner, ref); },
+    click: async (target, args, owner) => { check('submit', owner); const result = await scripted.click(target, args, owner); owner?.assertCurrent(); return result; },
+  };
+  let active = true;
+  const binding = { snapshotId: 'restored-snapshot', assertCurrent() { if (!active) throw new Error('Original page retired'); } };
+  const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => engine, cardFieldGuard: guard })('session-1', 'page-1', binding);
+  binding.snapshotId = 'replacement-snapshot';
+  await driver.fill('ship-city', 'Detroit');
+  await driver.choose('shipping', 'Standard (4-6 days)');
+  arm(guard);
+  await driver.fillSecrets([{ target: 'card-number', value: SENTINEL.number, kind: 'number' }]);
+  await verifyForSubmission(driver);
+  const result = await driver.submitOrder('place');
+  expect(result.url).toBe(CONFIRMATION_URL);
+  expect(observed).toEqual(['fill', 'choose', 'secret-batch', 'terms', 'submit']);
+  // The actuator cleared its controls; this does not revoke the page needed
+  // to inspect/account for its result. Retiring the real owner still does.
+  expect(await driver.url()).toBe(CHECKOUT_URL);
+  active = false;
+  await expect(driver.url()).rejects.toThrow('no longer current');
+});
+
 describe('the driver over a browser engine', () => {
   test('is bound to one session and page, and never resolves a default', async () => {
     const guard = new CardMaterialRedactor();

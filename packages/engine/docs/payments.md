@@ -948,6 +948,24 @@ retires future continuation authority when the merchant outcome remains unknown,
 while retaining the facts needed for reconciliation. Recovery must check the
 original owner's issued record; parsing or copying the reference grants nothing.
 
+The browser composition has a private restoration path for retained attached
+pages. It reconnects to the exact saved debugger WebSocket, selects the native
+target and context, and verifies the original document-loader graph. It does
+not rediscover a debugger, choose by URL/title, open a replacement tab, or launch
+a replacement browser. The Node-host fallback follows the same selection and
+the parent verifies the native document observations before publishing the page.
+Failed restoration retires its own transport/helper without closing the owner's
+browser. The debugger's private path/query is omitted from public session status.
+
+The returned checkout driver binds every control operation and quote observation
+to a fresh local snapshot ID containing only the retained selected identities.
+It cannot adopt another snapshot just because that snapshot also has `e1`.
+Entered values are not reconstructed. Fresh identity, quote, payment and owner
+checks still run. A successful submit clears controls as usual while retaining
+page ownership for accounting. Parsing stored identities alone does not create
+native snapshot provenance. This browser path is not yet wired into automatic
+startup payment-window continuation; that integration remains unfinished.
+
 Each wait now carries its exact `purchaseId`, rendered notice, deadline and
 owning cancellation signal. The notifier does not keep a shared last notice;
 concurrent purchases cannot overwrite the text used to interpret another

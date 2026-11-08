@@ -8,12 +8,12 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Locator, Page } from 'playwright-core';
 import { BrowserSessionError, BrowserSessionManager, hasDisplay } from './browser-sessions.js';
-import type { BrowserAttachOptions, BrowserLaunchOptions } from './browser-sessions.js';
+import type { BrowserAttachOptions, BrowserLaunchOptions, RestoredBrowserPage } from './browser-sessions.js';
 import type { BrowserPageConnection } from './browser-page-connection-data.js';
 import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from './browser-checkout-recovery-data.js';
 import { BrowserControlSnapshotError } from './browser-control-snapshot-data.js';
 import { describeProvisionWork } from './browser-provisioning.js';
-import { captureCredentialPage, captureNativeSnapshotControls, retainBrowserMethods, resolveRef, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
+import { captureCredentialPage, captureNativeSnapshotControls, restoreControlSnapshot, retainBrowserMethods, resolveRef, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
 import { assertCaptureAllowed, fillSecretsIntoPage } from './browser-secret-fill.js';
 import type {
   BrowserProvisionReport,
@@ -46,6 +46,13 @@ import type {
 
 export { UntrustedEffectError };
 export type { BrowserActionLifetime, BrowserEngineOptions, BrowserExtractField, BrowserTarget };
+
+/** Host-owned attachment. The driver must bind snapshotId to every control
+ * operation; assertCurrent retains the page/owner even after its submit clears
+ * refs. A later snapshot can never supply replacement controls to that driver. */
+export interface RestoredCheckoutPage extends RestoredBrowserPage {
+  readonly snapshotId: string;
+}
 
 
 /** A native click entered the actuator. Later cancellation/validation failures
@@ -513,6 +520,38 @@ export class BrowserEngine {
     if (!connection) return null;
     if (!controls) throw new BrowserControlSnapshotError();
     return captureBrowserCheckoutRecovery({ connection, controls });
+  }
+
+  /** Composition-only restoration; no public browser verb accepts this data.
+   * The host supplies independently restored payment authority, while the
+   * session manager reconnects only the original endpoint/tab/documents. */
+  async restoreCheckoutRecovery(value: BrowserCheckoutRecovery, owner: BrowserProvisionLifetime): Promise<RestoredCheckoutPage> {
+    const retained = captureBrowserCheckoutRecovery(value);
+    const page = await this.sessions.restorePage(retained.connection, owner);
+    const { sessionId, pageId } = page;
+    let published: BrowserSnapshot | undefined;
+    try {
+      page.assertCurrent();
+      const snapshot = await this.sessions.withPage(sessionId, pageId, async (native, current) => {
+        current(); page.assertCurrent();
+        if (this.currentSnapshot(sessionId, pageId) || native.url() !== retained.controls.url) throw new BrowserControlSnapshotError();
+        const snapshot = restoreControlSnapshot(retained.controls, sessionId, pageId, this.cardGuard);
+        current(); page.assertCurrent(); this.snapshots.set(snapshot); published = snapshot;
+        return snapshot;
+      });
+      page.assertCurrent();
+      if (this.currentSnapshot(sessionId, pageId) !== snapshot) throw new BrowserControlSnapshotError();
+      const original = snapshot;
+      let closing: Promise<void> | undefined;
+      return Object.freeze({ sessionId, pageId, snapshotId: original.snapshotId, assertCurrent: page.assertCurrent, release: () => {
+        if (closing) return closing;
+        if (this.currentSnapshot(sessionId, pageId) === original) this.snapshots.clear(sessionId, pageId);
+        closing = page.release(); return closing;
+      } });
+    } catch {
+      if (published && this.currentSnapshot(sessionId, pageId) === published) this.snapshots.clear(sessionId, pageId);
+      try { await page.release(); } finally { throw new BrowserControlSnapshotError(); }
+    }
   }
 
   /** Keep the shared tool decision bound to this serving browser and original input. */

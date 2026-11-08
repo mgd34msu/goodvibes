@@ -66,7 +66,7 @@ import type {
 } from '../../payments/browser-checkout-driver.js';
 import type { CheckoutPageDriver } from '../../payments/checkout-page.js';
 import type { OwnerApproval } from '../../browser/index.js';
-import type { BrowserPageConnection, BrowserCheckoutRecovery } from '../../browser/index.js';
+import type { BrowserPageConnection, BrowserCheckoutRecovery, RestoredCheckoutPage } from '../../browser/index.js';
 import type { BrowserProvisionLifetime } from '../../browser/browser-failure-reading.js';
 import type { BrowserGatewayService } from './browser.js';
 
@@ -154,6 +154,9 @@ export interface BrowserCheckoutSeam {
   capturePageConnection?(sessionId: string, pageId: string, owner: BrowserProvisionLifetime): Promise<BrowserPageConnection | null>;
   /** Original selected control identities and connection, retained together. */
   captureCheckoutRecovery?(sessionId: string, pageId: string, refs: readonly string[], owner: BrowserProvisionLifetime): Promise<BrowserCheckoutRecovery | null>;
+  /** Reacquire only the original native page and bind every action to its
+   * retained controls. Host must independently restore the paired authority. */
+  restoreCheckoutRecovery?(value: BrowserCheckoutRecovery, owner: BrowserProvisionLifetime): Promise<RestoredCheckoutPage & { readonly driver: CheckoutPageDriver }>;
   /**
    * Arms the owner's approval for ONE outward submit, directly on the engine
    * this seam's driver runs against.
@@ -272,6 +275,18 @@ export function composeDaemonBrowser(
         const engine = await built.engineFor();
         owner.signal?.throwIfAborted(); owner.assertCurrent?.();
         return engine.captureCheckoutRecovery({ sessionId, pageId }, refs, owner);
+      },
+      restoreCheckoutRecovery: async (value, owner) => {
+        const engine = await built.engineFor();
+        owner.signal?.throwIfAborted(); owner.assertCurrent?.();
+        const page = await engine.restoreCheckoutRecovery(value, owner);
+        try {
+          page.assertCurrent();
+          const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => engine, cardFieldGuard,
+            ...(deps.describeSubmission === undefined ? {} : { describeSubmission: deps.describeSubmission }),
+          })(page.sessionId, page.pageId, { snapshotId: page.snapshotId, signal: owner.signal, assertCurrent: page.assertCurrent });
+          page.assertCurrent(); return Object.freeze({ ...page, driver });
+        } catch (error) { await page.release(); throw error; }
       },
     });
   }

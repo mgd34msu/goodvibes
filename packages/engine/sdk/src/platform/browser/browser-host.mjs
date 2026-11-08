@@ -51,6 +51,13 @@ function requirePage(pageId) {
   return page;
 }
 
+async function pageConnectionFor(context, page) {
+  const session = await context.newCDPSession(page);
+  try {
+    return { target: await session.send('Target.getTargetInfo'), documents: await session.send('Page.getFrameTree') };
+  } finally { await session.detach(); }
+}
+
 /** Narrows a page to the frame addressed by a chain of iframe selectors. */
 function scopeFor(page, frameChain) {
   let scope = page;
@@ -67,15 +74,35 @@ function compileFunction(source) {
 }
 
 const handlers = {
-  async attach({ endpoint }) {
+  async attach({ endpoint, original }) {
     if (require('playwright-core/package.json').version !== '1.62.0') {
       throw new Error('This browser driver does not support the action cancellation required by this build.');
     }
     const { chromium } = require('playwright-core');
     state.browser = await chromium.connectOverCDP(endpoint, { timeout: 15_000 });
     const contexts = state.browser.contexts();
-    state.context = contexts[0] ?? null;
+    let selected = null;
+    if (original !== undefined) {
+      let inspected = 0;
+      for (const context of contexts) {
+        for (const page of context.pages()) {
+          if (++inspected > 4096) throw new Error('Original browser page is unavailable');
+          let observed;
+          try { observed = await pageConnectionFor(context, page); } catch { continue; }
+          const target = observed.target?.targetInfo;
+          if (target?.targetId !== original.targetId) continue;
+          if ((target.browserContextId ?? null) !== original.browserContextId) throw new Error('Original browser context is unavailable');
+          selected = { context, page }; break;
+        }
+        if (selected) break;
+      }
+      if (!selected) throw new Error('Original browser page is unavailable');
+    }
+    state.context = selected?.context ?? contexts[0] ?? null;
     if (!state.context) throw new Error('the browser exposed no browsing context');
+    // Parent re-reads and validates native document identities before using
+    // this page. Ordering only names the page selected by the native target.
+    if (selected) trackPage(selected.page);
     for (const page of state.context.pages()) trackPage(page);
     state.context.on('page', (page) => trackPage(page));
     return { pages: await handlers.pages({}) };
@@ -103,13 +130,7 @@ const handlers = {
   /** Native protocol IDs only; never a marker injected into an untrusted page. */
   async pageConnection({ pageId }) {
     if (!state.context) throw new Error('not attached');
-    const session = await state.context.newCDPSession(requirePage(pageId));
-    try {
-      return {
-        target: await session.send('Target.getTargetInfo'),
-        documents: await session.send('Page.getFrameTree'),
-      };
-    } finally { await session.detach(); }
+    return pageConnectionFor(state.context, requirePage(pageId));
   },
 
   async pageCall({ pageId, method, args }) {

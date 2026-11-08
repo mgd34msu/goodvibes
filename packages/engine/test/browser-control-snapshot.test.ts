@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { captureNativeSnapshotControls, takeSnapshot } from '../sdk/src/platform/browser/browser-snapshot.js';
+import { captureNativeSnapshotControls, restoreControlSnapshot, takeSnapshot } from '../sdk/src/platform/browser/browser-snapshot.js';
 import { captureBrowserControlSnapshot } from '../sdk/src/platform/browser/browser-control-snapshot-data.js';
 import type { BrowserSnapshot } from '../sdk/src/platform/browser/browser-types.js';
 import { withSecurityReadings } from './helpers/security-readings.ts';
@@ -63,5 +63,21 @@ test('concurrent native snapshot reads keep their own allocated snapshot IDs', a
     expect(a.snapshotId).not.toBe(b.snapshotId);
     expect(captureNativeSnapshotControls(a, ['e1']).snapshotId).toBe(a.snapshotId);
     expect(captureNativeSnapshotControls(b, ['e1']).snapshotId).toBe(b.snapshotId);
+  });
+});
+
+test('rehydrating selected control data allocates a fresh epoch without minting native provenance or field values', async () => {
+  await withSecurityReadings({}, async requests => {
+    const original = await takeSnapshot(page(), 'old-session', 'old-page');
+    const retained = captureNativeSnapshotControls(original, ['e1']);
+    const restored = restoreControlSnapshot(retained, 'restored-session', 'restored-page');
+    expect(restored.snapshotId).not.toBe(original.snapshotId);
+    expect(restored).toMatchObject({ sessionId: 'restored-session', pageId: 'restored-page', url: retained.url, title: '', truncated: true });
+    expect(restored.elements[0]).toMatchObject({ ref: 'e1', selector: '#original-submit', name: 'Place order' });
+    expect(restored.elements[0]?.value).toBeUndefined();
+    expect(JSON.stringify(restored)).not.toContain('entered-value-not-for-recovery');
+    expect(Object.isFrozen(restored.elements[0]?.frameChain)).toBe(true);
+    expect(() => captureNativeSnapshotControls(restored, ['e1'])).toThrow('unavailable');
+    expect(requests).toEqual([]);
   });
 });

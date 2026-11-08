@@ -4,13 +4,15 @@ import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
 import { BrowserEngine } from '../sdk/src/platform/browser/browser-engine.js';
 import { remotePage, type BrowserHostClient } from '../sdk/src/platform/browser/browser-host-client.js';
-import { observeBrowserPageConnection } from '../sdk/src/platform/browser/browser-page-connection.js';
+import { findOriginalBrowserPage, observeBrowserPageConnection } from '../sdk/src/platform/browser/browser-page-connection.js';
 import { captureBrowserPageConnection } from '../sdk/src/platform/browser/browser-page-connection-data.js';
 import { DRIVER_VERSION } from '../sdk/src/platform/browser/browser-provision-io.js';
 import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { createUntrustedContentPort, UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
 import { withSecurityReadings } from './helpers/security-readings.ts';
+import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
+import { createBrowserCheckoutDriverFactory } from '../sdk/src/platform/payments/browser-checkout-driver.js';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -36,6 +38,8 @@ function nativeContext(options: { readonly send?: (method: string) => Promise<un
 }
 async function attached(options: Parameters<typeof nativeContext>[0] = {}) {
   const f = nativeContext(options), root = makeProjectTempDir('browser-page-connection');
+  let probes = 0;
+  const connections: string[] = [];
   const io: BrowserProvisionIo = {
     resolveDriver: () => ({ available: true, packageDirectory: '/synthetic', cliPath: '/synthetic/cli', version: DRIVER_VERSION, error: null }),
     expectedExecutablePath: () => '/synthetic/browser', browsersPath: () => '/synthetic/cache', pathExists: () => true,
@@ -44,14 +48,14 @@ async function attached(options: Parameters<typeof nativeContext>[0] = {}) {
   };
   const browser = { contexts: () => [f.context], _connection: { close() { f.effects.push('transport-detach'); } } } as unknown as Browser;
   const manager = new BrowserSessionManager({ profileRoot: join(root, 'profiles'), surfaceRoot: 'synthetic', io,
-    loadDriver: () => ({ chromium: { connectOverCDP: async (actual: string) => { expect(actual).toBe(endpoint); return browser; },
+    loadDriver: () => ({ chromium: { connectOverCDP: async (actual: string) => { connections.push(actual); expect(actual).toBe(endpoint); return browser; },
       launchPersistentContext: async () => { throw new Error('Recovery must not launch a substitute browser'); } } }),
-    probeEndpoint: async () => ({ endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: endpoint }),
+    probeEndpoint: async () => { probes += 1; return { endpoint: 'http://127.0.0.1:9222', webSocketDebuggerUrl: endpoint }; },
   });
   cleanup.push(() => manager.shutdown());
   const session = await manager.attach({ cdpEndpoint: 'http://127.0.0.1:9222' });
   if (!session.activePageId) throw new Error('Missing original page');
-  return { ...f, manager, session, pageId: session.activePageId };
+  return { ...f, manager, session, pageId: session.activePageId, connections, probes: () => probes };
 }
 function engineFor(manager: BrowserSessionManager): BrowserEngine {
   return new BrowserEngine(manager, { screenshotDirectory: makeProjectTempDir('browser-source-screenshots'),
@@ -136,4 +140,96 @@ test('private connection parsing rejects disconnected/cyclic frame graphs and ac
   let getter = false;
   expect(() => captureBrowserPageConnection({ ...source, get endpoint() { getter = true; return endpoint; } })).toThrow();
   expect(getter).toBe(false);
+});
+
+test('restore pins the saved WebSocket without rediscovery and owns only its new transport', async () => {
+  const f = await attached();
+  const source = await f.manager.pageConnection(f.session.sessionId, f.pageId);
+  if (!source) throw new Error('Missing native connection');
+  f.manager.release(f.session.sessionId); f.effects.length = 0;
+  let current = true;
+  const restored = await f.manager.restorePage(source, { assertCurrent() { if (!current) throw new Error('Original owner retired'); } });
+  expect(restored.sessionId).not.toBe(f.session.sessionId);
+  expect(f.connections).toEqual([endpoint, endpoint]); expect(f.probes()).toBe(1);
+  expect((await f.manager.page(restored.sessionId, restored.pageId)).page).toBe(f.page);
+  expect(JSON.stringify(f.manager.list())).not.toContain('private=fixture-only');
+  restored.assertCurrent(); current = false;
+  expect(restored.assertCurrent).toThrow();
+  const closing = restored.release(); expect(restored.release()).toBe(closing); await closing;
+  expect(f.effects.filter(effect => effect === 'transport-detach')).toHaveLength(1);
+  expect(f.manager.list()).toEqual([]);
+});
+
+test.each(['target', 'context', 'document', 'child-document'] as const)(
+  'restoration refuses a different %s without publishing a substitute session', async change => {
+    let changed = false;
+    const f = await attached({ send: async method => {
+      if (method === 'Target.getTargetInfo') return changed && change === 'target' ? { targetInfo: { ...target.targetInfo, targetId: 'other-tab' } }
+        : changed && change === 'context' ? { targetInfo: { ...target.targetInfo, browserContextId: 'other-context' } } : target;
+      if (changed && change === 'document') return { frameTree: { ...documents.frameTree, frame: { ...documents.frameTree.frame, loaderId: 'new-document' } } };
+      if (changed && change === 'child-document') return { frameTree: { ...documents.frameTree,
+        childFrames: [{ frame: { id: 'child-frame', loaderId: 'new-child-document', parentId: 'native-tab' } }] } };
+      return documents;
+    } });
+    const source = await f.manager.pageConnection(f.session.sessionId, f.pageId);
+    if (!source) throw new Error('Missing native connection');
+    f.manager.release(f.session.sessionId); f.effects.length = 0; changed = true;
+    await expect(f.manager.restorePage(source, {})).rejects.toThrow('unavailable');
+    expect(f.manager.list()).toEqual([]); expect(f.probes()).toBe(1);
+    expect(f.effects.filter(effect => effect === 'transport-detach')).toHaveLength(1);
+  },
+);
+
+test('native target selection searches contexts and ignores an earlier same-URL tab', async () => {
+  const original = nativeContext(), unrelated = nativeContext({ send: async method => method === 'Target.getTargetInfo'
+    ? { targetInfo: { ...target.targetInfo, targetId: 'other-tab', browserContextId: 'other-context' } } : documents });
+  expect(original.page.url()).toBe(unrelated.page.url());
+  const source = await observeBrowserPageConnection(original.context, original.page, endpoint, () => {});
+  const result = await findOriginalBrowserPage({ contexts: () => [unrelated.context, original.context] } as unknown as Browser, source, () => {});
+  expect(result.page).toBe(original.page); expect(result.context).toBe(original.context);
+  expect(unrelated.effects.at(-1)).toBe('cdp-detach'); expect(original.effects.at(-1)).toBe('cdp-detach');
+});
+
+test('shutdown drains a restore protocol read and cannot publish its late page', async () => {
+  const entered = barrier(), answer = barrier(), detached = barrier(), finishDetach = barrier();
+  let restoring = false;
+  const f = await attached({ send: async method => {
+    if (restoring && method === 'Target.getTargetInfo') { entered.release(); await answer.wait; }
+    return method === 'Target.getTargetInfo' ? target : documents;
+  }, detach: async () => { if (restoring) { detached.release(); await finishDetach.wait; } } });
+  cleanup.push(answer.release, finishDetach.release);
+  const source = await f.manager.pageConnection(f.session.sessionId, f.pageId);
+  if (!source) throw new Error('Missing native connection');
+  f.manager.release(f.session.sessionId); restoring = true;
+  const pending = f.manager.restorePage(source, {}).catch(error => error as unknown);
+  await entered.wait;
+  let drained = false; const closing = f.manager.shutdown().then(() => { drained = true; });
+  await Promise.resolve(); await Promise.resolve();
+  // Disconnect must precede the creation join: a real CDP read may need that
+  // disconnect to settle. The scripted read ignores it until answer.release.
+  expect(f.effects.filter(effect => effect === 'transport-detach')).toHaveLength(2);
+  answer.release(); await detached.wait; expect(drained).toBe(false);
+  finishDetach.release(); expect(await pending).toBeInstanceOf(Error); await closing;
+  expect(drained).toBe(true); expect(f.manager.list()).toEqual([]);
+});
+
+test('a restored driver cannot adopt a later snapshot even when the ref string is the same', async () => {
+  await withSecurityReadings({}, async () => {
+    const f = await attached(), guard = new CardMaterialRedactor();
+    const engine = new BrowserEngine(f.manager, { screenshotDirectory: makeProjectTempDir('browser-restoration-screenshots'), cardFieldGuard: guard,
+      untrusted: createUntrustedContentPort({ surface: 'web-page', toolName: 'browser-restoration-fixture', ledger: new UntrustedContentLedger() }) });
+    const original = { sessionId: f.session.sessionId, pageId: f.pageId };
+    await engine.snapshot(original);
+    const retained = await engine.captureCheckoutRecovery(original, ['e1'], {});
+    if (!retained) throw new Error('Missing native controls');
+    f.manager.release(f.session.sessionId);
+    const restored = await engine.restoreCheckoutRecovery(retained, {});
+    expect(restored.snapshotId).not.toBe(retained.controls.snapshotId);
+    const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => engine, cardFieldGuard: guard })(restored.sessionId, restored.pageId, restored);
+    const replacement = await engine.snapshot(restored);
+    expect(replacement['snapshotId']).not.toBe(restored.snapshotId);
+    // Both snapshots have e1, but this driver is restricted to its own one.
+    await expect(driver.fill('e1', 'ordinary fixture value')).rejects.toThrow('no longer current');
+    restored.assertCurrent(); await restored.release(); expect(restored.assertCurrent).toThrow();
+  });
 });

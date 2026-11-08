@@ -583,6 +583,12 @@ const identityMetadata = new WeakMap<BrowserElementRef, { readonly name: string;
 const nativeSnapshots = new WeakSet<BrowserSnapshot>();
 let snapshotCounter = 0;
 
+function nextSnapshotId(): string {
+  if (snapshotCounter >= Number.MAX_SAFE_INTEGER) throw new StaleElementError('Browser snapshot references are exhausted.', 'Restart the browser runtime before taking another snapshot.');
+  snapshotCounter += 1;
+  return `s${String(snapshotCounter)}`;
+}
+
 export class StaleElementError extends Error {
   constructor(message: string, readonly fix: string) {
     super(message);
@@ -624,6 +630,27 @@ export function captureNativeSnapshotControls(snapshot: BrowserSnapshot, refs: r
         ...(metadata.control === undefined ? {} : { control: metadata.control }) } };
   });
   return captureBrowserControlSnapshot({ version: 1, snapshotId: snapshot.snapshotId, url: snapshot.url, controls });
+}
+
+/** Rebuild retained identities for a host which has reacquired the original
+ * native page. This does not register native provenance or grant authority.
+ * Every control still passes resolveRef's fresh identity checks before use.
+ * A fresh local snapshot ID prevents an old ref from adopting a later page
+ * snapshot; only the retained ref strings survive the restart. */
+export function restoreControlSnapshot(value: BrowserControlSnapshot, sessionId: string, pageId: string, guard?: CardFieldGuard | null): BrowserSnapshot {
+  const retained = captureBrowserControlSnapshot(value);
+  const elements = retained.controls.map(control => {
+    const { metadata, ...identity } = control;
+    const element: BrowserElementRef = Object.freeze({ ...identity, frameChain: Object.freeze([...identity.frameChain]),
+      value: undefined, checked: undefined });
+    identityMetadata.set(element, metadata);
+    if (guard) assertIdentityReadingAllowed.set(element, () => {
+      if (guard.hasLiveMaterial(sessionId, pageId)) throw new StaleElementError('Cannot read changed control identity while payment material is live.', 'Use an unchanged control or finish the authorized payment flow first.');
+    });
+    return element;
+  });
+  return Object.freeze({ sessionId, pageId, snapshotId: nextSnapshotId(), url: retained.url,
+    title: '', elements: Object.freeze(elements), truncated: true });
 }
 
 /** The selector of one element within its own document, used to address iframes. */
@@ -715,9 +742,7 @@ export async function takeSnapshot(
   if (options.controls) {
     options.controls.admit(raw.map((element, index) => ({ ref: `e${String(index + 1)}`, role: element.role, name: element.name, tag: element.tag, disabled: element.disabled, ...(element.control ? { control: element.control } : {}) })));
   }
-  if (snapshotCounter >= Number.MAX_SAFE_INTEGER) throw new StaleElementError('Browser snapshot references are exhausted.', 'Restart the browser runtime before taking another snapshot.');
-  snapshotCounter += 1;
-  const snapshotId = `s${String(snapshotCounter)}`;
+  const snapshotId = nextSnapshotId();
   const scrub = (text: string): string =>
     options.guard === undefined ? text : options.guard.redact(sessionId, pageId, text);
 

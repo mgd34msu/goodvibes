@@ -1,7 +1,8 @@
 /** Native browser connection/document observations for host-owned recovery.
  * A parsed record is not an attachment capability, a control reference or
  * permission to resume a purchase. Never publish its private endpoint in UI. */
-import type { BrowserContext, Page } from 'playwright-core';
+import type { Browser, BrowserContext, Page } from 'playwright-core';
+import { isDeepStrictEqual } from 'node:util';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { debuggerWebSocket } from './browser-cdp.js';
 import { readRemotePageConnection } from './browser-host-client.js';
@@ -67,4 +68,28 @@ export async function observeBrowserPageConnection(context: BrowserContext, page
   } catch {
     throw new BrowserPageConnectionError();
   }
+}
+
+/** Select by native target/context and original document observations. The
+ * caller already connected to the retained exact browser WebSocket. Never
+ * choose a tab by URL, index or display title, and never create a substitute. */
+export async function findOriginalBrowserPage(browser: Browser, source: BrowserPageConnection, current: () => void): Promise<{ readonly context: BrowserContext; readonly page: Page }> {
+  current();
+  const contexts = [...browser.contexts()];
+  let inspected = 0;
+  for (const context of contexts) {
+    current();
+    for (const page of [...context.pages()]) {
+      current();
+      if (++inspected > 4096) throw new BrowserPageConnectionError();
+      let observed: BrowserPageConnection;
+      try { observed = await observeBrowserPageConnection(context, page, source.endpoint, current); }
+      catch { current(); continue; }
+      current();
+      if (observed.targetId !== source.targetId) continue;
+      if (!isDeepStrictEqual(observed, source)) throw new BrowserPageConnectionError();
+      return { context, page };
+    }
+  }
+  throw new BrowserPageConnectionError();
 }

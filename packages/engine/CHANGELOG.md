@@ -4,17 +4,24 @@
 
 ### Fixed
 
+- Add the private browser restoration path for the retained exact debugger,
+  native target/context and document-loader graph, including the Node-host
+  fallback. Reconstruct only selected control identities with a fresh snapshot
+  binding on every checkout-driver action; later same-ref snapshots cannot be
+  adopted. Retire failed attachments without closing the owner's browser.
+  Automatic startup payment-window continuation remains unfinished.
+
 - Retain the selected checkout control identities, frame selectors and native
   identity metadata with encrypted browser recovery facts, excluding entered
   values. Native snapshots are immutable; JSON copies cannot mint their source
   provenance. Concurrent snapshot reads keep distinct allocated IDs. Actual
-  control restoration and resumed payment windows remain unfinished.
+  startup integration and resumed payment windows remain unfinished.
 
 - Retain the original discovered browser WebSocket, native tab/context and
   document-loader observations inside encrypted checkout facts. Use the actual
   browser or Node-host page mapping and drain protocol reads through admission
-  cancellation and shutdown. These observations do not restore control refs or
-  authorize restart continuation; that integration remains unfinished.
+  cancellation and shutdown. These observations do not authorize restart
+  continuation; automatic startup integration remains unfinished.
 
 - Attribute optional calibration reports to the Git revision and local file
   versions instead of hashing every source file and the complete digest list.

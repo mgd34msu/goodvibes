@@ -7,7 +7,9 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { OwnedWork } from '../utils/owned-work.js';
-import { observeBrowserPageConnection, type BrowserPageConnection } from './browser-page-connection.js';
+import { findOriginalBrowserPage, observeBrowserPageConnection, type BrowserPageConnection } from './browser-page-connection.js';
+import { captureBrowserPageConnection, BrowserPageConnectionError } from './browser-page-connection-data.js';
+import { isDeepStrictEqual } from 'node:util';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import { BrowserHostClient, remoteContext, type BrowserHostOptions } from './browser-host-client.js';
@@ -46,6 +48,14 @@ export interface BrowserLaunchOptions extends BrowserProvisionLifetime {
 export interface BrowserAttachOptions {
   /** A CDP endpoint of a browser the user already has running. */
   readonly cdpEndpoint: string;
+}
+
+/** Native attachment retained for one recovery owner, never a wire receipt. */
+export interface RestoredBrowserPage {
+  readonly sessionId: string;
+  readonly pageId: string;
+  readonly assertCurrent: () => void;
+  readonly release: () => Promise<void>;
 }
 
 export class BrowserSessionError extends Error {
@@ -447,13 +457,15 @@ export class BrowserSessionManager {
     return this.#creations.run(() => this.attachOwned(requestedEndpoint));
   }
 
-  private async attachOwned(requestedEndpoint: string): Promise<BrowserSessionInfo> {
-    this.#assertOpen();
+  private async attachOwned(requestedEndpoint: string, original?: BrowserPageConnection, owner: BrowserProvisionLifetime = {}): Promise<BrowserSessionInfo> {
+    const current = () => { this.#assertOpen(); assertProvisionCurrent(owner); this.#assertOpen(); };
+    current();
     const driver = this.driver();
-    this.#assertOpen();
+    current();
     const candidates = cdpEndpointCandidates(requestedEndpoint);
-    const reachable = await this.probeEndpoint(candidates, this.#retiring.signal);
-    this.#assertOpen();
+    const reachable = original ? { endpoint: requestedEndpoint, webSocketDebuggerUrl: original.endpoint }
+      : await this.probeEndpoint(candidates, this.#retiring.signal);
+    current();
     if (!reachable) {
       throw new BrowserSessionError(
         `No browser is listening at ${requestedEndpoint} (tried ${candidates.join(', ')}).`,
@@ -472,38 +484,42 @@ export class BrowserSessionManager {
     let browser: Browser | null = null;
     let lastMessage = '';
     try {
-      this.#assertOpen();
+      current();
       // The endpoint is already known to answer, so a long connect timeout only
       // delays an honest answer.
       browser = await driver.chromium.connectOverCDP(webSocket, { timeout: 8_000 });
       this.#unpublishedBrowsers.add(browser);
     } catch (error) {
-      this.#assertOpen();
+      current();
       lastMessage = error instanceof Error ? error.message : String(error);
     }
-    try { this.#assertOpen(); }
+    try { current(); }
     catch (error) {
-      if (browser) { detachBrowser(browser); this.#unpublishedBrowsers.delete(browser); }
+      if (browser) this.retireBrowserClient(browser);
       throw error;
     }
     if (!browser) {
       // This runtime cannot complete a CDP WebSocket handshake, so the
       // connection is made by a Node process instead and driven over a pipe.
       // The result is the same session, with the same operations.
-      const hosted = await this.attachThroughHost(webSocket, requestedEndpoint).catch((error: unknown) => {
+      const hosted = await this.attachThroughHost(webSocket, requestedEndpoint, original, owner).catch((error: unknown) => {
+        if (original) throw error;
         lastMessage = `${lastMessage} | host: ${error instanceof Error ? error.message : String(error)}`;
         return null;
       });
-      this.#assertOpen();
-      if (hosted) return hosted;
+      if (hosted) {
+        try { current(); return hosted; }
+        catch (error) { await this.retireAttachment(hosted.sessionId); throw error; }
+      }
+      current();
     }
     if (!browser) {
       // The browser answered on HTTP, so the endpoint is right and the browser
       // is alive. Distinguish "this runtime cannot complete the debugger
       // handshake" from a genuine connection problem, because the two have
       // completely different answers and only one of them is the user's doing.
-      const handshake = await cdpWebSocketHandshakeWorks(webSocket, this.#retiring.signal);
-      this.#assertOpen();
+      const handshake = await cdpWebSocketHandshakeWorks(webSocket, owner.signal ?? this.#retiring.signal);
+      current();
       throw new BrowserSessionError(
         handshake
           ? `The browser at ${endpoint} is running and reachable, but this build cannot complete the debugger handshake: ${lastMessage.split('\n')[0]}`
@@ -513,9 +529,12 @@ export class BrowserSessionManager {
           : 'Restart the browser with --remote-debugging-port and try again, or use action:"launch".',
       );
     }
+    let publishedId: string | undefined;
     try {
       const contexts = browser.contexts();
-      const context = contexts[0];
+      const selected = original ? await findOriginalBrowserPage(browser, original, current) : undefined;
+      current();
+      const context = selected?.context ?? contexts[0];
       if (!context) throw new BrowserSessionError(
         `The browser at ${requestedEndpoint} exposed no browsing context to attach to.`,
         'Open a tab in that browser and attach again.',
@@ -530,11 +549,16 @@ export class BrowserSessionManager {
         executablePath: null,
         source: null,
         headless: false,
+        ...(selected ? { preferredPage: selected.page } : {}),
       });
+      publishedId = info.sessionId;
+      current();
       this.#unpublishedBrowsers.delete(browser);
       return info;
     } catch (error) {
-      try { detachBrowser(browser); this.#unpublishedBrowsers.delete(browser); }
+      const published = publishedId === undefined ? undefined : this.sessions.get(publishedId);
+      if (published) this.forgetSession(published);
+      try { this.retireBrowserClient(browser); }
       catch (cleanup) { throw new AggregateError([error, cleanup], 'The attached browser client could not be retired cleanly'); }
       throw error;
     }
@@ -547,21 +571,29 @@ export class BrowserSessionManager {
    * it produces is an ordinary attached session: origin 'attached', so nothing
    * here can close the user's browser.
    */
-  private async attachThroughHost(endpoint: string, requestedEndpoint: string): Promise<BrowserSessionInfo | null> {
-    this.#assertOpen();
+  private async attachThroughHost(endpoint: string, requestedEndpoint: string, original?: BrowserPageConnection, owner: BrowserProvisionLifetime = {}): Promise<BrowserSessionInfo | null> {
+    const current = () => { this.#assertOpen(); assertProvisionCurrent(owner); this.#assertOpen(); };
+    current();
     const client = new BrowserHostClient(this.hostOptions);
     this.#unpublishedHosts.add(client);
     const abort = (): void => { void this.retireHost(client).catch(() => {}); };
-    this.#retiring.signal.addEventListener('abort', abort, { once: true });
+    const signal = owner.signal ?? this.#retiring.signal;
+    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    let publishedId: string | undefined;
     try {
+      current();
       await client.start();
-      this.#assertOpen();
-      const attached = await client.call<{ pages: { pages: { pageId: string; url: string }[] } }>('attach', { endpoint });
-      this.#assertOpen();
+      current();
+      const attached = await client.call<{ pages: { pages: { pageId: string; url: string }[] } }>('attach', { endpoint,
+        ...(original ? { original: { targetId: original.targetId, browserContextId: original.browserContextId } } : {}),
+      }, { signal });
+      current();
       const pages = attached.pages.pages;
       if (pages.length === 0) {
+        if (original) throw new BrowserPageConnectionError();
         const created = await client.call<{ pageId: string }>('newPage');
-        this.#assertOpen();
+        current();
         pages.push({ pageId: created.pageId, url: 'about:blank' });
       }
       const context = remoteContext(client, pages);
@@ -576,14 +608,19 @@ export class BrowserSessionManager {
           source: null,
           headless: false,
       });
+      publishedId = info.sessionId;
       this.hosts.set(info.sessionId, client);
+      current();
       this.#unpublishedHosts.delete(client);
       return info;
     } catch (error) {
+      const published = publishedId === undefined ? undefined : this.sessions.get(publishedId);
+      if (published) this.forgetSession(published);
+      if (publishedId !== undefined && this.hosts.get(publishedId) === client) this.hosts.delete(publishedId);
       try { await this.retireHost(client); this.#unpublishedHosts.delete(client); }
       catch (cleanup) { throw new AggregateError([error, cleanup], 'The browser helper could not be retired cleanly'); }
       throw error;
-    } finally { this.#retiring.signal.removeEventListener('abort', abort); }
+    } finally { signal.removeEventListener('abort', abort); }
   }
 
   /** Synchronous release keeps its real asynchronous retirement owned here. */
@@ -607,6 +644,7 @@ export class BrowserSessionManager {
     readonly profileDirectory: string | null;
     readonly cdpEndpoint: string | null;
     readonly connectionEndpoint?: string;
+    readonly preferredPage?: Page;
     readonly executablePath: string | null;
     readonly source: BrowserProvisionReport['source'];
     readonly headless: boolean;
@@ -635,6 +673,11 @@ export class BrowserSessionManager {
     this.sessions.set(sessionId, session);
     try {
       for (const page of input.context.pages()) this.trackPage(session, page);
+      if (input.preferredPage) {
+        const selected = [...session.pages.values()].find(tracked => tracked.page === input.preferredPage);
+        if (!selected) throw new BrowserPageConnectionError();
+        session.activePageId = selected.pageId;
+      }
       input.context.on('page', (page: Page) => { this.trackPage(session, page); });
       this.#assertOpen();
       return this.describe(session);
@@ -754,6 +797,49 @@ export class BrowserSessionManager {
       if (!endpoint) return null;
       const result = await observeBrowserPageConnection(session.context, page, endpoint, active);
       active(); return result;
+    });
+  }
+
+  /** Reconnect only the retained browser and native tab/documents. The host
+   * must independently hold original continuation authority. Currentness here
+   * retains this page/owner; effects still validate current terms and controls. */
+  restorePage(value: BrowserPageConnection, input: BrowserProvisionLifetime): Promise<RestoredBrowserPage> {
+    const original = captureBrowserPageConnection(value), owner = this.ownLifetime(input);
+    return this.#creations.run(async () => {
+      let sessionId: string | undefined;
+      try {
+        assertProvisionCurrent(owner);
+        // Status may show the origin, never the private browser path/query.
+        const info = await this.attachOwned(new URL(original.endpoint).origin, original, owner);
+        sessionId = info.sessionId;
+        assertProvisionCurrent(owner);
+        const session = this.require(sessionId), pageId = info.activePageId;
+        if (!pageId || session.connectionEndpoint !== original.endpoint) throw new BrowserPageConnectionError();
+        const tracked = session.pages.get(pageId);
+        if (!tracked) throw new BrowserPageConnectionError();
+        const originalHost = this.hosts.get(sessionId);
+        let retired = false, closing: Promise<void> | undefined;
+        const current = () => {
+          assertProvisionCurrent(owner); this.assertSessionCurrent(session);
+          if (retired || session.pages.get(pageId) !== tracked) throw new BrowserPageConnectionError();
+          tracked.lifetime.signal.throwIfAborted();
+        };
+        current();
+        const observed = await this.pageConnection(sessionId, pageId, { signal: owner.signal, assertCurrent: current });
+        current();
+        if (!isDeepStrictEqual(observed, original)) throw new BrowserPageConnectionError();
+        return Object.freeze({ sessionId, pageId, assertCurrent: current, release: () => {
+          if (closing) return closing;
+          let resolve!: () => void, reject!: (error: unknown) => void;
+          closing = new Promise<void>((done, failed) => { resolve = done; reject = failed; });
+          retired = true;
+          void this.retireAttachment(session.sessionId, originalHost).then(resolve, reject);
+          return closing;
+        } });
+      } catch {
+        try { if (sessionId !== undefined) await this.retireAttachment(sessionId); }
+        finally { throw new BrowserPageConnectionError(); }
+      }
     });
   }
 
@@ -929,23 +1015,40 @@ export class BrowserSessionManager {
    */
   release(sessionId: string): BrowserSessionInfo {
     const session = this.require(sessionId);
+    return this.releaseTrackedSession(session);
+  }
+
+  private releaseTrackedSession(session: TrackedSession): BrowserSessionInfo {
     const info = this.describe(session);
     this.forgetSession(session);
-    const host = this.hosts.get(sessionId);
+    const host = this.hosts.get(session.sessionId);
     if (host) {
       // Ends the helper process, never the browser it was talking to.
       void this.retireHost(host).catch(() => {});
-      this.hosts.delete(sessionId);
+      this.hosts.delete(session.sessionId);
     }
     const browser = session.browser;
     if (browser) {
       // Retire the transport before another admitted continuation can run.
       // A failed detach remains owned for shutdown retry/reporting.
       this.#unpublishedBrowsers.add(browser);
-      detachBrowser(browser);
-      this.#unpublishedBrowsers.delete(browser);
+      this.retireBrowserClient(browser);
     }
     return info;
+  }
+
+  private async retireAttachment(sessionId: string, originalHost?: BrowserHostClient): Promise<void> {
+    const session = this.sessions.get(sessionId), host = this.hosts.get(sessionId) ?? originalHost;
+    if (session) this.releaseTrackedSession(session);
+    else if (host) this.hosts.delete(sessionId);
+    if (host) await this.retireHost(host);
+  }
+
+  /** Keep failed detachments retained, and never detach twice when shutdown
+   * already interrupted a pending native restore through the same client. */
+  private retireBrowserClient(browser: Browser): void {
+    if (!this.#unpublishedBrowsers.has(browser)) return;
+    detachBrowser(browser); this.#unpublishedBrowsers.delete(browser);
   }
 
   /** Closes only what this agent launched. Attached browsers are left running. */
@@ -961,6 +1064,15 @@ export class BrowserSessionManager {
     void Promise.allSettled([...helpers].map(host => this.retireHost(host))).then(async results => {
       const errors: unknown[] = [];
       for (const result of results) if (result.status === 'rejected') errors.push(result.reason);
+      // Restoring a page performs native protocol I/O inside creation. Its
+      // pending read may require this disconnect to settle; joining creation
+      // before retiring its CDP client would deadlock shutdown.
+      for (const session of [...this.sessions.values()]) if (session.origin === 'attached' && session.browser) {
+        try { this.releaseTrackedSession(session); } catch (error) { errors.push(error); }
+      }
+      for (const browser of this.#unpublishedBrowsers) {
+        try { this.retireBrowserClient(browser); } catch (error) { errors.push(error); }
+      }
       if (!errors.length) {
         await this.#creations.join();
         this.hosts.clear();
@@ -985,7 +1097,7 @@ export class BrowserSessionManager {
         try { await this.closeContext(context); } catch (error) { errors.push(error); }
       }
       for (const browser of this.#unpublishedBrowsers) {
-        try { detachBrowser(browser); this.#unpublishedBrowsers.delete(browser); } catch (error) { errors.push(error); }
+        try { this.retireBrowserClient(browser); } catch (error) { errors.push(error); }
       }
       await Promise.all(pageCleanups);
       // Retiring the native connection/context interrupts its pending RPCs.

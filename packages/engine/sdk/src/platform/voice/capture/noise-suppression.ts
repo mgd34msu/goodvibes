@@ -8,7 +8,6 @@ import {
   SPEEXDSP_WASM_BASE64,
   SPEEXDSP_WASM_BUILD,
   SPEEXDSP_WASM_BYTES,
-  SPEEXDSP_WASM_SHA256,
 } from './vendor/speexdsp-wasm.js';
 import {
   AudioCaptureError,
@@ -38,9 +37,8 @@ export const SPEEXDSP_PREPROCESS = {
   upstreamSha256: SPEEXDSP_WASM_BUILD.upstreamSha256,
   noticePath: 'native/speexdsp-wasm/NOTICE.txt',
   licensePath: 'native/speexdsp-wasm/SpeexDSP-1.2.1-COPYING.txt',
-  /** Bytes and checksum of the module actually embedded. */
+  /** Byte count of the module actually embedded. */
   moduleBytes: SPEEXDSP_WASM_BYTES,
-  moduleSha256: SPEEXDSP_WASM_SHA256,
   /** Compiler, linker and sysroot the module was produced with. */
   toolchain: SPEEXDSP_WASM_BUILD,
   /**

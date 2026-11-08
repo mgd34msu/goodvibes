@@ -22,9 +22,6 @@
 /** Bytes of the module, before base64. */
 export const SPEEXDSP_WASM_BYTES = 53678;
 
-/** sha256 of those bytes. Asserted against the base64 below by test. */
-export const SPEEXDSP_WASM_SHA256 = '4829d9fa97e648ab9c45e9a685adba7bd762a4f948ec499c59b073bd03cce2bb';
-
 /** How the module was produced, recorded so a rebuild can be compared to it. */
 export const SPEEXDSP_WASM_BUILD = {
   upstreamVersion: '1.2.1',

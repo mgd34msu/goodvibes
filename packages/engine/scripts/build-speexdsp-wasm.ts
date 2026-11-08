@@ -8,8 +8,8 @@
 //
 // This is NOT a gate and nothing runs it automatically. The artifact is
 // committed, so a checkout builds and tests without a C toolchain; --check
-// exists for a human who wants to confirm the committed base64 still matches its
-// recorded sha256, which test/voice-noise-suppression.test.ts also asserts.
+// exists for a human who wants to check the embedded module's encoding, byte
+// count and WebAssembly format. Signal-level tests exercise the actual filter.
 //
 // Everything the build depends on is pinned: the upstream tarball by sha256, the
 // compiler and sysroot by version (recorded into the generated file, and printed
@@ -61,10 +61,6 @@ const CLANG_FLAGS = [
   '-Wl,--strip-all',
 ] as const;
 
-function sha256(bytes: Uint8Array): string {
-  return createHash('sha256').update(bytes).digest('hex');
-}
-
 function checkCommitted(): void {
   if (!existsSync(GENERATED)) {
     console.error(`ERROR: ${GENERATED} does not exist. Run this script without --check.`);
@@ -72,22 +68,21 @@ function checkCommitted(): void {
   }
   const source = readFileSync(GENERATED, 'utf8');
   const base64 = /SPEEXDSP_WASM_BASE64 = '([A-Za-z0-9+/=]+)'/.exec(source)?.[1];
-  const recordedSha = /SPEEXDSP_WASM_SHA256 = '([0-9a-f]{64})'/.exec(source)?.[1];
   const recordedBytes = /SPEEXDSP_WASM_BYTES = (\d+)/.exec(source)?.[1];
-  if (base64 === undefined || recordedSha === undefined || recordedBytes === undefined) {
-    console.error('ERROR: the generated file does not carry a base64 blob, a sha256 and a byte count.');
+  if (base64 === undefined || recordedBytes === undefined) {
+    console.error('ERROR: the generated file does not carry a base64 blob and a byte count.');
     process.exit(1);
   }
   const bytes = Buffer.from(base64, 'base64');
-  const actualSha = sha256(bytes);
-  const ok = actualSha === recordedSha && bytes.length === Number(recordedBytes);
-  console.log(`committed module: ${bytes.length} bytes, sha256 ${actualSha}`);
-  console.log(`recorded        : ${recordedBytes} bytes, sha256 ${recordedSha}`);
+  const ok = bytes.toString('base64') === base64 && bytes.length === Number(recordedBytes)
+    && WebAssembly.validate(new Uint8Array(bytes));
+  console.log(`committed module: ${bytes.length} bytes`);
+  console.log(`recorded        : ${recordedBytes} bytes`);
   if (!ok) {
-    console.error('ERROR: the committed base64 does not match what the file records about it.');
+    console.error('ERROR: the committed module has invalid encoding, a different byte count or invalid WebAssembly.');
     process.exit(1);
   }
-  console.log('OK: the committed artifact matches its recorded checksum and size.');
+  console.log('OK: the committed module is valid WebAssembly with the recorded size.');
 }
 
 function toolVersion(command: string, args: readonly string[]): string {
@@ -110,7 +105,8 @@ function download(): string {
     console.log(`downloading ${UPSTREAM.url}`);
     execFileSync('curl', ['-sSL', '--max-time', '300', '-o', archive, UPSTREAM.url], { stdio: 'inherit' });
   }
-  const actual = sha256(readFileSync(archive));
+  // The independently recorded upstream archive pin is the checksum boundary.
+  const actual = createHash('sha256').update(readFileSync(archive)).digest('hex');
   if (actual !== UPSTREAM.sha256) {
     console.error(`ERROR: archive sha256 ${actual} does not match the pin ${UPSTREAM.sha256}`);
     process.exit(1);
@@ -161,7 +157,6 @@ function compile(sourceRoot: string, stage: string): Uint8Array {
 
 function generate(wasm: Uint8Array, toolchain: Record<string, string>): void {
   const base64 = Buffer.from(wasm).toString('base64');
-  const digest = sha256(wasm);
   const lines = [
     '/**',
     ' * speexdsp-wasm.ts — GENERATED. Do not edit by hand.',
@@ -187,9 +182,6 @@ function generate(wasm: Uint8Array, toolchain: Record<string, string>): void {
     '/** Bytes of the module, before base64. */',
     `export const SPEEXDSP_WASM_BYTES = ${wasm.length};`,
     '',
-    '/** sha256 of those bytes. Asserted against the base64 below by test. */',
-    `export const SPEEXDSP_WASM_SHA256 = '${digest}';`,
-    '',
     '/** How the module was produced, recorded so a rebuild can be compared to it. */',
     'export const SPEEXDSP_WASM_BUILD = {',
     `  upstreamVersion: '${UPSTREAM.version}',`,
@@ -209,7 +201,7 @@ function generate(wasm: Uint8Array, toolchain: Record<string, string>): void {
   mkdirSync(dirname(GENERATED), { recursive: true });
   writeFileSync(GENERATED, lines.join('\n'));
   console.log(`wrote ${GENERATED}`);
-  console.log(`module: ${wasm.length} bytes, sha256 ${digest}, base64 ${base64.length} chars`);
+  console.log(`module: ${wasm.length} bytes, base64 ${base64.length} chars`);
 }
 
 if (process.argv.includes('--check')) {

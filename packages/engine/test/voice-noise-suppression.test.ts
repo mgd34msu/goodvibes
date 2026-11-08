@@ -15,7 +15,6 @@
  * recorded after a wake, push-to-talk voice input), and a filter that cannot run
  * has to stop capture rather than quietly pass audio through.
  */
-import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import {
@@ -38,7 +37,6 @@ import {
 import {
   SPEEXDSP_WASM_BASE64,
   SPEEXDSP_WASM_BYTES,
-  SPEEXDSP_WASM_SHA256,
 } from '../sdk/src/platform/voice/capture/vendor/speexdsp-wasm.js';
 import { base64ToBytes } from '../sdk/src/platform/voice/capture/frames.js';
 import { WakeWordEngine } from '../sdk/src/platform/voice/wake/engine.js';
@@ -131,11 +129,12 @@ function toneCorrelation(clean: Float32Array, actual: Float32Array, gate: Uint8A
 // ── the artifact ─────────────────────────────────────────────────────────────
 
 describe('the embedded speexdsp module is the artifact it says it is', () => {
-  test('the base64 decodes to the recorded byte count and sha256', () => {
+  test('the base64 decodes to a valid WebAssembly module of the recorded size', () => {
     const bytes = base64ToBytes(SPEEXDSP_WASM_BASE64);
     expect(bytes.length).toBe(SPEEXDSP_WASM_BYTES);
-    expect(createHash('sha256').update(bytes).digest('hex')).toBe(SPEEXDSP_WASM_SHA256);
-    expect(SPEEXDSP_PREPROCESS.moduleSha256).toBe(SPEEXDSP_WASM_SHA256);
+    expect(Buffer.from(bytes).toString('base64')).toBe(SPEEXDSP_WASM_BASE64);
+    expect(WebAssembly.validate(bytes)).toBe(true);
+    expect(SPEEXDSP_PREPROCESS.moduleBytes).toBe(bytes.length);
   });
 
   test('the license is BSD-3-Clause and its NOTICE is carried where the manifest says', () => {

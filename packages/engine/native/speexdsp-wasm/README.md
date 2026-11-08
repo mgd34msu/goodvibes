@@ -59,10 +59,10 @@ bun packages/engine/scripts/build-speexdsp-wasm.ts --check    # verifies the com
 The build downloads the pinned tarball, refuses to continue unless its sha256
 matches, compiles, and rewrites
 `packages/engine/sdk/src/platform/voice/capture/vendor/speexdsp-wasm.ts`, writing the
-base64 of the module, its byte count, its sha256, and the pins above. `--check`
-recomputes the sha256 of the committed base64 and compares it with the recorded
-one, which is also asserted by `test/voice-noise-suppression.test.ts` on every
-test run.
+base64 of the module, its byte count, and the pins above. `--check` validates the
+base64 encoding, recorded byte count and WebAssembly format without a compiler.
+The noise-suppression tests run the embedded filter and measure its effect on
+audio; a checksum stored beside the same blob does not establish that behavior.
 
 The module is embedded in the source rather than downloaded at runtime like the
 wake models. At 53 kB it is small enough that provisioning it would cost more

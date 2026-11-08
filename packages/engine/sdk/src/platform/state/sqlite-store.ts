@@ -7,7 +7,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { openVersionedSchema, sqlJsVersionHandle } from './store-versioning.js';
 import { restoreStoreSnapshot, snapshotStoreFile } from './store-snapshots.js';
-import { imageDigest, SQLitePublicationError, SQLiteStorePersistence } from './sqlite-store-persistence.js';
+import { readSQLitePersistedImage, SQLitePublicationError, SQLiteStorePersistence, type SQLiteImageObservation } from './sqlite-store-persistence.js';
 import { sqliteLocalObservation } from './sqlite-local-observation.js';
 import { nativeKnowledgeSchemaReadPlanMatches, validateNativeKnowledgeReadSchema, type NativeKnowledgeSchemaReadPlan } from './knowledge-schema-read-plan.js';
 import { knowledgeRecordTableSql } from '../knowledge/store-schema-validation-data.js';
@@ -1109,26 +1109,33 @@ const frameImageStamps = new WeakMap<NativeFrameImageStamp, {
   readonly schemaVersion: number;
   readonly imageEpoch: number;
   readonly observationEpoch: number;
-  readonly digest: string;
+  readonly evidence: SQLiteImageObservation;
 }>();
 interface NativeReadFrameObservation {
   readonly identity: string | undefined;
   readonly local: string;
-  readonly persisted: string | undefined;
+  readonly persisted: SQLiteImageObservation | undefined;
   readonly localState: OwnedSqlDatabase | undefined;
   readonly localRevision: bigint | undefined;
   readonly localProbe: string | undefined;
   readonly localIsolated: boolean;
 }
+function readFrameImage(persistence: SQLiteStorePersistence) {
+  try { return readSQLitePersistedImage(persistence); }
+  catch { throw new SQLiteObservationRetiredError(); }
+}
 const nativeReadFrameIdentities = new WeakMap<object, {
   readonly store: SQLiteStore;
   readonly identity: object;
+  readonly persistence: SQLiteStorePersistence | null;
   readonly assertCurrent: (verifyNative?: boolean) => void;
   readonly observation?: NativeReadFrameObservation;
+  readonly bytes?: Buffer;
 }>();
 function assertReadFrameOrigin(store: SQLiteStore, frame: object) {
   const original = privateMapGet(nativeReadFrameIdentities, frame);
-  if (original?.store !== store || nativeGetDescriptor(frame, 'assertCurrent')?.value !== original.assertCurrent) {
+  if (original?.store !== store || nativeGetDescriptor(frame, 'assertCurrent')?.value !== original.assertCurrent
+    || nativeGetDescriptor(store, 'persistence')?.value !== original.persistence) {
     throw new SQLiteObservationRetiredError();
   }
   if (original.observation) {
@@ -1145,7 +1152,7 @@ const nativeReadImages = new WeakMap<object, {
   readonly db: SqlDatabase;
   readonly store: SQLiteStore;
   readonly origin: object;
-  readonly digest: string;
+  readonly evidence: SQLiteImageObservation;
   readonly state: OwnedSqlDatabase;
   readonly revision: bigint;
 }>();
@@ -1171,7 +1178,7 @@ const expectedRecordReadsets = new WeakMap<object, {
   readonly plan: NativeKnowledgeSchemaReadPlan | undefined;
   readonly validator: SqliteStoreInitOptions['validateCurrentSchema'];
   readonly schemaVersion: number;
-  readonly digest: string | undefined;
+  readonly evidence: SQLiteImageObservation | undefined;
   readonly canonical: boolean;
   readonly selectors: readonly PersistedKnowledgeRecordSelector[];
   readonly records: readonly ActualKnowledgeRecordValues[];
@@ -1196,7 +1203,7 @@ export class SQLiteStore {
   private readonly privateSchemaImages = new WeakSet<SqlDatabase>();
   private imageEpoch = 0;
   private observationEpoch = 0;
-  private persistedReadFrame: { db: SqlDatabase | null; owned: boolean; identity: string | undefined; local: string | undefined; persisted: string | undefined; poisoned: boolean; localState: OwnedSqlDatabase | undefined; localRevision: bigint | undefined; localProbe: string | undefined; localIsolated: boolean; rows: Map<string, ReturnType<SqlDatabase['exec']>>; generations: Map<string, string | null>; assertCurrent: (verifyNative?: boolean) => void } | null = null;
+  private persistedReadFrame: { db: SqlDatabase | null; owned: boolean; identity: string | undefined; local: string | undefined; persisted: SQLiteImageObservation | undefined; poisoned: boolean; localState: OwnedSqlDatabase | undefined; localRevision: bigint | undefined; localProbe: string | undefined; localIsolated: boolean; rows: Map<string, ReturnType<SqlDatabase['exec']>>; generations: Map<string, string | null>; assertCurrent: (verifyNative?: boolean) => void } | null = null;
   private admission: Promise<void> = Promise.resolve();
   private readonly activeBatches = new Set<Promise<void>>();
   private fenced = false;
@@ -1355,7 +1362,7 @@ export class SQLiteStore {
       const originalGenerations = original.generations;
       const native = frame?.db ? privateMapGet(ownedDatabases, frame.db) : undefined;
       let canonical = Boolean(frame && image?.store === this && image.origin === privateMapGet(nativeReadFrameIdentities, frame)?.identity
-        && image.digest === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
+        && image.evidence === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
         && frame.localState && frame.persisted
         && nativeMethodsMatch(this.sqlEngine, native?.raw) && nativeMethodsMatch(this.sqlEngine, frame.localState.raw)
         && nativeKnowledgeSchemaReadPlanMatches(this.nativeSchemaReadPlan, this.validateCurrentSchema, this.schemaVersion));
@@ -1370,7 +1377,7 @@ export class SQLiteStore {
       privateMapSet(expectedRecordReadsets, expected, nativeFreeze({ token: expected, store: this,
         origin: frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined, persistence: this.persistence,
         plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
-        digest: frame?.persisted, canonical, selectors: Object.freeze(captured.map(selector => Object.freeze(selector))),
+        evidence: frame?.persisted, canonical, selectors: Object.freeze(captured.map(selector => Object.freeze(selector))),
         records: original.records }));
       result = Object.freeze({ expected, originalGenerations });
     });
@@ -1399,7 +1406,7 @@ export class SQLiteStore {
       }
       const native = frame?.db ? privateMapGet(ownedDatabases, frame.db) : undefined;
       let canonical = Boolean(frame && image?.store === this && image.origin === privateMapGet(nativeReadFrameIdentities, frame)?.identity
-        && image.digest === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
+        && image.evidence === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
         && frame.localState && frame.persisted
         && nativeMethodsMatch(this.sqlEngine, native?.raw) && nativeMethodsMatch(this.sqlEngine, frame.localState.raw)
         && nativeKnowledgeSchemaReadPlanMatches(this.nativeSchemaReadPlan, this.validateCurrentSchema, this.schemaVersion));
@@ -1419,7 +1426,7 @@ export class SQLiteStore {
         privateMapSet(expectedRecordReadsets, expected, nativeFreeze({ token: expected, store: this,
           origin: frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined, persistence: this.persistence,
           plan: this.nativeSchemaReadPlan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
-          digest: frame?.persisted, canonical, selectors: Object.freeze(selectors.map(selector => Object.freeze(selector))),
+          evidence: frame?.persisted, canonical, selectors: Object.freeze(selectors.map(selector => Object.freeze(selector))),
           records: original.records }));
         values.push(Object.freeze({ expected, originalGenerations }));
       }
@@ -1443,7 +1450,7 @@ export class SQLiteStore {
       }
       let matches: readonly boolean[] = [];
       const compare = (): undefined => {
-        // Acquire this frame's private image and complete entry digest even
+        // Acquire this frame's private image and original native image evidence even
         // when every original raw row can be proved equal without selecting it.
         currentNativeReadImage(this, this.persistedReadFrame, this.persistedReadFrame?.db, this.sqlEngine);
         this.readPrivatePersistedRows('SELECT 1', [], true);
@@ -1452,7 +1459,7 @@ export class SQLiteStore {
         const native = frame?.db ? privateMapGet(ownedDatabases, frame.db) : undefined;
         const image = currentNativeReadImage(this, frame, frame?.db, this.sqlEngine);
         const closed = Boolean(frame && image?.store === this && image.origin === privateMapGet(nativeReadFrameIdentities, frame)?.identity
-          && image.digest === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
+          && image.evidence === frame.persisted && image.state === native && image.revision === native?.revision && !native?.inFlight
           && frame.localState
           && nativeMethodsMatch(this.sqlEngine, native?.raw) && nativeMethodsMatch(this.sqlEngine, frame.localState.raw)
           && nativeKnowledgeSchemaReadPlanMatches(this.nativeSchemaReadPlan, this.validateCurrentSchema, this.schemaVersion));
@@ -1462,7 +1469,7 @@ export class SQLiteStore {
           if (!retained) throw new TypeError('SQLiteStore: unknown expected readset');
           if (closed && retained.canonical && retained.origin && retained.persistence === this.persistence
             && retained.plan === this.nativeSchemaReadPlan && retained.validator === this.validateCurrentSchema
-            && retained.schemaVersion === this.schemaVersion && retained.digest === frame?.persisted) {
+            && retained.schemaVersion === this.schemaVersion && retained.evidence === frame?.persisted) {
             values.push(true);
           } else {
             frame?.assertCurrent();
@@ -1519,7 +1526,8 @@ export class SQLiteStore {
       }
       frame.assertCurrent(!closedReadSet);
       if (!frame.db) {
-        frame.identity = this.persistence?.observationIdentity();
+        const persistedImage = this.persistence ? readFrameImage(this.persistence) : undefined;
+        frame.identity = persistedImage?.identity;
         frame.local = observeDatabase(this.getDb());
         const localState = privateMapGet(ownedDatabases, this.getDb()), revision = localState?.revision;
         const probe = localState ? databaseProbe(localState.raw) : undefined;
@@ -1529,11 +1537,11 @@ export class SQLiteStore {
           frame.localProbe = probe.signature; frame.localIsolated = probe.isolated;
           installDatabaseProbe(localState, probe, this.sqlEngine, frame);
         }
-        const persisted = this.persistence?.read();
-        frame.persisted = persisted ? imageDigest(persisted) : undefined;
+        const persisted = persistedImage?.data;
+        frame.persisted = persisted ? persistedImage?.evidence : undefined;
         const origin = assertReadFrameOrigin(this, frame);
         if (origin.observation) throw new SQLiteObservationRetiredError();
-        privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ ...origin, observation: nativeFreeze({
+        privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ ...origin, ...(persisted ? { bytes: Buffer.from(persisted) } : {}), observation: nativeFreeze({
           identity: frame.identity, local: frame.local, persisted: frame.persisted, localState: frame.localState,
           localRevision: frame.localRevision, localProbe: frame.localProbe, localIsolated: frame.localIsolated,
         }) }));
@@ -1544,7 +1552,7 @@ export class SQLiteStore {
         if (stamp && persisted && this.persistence && plan && frame.persisted) {
           privateMapSet(frameImageStamps, stamp, { store: this, frame, data: persisted, persistence: this.persistence,
             plan, validator: this.validateCurrentSchema, schemaVersion: this.schemaVersion,
-            imageEpoch: this.imageEpoch, observationEpoch: this.observationEpoch, digest: frame.persisted });
+            imageEpoch: this.imageEpoch, observationEpoch: this.observationEpoch, evidence: frame.persisted });
         }
         try { frame.db = this.openPrivateReadImage(stamp); }
         finally { if (stamp) privateMapDelete(frameImageStamps, stamp); }
@@ -1595,7 +1603,7 @@ export class SQLiteStore {
     const observationEpoch = this.observationEpoch, imageEpoch = this.imageEpoch;
     const frame = {
       db: null as SqlDatabase | null, owned: false, identity: undefined as string | undefined,
-      local: undefined as string | undefined, persisted: undefined as string | undefined, poisoned: false,
+      local: undefined as string | undefined, persisted: undefined as SQLiteImageObservation | undefined, poisoned: false,
       localState: undefined as OwnedSqlDatabase | undefined, localRevision: undefined as bigint | undefined,
       localProbe: undefined as string | undefined, localIsolated: false,
       rows: new Map<string, ReturnType<SqlDatabase['exec']>>(),
@@ -1618,7 +1626,7 @@ export class SQLiteStore {
       },
     };
     const assertCurrent = frame.assertCurrent;
-    privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ store: this, identity: nativeFreeze({}), assertCurrent }));
+    privateMapSet(nativeReadFrameIdentities, frame, nativeFreeze({ store: this, identity: nativeFreeze({}), persistence: this.persistence, assertCurrent }));
     this.persistedReadFrame = frame;
     try {
       invoke();
@@ -1626,9 +1634,11 @@ export class SQLiteStore {
       if (frame.db) {
         // Full-state fences run once per outer assertion, not once per row. No
         // data from this frame can authorize the next await or publication.
-        const persisted = this.persistence?.read(), original = assertReadFrameOrigin(this, frame).observation;
-        if (!original || observeDatabase(this.getDb()) !== original.local
-          || (persisted ? imageDigest(persisted) : undefined) !== original.persisted) {
+        const current = this.persistence ? readFrameImage(this.persistence) : undefined;
+        const retained = assertReadFrameOrigin(this, frame), original = retained.observation;
+        const persisted = current?.data;
+        if (!original || observeDatabase(this.getDb()) !== original.local || current?.identity !== original.identity
+          || (persisted ? retained.bytes === undefined || !persisted.equals(retained.bytes) : retained.bytes !== undefined)) {
           throw new SQLiteObservationRetiredError();
         }
         assertCurrent();
@@ -1637,6 +1647,10 @@ export class SQLiteStore {
       this.persistedReadFrame = null;
       const release = privateMapGet(nativeFrameReleases, frame);
       privateMapDelete(nativeFrameReleases, frame);
+      // Retired reflected frame objects must not retain the private database
+      // byte snapshot or become another source of native image evidence.
+      privateMapDelete(nativeReadFrameIdentities, frame);
+      privateMapDelete(nativeReadImages, frame);
       try { release?.(); }
       finally { if (frame.owned && frame.db) this.closeReadImage(frame.db); }
     }
@@ -1983,7 +1997,7 @@ export class SQLiteStore {
       throw new Error('SQLiteStore: no proven clean ephemeral image is available');
     }
     let entryBytes: Uint8Array | undefined;
-    let entryDigest: string | undefined;
+    let entryEvidence: SQLiteImageObservation | undefined;
     if (stamp) {
       const captured = privateMapGet(frameImageStamps, stamp), frame = this.persistedReadFrame;
       if (captured?.store === this) privateMapDelete(frameImageStamps, stamp);
@@ -1991,12 +2005,12 @@ export class SQLiteStore {
         && captured.persistence === this.persistence && captured.plan === privateReadPlan && privateReadPlan === this.nativeSchemaReadPlan
         && captured.validator === this.validateCurrentSchema && captured.schemaVersion === this.schemaVersion
         && captured.imageEpoch === this.imageEpoch && captured.observationEpoch === this.observationEpoch
-        && captured.digest === frame.persisted
+        && captured.evidence === frame.persisted
         && nativeKnowledgeSchemaReadPlanMatches(privateReadPlan, this.validateCurrentSchema, this.schemaVersion)) {
         frame.assertCurrent();
         if (captured.persistence.observationIdentity() !== frame.identity) throw new SQLiteObservationRetiredError();
         entryBytes = captured.data;
-        entryDigest = captured.digest;
+        entryEvidence = captured.evidence;
       }
     }
     const data = entryBytes ?? (this.persistence ? this.persistence.read() : this.cleanBytes);
@@ -2004,6 +2018,10 @@ export class SQLiteStore {
     const Database = currentDatabaseConstructor(this.sqlEngine!);
     const current = constructOwnedDatabase(this.sqlEngine!, data ?? undefined, Database);
     try {
+      if (entryEvidence) {
+        const retained = this.persistedReadFrame ? assertReadFrameOrigin(this, this.persistedReadFrame).bytes : undefined;
+        if (!retained || !data || !Buffer.from(data.buffer, data.byteOffset, data.byteLength).equals(retained)) throw new SQLiteObservationRetiredError();
+      }
       if (data === null) {
         this.schema!(current);
         sqlJsVersionHandle(current).setUserVersion(this.schemaVersion);
@@ -2014,8 +2032,8 @@ export class SQLiteStore {
         && validateNativeKnowledgeReadSchema({ exec: sql => readDatabaseRow(current, sql, []) })) {
         this.privateSchemaImages.add(current);
         const frame = this.persistedReadFrame, state = privateMapGet(ownedDatabases, current), origin = frame ? privateMapGet(nativeReadFrameIdentities, frame)?.identity : undefined;
-        if (entryDigest && origin && state && frame) privateMapSet(nativeReadImages, frame, nativeFreeze({ db: current, store: this, origin,
-          digest: entryDigest, state, revision: state.revision }));
+        if (entryEvidence && origin && state && frame) privateMapSet(nativeReadImages, frame, nativeFreeze({ db: current, store: this, origin,
+          evidence: entryEvidence, state, revision: state.revision }));
       } else this.validateCurrentSchema?.(current);
       return current;
     } catch (error) { current.close(); throw error; }

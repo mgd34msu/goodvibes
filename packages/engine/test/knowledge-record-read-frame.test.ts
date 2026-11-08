@@ -1,9 +1,10 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { copyFileSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadSqlJsEngine, SQLiteObservationRetiredError, SQLiteStore, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
 import { SQLiteStorePersistence } from '../sdk/src/platform/state/sqlite-store-persistence.js';
+import * as fileObservations from '../sdk/src/platform/utils/file-observation.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { assertKnowledgeRecordAdmissions, KnowledgeRecordAdmissionHeldError, prepareKnowledgeRecordAdmission } from '../sdk/src/platform/knowledge/store-record-snapshot.js';
 import { createSemanticWriteGuard } from '../sdk/src/platform/knowledge/semantic/primary-source-plan.js';
@@ -77,15 +78,15 @@ function interceptPrivateImage(sqlite: SQLiteStore, intercept: (open: (...args: 
 }
 
 function observePhysicalReads() {
-  const read = SQLiteStorePersistence.prototype.read;
+  const read = fileObservations.readFileObservation;
   let count = 0;
-  const observing = spyOn(SQLiteStorePersistence.prototype, 'read').mockImplementation(function (this: SQLiteStorePersistence) {
-    count++; return read.call(this);
+  const observing = spyOn(fileObservations, 'readFileObservation').mockImplementation(path => {
+    count++; return read(path);
   });
   return { count: () => count, restore: () => observing.mockRestore() };
 }
 
-test('native frame construction consumes its exact hashed entry bytes once and keeps a fresh exit read', async () => {
+test('native frame construction consumes its exact owned entry bytes once and keeps a fresh exit read', async () => {
   const { sqlite, source } = await fixture(), physical = observePhysicalReads();
   try {
     const current = () => sqlite.assertPersistedReadFrame(() => {
@@ -96,6 +97,24 @@ test('native frame construction consumes its exact hashed entry bytes once and k
     await Promise.resolve();
     current(); expect(physical.count()).toBe(4);
   } finally { physical.restore(); }
+});
+
+test('the real frame exit rejects changed persisted bytes despite a substituted public stat observer', async () => {
+  const { store, sqlite, source } = await fixture();
+  const persistence: unknown = Reflect.get(sqlite, 'persistence');
+  if (!(persistence instanceof SQLiteStorePersistence)) throw new Error('Missing actual native persistence owner');
+  const original = readFileSync(store.storagePath), SQL = await loadSqlJsEngine(), modified = new SQL.Database(original);
+  let replacement: Uint8Array;
+  try { modified.run('UPDATE knowledge_sources SET title = ? WHERE id = ?', ['changed while reading', source.id]); replacement = modified.export(); }
+  finally { modified.close(); }
+  const identity = persistence.observationIdentity();
+  const observing = spyOn(persistence, 'observationIdentity').mockReturnValue(identity);
+  try {
+    expect(() => sqlite.assertPersistedReadFrame(() => {
+      expect(sqlite.readPersistedRow('knowledge_sources', 'id', source.id)[0]?.values).toHaveLength(1);
+      writeFileSync(store.storagePath, replacement);
+    })).toThrow(SQLiteObservationRetiredError);
+  } finally { observing.mockRestore(); writeFileSync(store.storagePath, original); }
 });
 
 test.each(['missing', 'copied', 'proxy', 'replayed'] as const)(

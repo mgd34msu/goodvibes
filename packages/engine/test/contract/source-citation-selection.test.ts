@@ -57,3 +57,58 @@ test('old primary quotations are not retransmitted after the report removes its 
   expect(requests).toEqual([]);
   expect(evidence.sourceReads![0]!.returnedContent!.length).toBeGreaterThan(100000);
 });
+
+test('the cache belongs to the complete current report and the actual owner', async () => {
+  const owner = {}, first = largeEvidence('Read src/parser.ts:1-5000 completely.');
+  const changed = largeEvidence(first.output + ' A later qualification changes the complete report.');
+  const { port, requests } = fakePort(() => noulAnswer(0.99));
+  await selectSourceCitationEvidence(owner, first, port);
+  await selectSourceCitationEvidence(owner, first, port); expect(requests).toHaveLength(1);
+  await selectSourceCitationEvidence(owner, changed, port); expect(requests).toHaveLength(2);
+  await selectSourceCitationEvidence(owner, first, port); expect(requests).toHaveLength(3);
+  await selectSourceCitationEvidence({}, first, port); expect(requests).toHaveLength(4);
+});
+
+test('a late result for another report cannot overwrite the current report cache', async () => {
+  const owner = {}, old = largeEvidence('OLD read ledger: src/parser.ts:1-5000.'), current = largeEvidence('CURRENT finding: src/parser.ts:1-5000.');
+  let release!: () => void, entered!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const fake = fakePort((_name, _question, state) => noulAnswer((state as { report: string }).report === old.output ? 0.99 : 0.01));
+  const port = { ...fake.port, async ask(request: Parameters<typeof fake.port.ask>[0]) {
+    if ((request.state as { report: string }).report === old.output) { entered(); await hold; }
+    return fake.port.ask(request);
+  } } as typeof fake.port;
+  const pending = selectSourceCitationEvidence(owner, old, port); await ready;
+  expect((await selectSourceCitationEvidence(owner, current, port)).evidence).toBe(current);
+  release(); await pending;
+  expect((await selectSourceCitationEvidence(owner, current, port)).evidence).toBe(current);
+  expect(fake.requests).toHaveLength(2);
+});
+
+test('repeated read records classify each actual report occurrence once while retaining every scope record', async () => {
+  const original = largeEvidence('Read receipts: src/parser.ts:1-5000 returned completely.');
+  const evidence = { ...original, sourceReads: [...original.sourceReads!, { ...original.sourceReads![0]! }] };
+  const { port, requests } = fakePort(() => noulAnswer(0.99));
+  const selected = await selectSourceCitationEvidence({}, evidence, port);
+  expect(Object.keys(requests[0]!.questions)).toEqual(['citation_0']);
+  expect(selected.evidence.sourceReads).toHaveLength(3);
+  expect(selected.evidence.sourceReads![0]).toEqual(selected.evidence.sourceReads![2]);
+  expect(selected.evidence.sourceReads![0]?.returnedRanges).toEqual(['1-5000']);
+});
+
+for (const changed of ['report', 'returned-content', 'returned-ranges'] as const) test(`changed ${changed} cannot publish a selection from the prior captured evidence`, async () => {
+  const evidence = largeEvidence('Read receipts: src/parser.ts:1-5000 returned completely.');
+  let release!: () => void, entered!: () => void;
+  const ready = new Promise<void>(resolve => { entered = resolve; });
+  const hold = new Promise<void>(resolve => { release = resolve; });
+  const fake = fakePort(() => noulAnswer(0.99));
+  const port = { ...fake.port, async ask(request: Parameters<typeof fake.port.ask>[0]) {
+    entered(); await hold; return fake.port.ask(request);
+  } } as typeof fake.port;
+  const pending = selectSourceCitationEvidence({}, evidence, port); await ready;
+  if (changed === 'report') Object.assign(evidence, { output: 'This source is substantive evidence of a finding.' });
+  else if (changed === 'returned-content') Object.assign(evidence.sourceReads![0]!, { returnedContent: '1 | Changed source content' });
+  else Object.assign(evidence.sourceReads![0]!, { returnedRanges: ['1'] });
+  release(); await expect(pending).rejects.toThrow();
+});

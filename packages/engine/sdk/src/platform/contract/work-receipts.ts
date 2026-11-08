@@ -1,4 +1,5 @@
 import type { ContractView } from './types.js';
+import type { SourceReadEvidence } from './evidence.js';
 import { findCardNumberShapes } from '../security/card-shapes.js';
 import { readPrivateReceiptArchives, verifyPrivateReceiptPreservation } from './private-read-receipts.js';
 import { hashState, type JsonValue } from '@goodvibes-jev/judgment';
@@ -21,9 +22,16 @@ export function contractSourceScope(contract: Pick<ContractView, 'units'> & Part
   const observations: { source: string; reads: readonly { path: string; returnedRanges: readonly string[] }[] }[] = [
     ...passed.map(unit => ({ source: `passed unit ${unit.id}`, reads: unit.readEvidence ?? [] })),
     { source: 'qualified original-owner observations', reads: ownerReads }];
-  const references = [...new Map(passed.flatMap(unit => unit.readEvidence ?? [])
-    .filter(read => read.contentKind === 'declared-reference' && read.returnedContent !== undefined && read.path.toLowerCase().endsWith('.json'))
-    .map(read => [JSON.stringify([read.path, hashState(read.returnedContent!)]), read])).values()];
+  const references: SourceReadEvidence[] = [];
+  const byPath = new Map<string, Map<string, number>>();
+  for (const read of passed.flatMap(unit => unit.readEvidence ?? [])) {
+    if (read.contentKind !== 'declared-reference' || read.returnedContent === undefined || !read.path.toLowerCase().endsWith('.json')) continue;
+    const contents = byPath.get(read.path) ?? new Map<string, number>();
+    byPath.set(read.path, contents);
+    const index = contents.get(read.returnedContent);
+    if (index === undefined) { contents.set(read.returnedContent, references.length); references.push(read); }
+    else references[index] = read;
+  }
   const referenceOperations = currentFileObservations(cwd, references.map(read => read.path));
   return { referenceOperations,
     sourceJsonReferenceComparisons: compareJsonReadReferences(references, referenceOperations, observations),

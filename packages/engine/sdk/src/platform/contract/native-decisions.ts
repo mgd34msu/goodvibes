@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { bindNativeCiSourceIssuer } from '../ci-watch/native-owner.js';
 import type { ExternalOperationSource } from '../permissions/external-request.js';
@@ -272,7 +273,7 @@ export async function decideNativeContract(contract: Contract, services: NativeC
       actionId: `${contract.id}:${key}`, actionRevision, ...expectedAuthority };
     const active = () => {
       assertAuthority(contract, owner, expectedAuthority, input.signal);
-      if (hashState(snapshotJudgmentInput(input.state()) as EntryType) !== hashState(evidence)) { owner.cancel?.(contract, 'Native operation was superseded'); throw new JudgmentError('aborted', 'Native operation was superseded'); }
+      if (!isDeepStrictEqual(snapshotJudgmentInput(input.state()), evidence)) { owner.cancel?.(contract, 'Native operation was superseded'); throw new JudgmentError('aborted', 'Native operation was superseded'); }
       for (const [index, condition] of conditions.entries()) {
         const current = condition.current(); const captured = capturedConditions[index]!.ref;
         if (current.id !== captured.id || current.revision !== captured.revision) { owner.cancel?.(contract, 'Native condition catalog changed'); throw new JudgmentError('aborted', 'Native condition catalog changed'); }

@@ -46,6 +46,30 @@ function approvedWork(projectRoot = '/project') {
   return completedContractEvidence({ list: () => [accepted] }, 'session', projectRoot);
 }
 
+test('native work receipts compare exact detached values without invoking supplied accessors or proxies', () => {
+  const work = approvedWork()[0]!;
+  expect(isNativeCompletedWorkReceipt(work, structuredClone(work))).toBe(true);
+  let accessed = false;
+  const borrowed = { ...work, get answer() { accessed = true; return work.answer; } };
+  expect(isNativeCompletedWorkReceipt(work, borrowed)).toBe(false);
+  expect(accessed).toBe(false);
+  const proxy = new Proxy(structuredClone(work), { get(target, key, receiver) { accessed = true; return Reflect.get(target, key, receiver); } });
+  expect(isNativeCompletedWorkReceipt(work, proxy)).toBe(false);
+  expect(accessed).toBe(false);
+  expect(isNativeCompletedWorkReceipt(work, structuredClone(work))).toBe(true);
+});
+
+test('an observed mutation retires a native completed-work receipt even if its old values are restored', () => {
+  const work = approvedWork()[0]!, admitted = structuredClone(work);
+  const original = work.units[0]!.goal;
+  work.units[0]!.goal = 'A different saved unit scope.';
+  expect(isNativeCompletedWorkReceipt(work, admitted)).toBe(false);
+  work.units[0]!.goal = original;
+  expect(isNativeCompletedWorkReceipt(work, work)).toBe(false);
+  const current = approvedWork()[0]!;
+  expect(isNativeCompletedWorkReceipt(current, structuredClone(current))).toBe(true);
+});
+
 function handoff(previousObservation?: string, compactHistory = false) {
   const conversation = new ConversationManager();
   conversation.addUserMessage('Review all source and deliver review.md.');

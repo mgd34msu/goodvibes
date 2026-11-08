@@ -1,3 +1,5 @@
+import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
+import { captureOwnedJson, retainOwnedJson, type RetainedOwnedJson } from '../gate/judgment-input.js';
 import type { ContractRunner } from '../contract/runner.js';
 import { isTerminalContractStatus } from '../contract/types.js';
 import type { ContractView } from '../contract/types.js';
@@ -7,11 +9,15 @@ import { originalObligationSource } from '../contract/batteries/original-obligat
 
 // Process-local provenance: copied tool JSON cannot mint a native work receipt.
 // These are work checkpoints, never final-response publication permits.
-const nativeWorkReceipts = new WeakMap<object, string>();
+const nativeWorkReceipts = new WeakMap<object, RetainedOwnedJson>();
 export function isNativeCompletedWorkReceipt(original: unknown, admitted: unknown): boolean {
   if (!original || typeof original !== 'object') return false;
-  const digest = nativeWorkReceipts.get(original);
-  return digest !== undefined && digest === hashState(admitted as Parameters<typeof hashState>[0]);
+  const retained = nativeWorkReceipts.get(original);
+  if (!retained) return false;
+  try { retained.assertCurrent(); }
+  catch { nativeWorkReceipts.delete(original); return false; }
+  try { return isDeepStrictEqual(retained.snapshot, captureOwnedJson(admitted, nodeTypes.isProxy)); }
+  catch { return false; }
 }
 
 function recordedReview(contract: ContractView, target: 'final-answer-review' | 'goal-obligations' | 'original-obligations') {
@@ -87,7 +93,7 @@ export function completedContractEvidence(runner: Pick<ContractRunner, 'list'>, 
           || (!hasOriginalObligationCoverage && work.goalCoverage?.wellFormed && work.goalCoverage.matchesSavedAnswer && work.goalCoverage.matchesOriginalScope
             && work.goalCoverage.record.passed === true))
         && ['applied', 'committed'].includes(String(work.publication?.status)))
-        nativeWorkReceipts.set(work, hashState(work as unknown as Parameters<typeof hashState>[0]));
+        nativeWorkReceipts.set(work, retainOwnedJson(work, nodeTypes.isProxy));
       return work;
     });
 }

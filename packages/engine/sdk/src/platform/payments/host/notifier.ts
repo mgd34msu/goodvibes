@@ -80,6 +80,7 @@ export function channelBackedPaymentNotifier(
   }
 
   return createChannelPaymentNotifier({
+    requireDeliveryReceipt: true,
     router: daemonNoticeRouter(router),
     targets,
     replies,

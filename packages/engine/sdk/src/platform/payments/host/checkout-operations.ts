@@ -20,6 +20,7 @@ import type { RetainedTaintEvidence } from '../../security/untrusted-content.js'
 import type { PaymentRequestHostFacts, PaymentRequestStore } from './protected-requests.js';
 import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import { capturePaymentContinuation } from './continuation-binding.js';
+import { PaymentReplyWindowError } from '../reply-inbox.js';
 
 export interface DetachedCheckoutSource {
   readonly principalId: string;
@@ -196,7 +197,8 @@ export class CheckoutOperations {
     const { writer } = operation, previous = writer.read();
     let state: PaymentOperationView['state'] = 'uncertain';
     let outcome: string | null = previous.outcome ?? (error instanceof JudgmentPortMissingError || error instanceof JudgmentError && error.kind === 'unavailable'
-      ? 'decision-unavailable' : error instanceof DecisionModelsDisabledError ? 'decision-disabled' : null);
+      ? 'decision-unavailable' : error instanceof DecisionModelsDisabledError ? 'decision-disabled'
+        : error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable' ? 'reply-source-unavailable' : null);
     try {
       const entries = await this.journal.list(), retained = entries.find(row => row.purchaseId === writer.purchaseId);
       const recorded = this.purchases.get(writer.purchaseId);

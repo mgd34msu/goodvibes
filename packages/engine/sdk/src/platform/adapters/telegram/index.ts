@@ -165,6 +165,8 @@ export async function processTelegramUpdate(
     || /^\/goodvibes\b/i.test(text)
     || (botHandle && new RegExp(`@${escapeRegExp(botHandle)}\\b`, 'i').test(text)),
   );
+  const acquireTelegramAccount = !delegated && context.hasPaymentReplyWindow?.() ? deps.acquireSourceAccount?.bind(deps) : undefined;
+  const replied = readRecord(message.reply_to_message);
   const policy = await context.authorizeSurfaceIngress({
     surface: 'telegram',
     userId: readNumberString(from?.id),
@@ -175,14 +177,19 @@ export async function processTelegramUpdate(
     conversationKind: telegramConversationKind(readString(chat?.type), threadId),
     ...(delegated ? {} : { text: task || text }),
     mentioned,
+    acquireTelegramAccount,
     metadata: {
       updateId: readNumberString(payload.update_id),
       chatType: readString(chat?.type),
       chatTitle: readString(chat?.title),
       fromUsername: readString(from?.username),
+      messageId: readNumberString(message.message_id),
+      replyToMessageId: readNumberString(replied?.message_id),
     },
   });
   if (!policy.allowed) {
+    const paymentAnswer = /^payment-reply-(approve|deny|acknowledge|object)$/.exec(policy.reason)?.[1];
+    if (paymentAnswer) return Response.json({ ok: true, acknowledged: true, consumed: true, queued: false, outcome: 'payment-reply', answer: paymentAnswer });
     return Response.json({ ok: false, error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });
   }
 

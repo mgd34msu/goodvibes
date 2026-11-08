@@ -28,7 +28,7 @@ import { summarizeError } from '../utils/error-display.js';
 import { tryResolveApprovalReplyFromChannel, type ApprovalReplyBroker } from './approval-reply.js';
 import { tryResolveWorkProposalReplyFromChannel } from './work-proposal-reply.js';
 import { tryResolvePaymentReplyFromChannel } from './payment-reply.js';
-import { PaymentReplyInbox } from '../payments/reply-inbox.js';
+import { PaymentReplyInbox, type PaymentReplyOffer } from '../payments/reply-inbox.js';
 import { refuseCardShapedIngress, CARD_SHAPES_REFUSED_REASON, JUDGMENT_INPUT_REFUSED_REASON } from './surface-card-gate.js';
 import {
   deliverProposalNotice,
@@ -50,6 +50,7 @@ interface PendingNtfyChatReply {
 }
 
 interface DaemonSurfaceActionContext {
+  readonly telegramSourceAccounts?: import('../channels/telegram/source-account.js').TelegramSourceAccountReader | undefined;
   readonly delegatedTelegram?: import('./delegated-telegram-intake.js').DelegatedTelegramIntake | undefined;
   readonly serviceRegistry: ServiceRegistry;
   readonly secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'> & Partial<Pick<SecretsManager, 'onDidChange'>>;
@@ -158,6 +159,7 @@ export class DaemonSurfaceActionHelper {
     const commands = new WeakMap<SurfaceControlReading, () => void>();
     return {
       delegatedTelegram: this.context.delegatedTelegram,
+      hasPaymentReplyWindow: () => this.paymentReplies.pending > 0,
       serviceRegistry: this.context.serviceRegistry,
       secretsManager: this.context.secretsManager,
       configManager: this.context.configManager,
@@ -318,15 +320,24 @@ export class DaemonSurfaceActionHelper {
     // agreement answerable over whatever channel the proposal went out on,
     // with no per-adapter wiring and no walk to a terminal.
     const policySource = JSON.stringify({ ...decision.policy, updatedAt: undefined });
+    const replySurface = input.surface;
     const lifecycle = this.controlAbort.signal;
     const assertReplyCurrent = () => {
       lifecycle.throwIfAborted();
-      const registered = this.context.channelPolicy.listPolicies().find(policy => policy.surface === input.surface);
+      const registered = this.context.channelPolicy.listPolicies().find(policy => policy.surface === replySurface);
       if ((registered && registered !== decision.policy)
-        || JSON.stringify({ ...this.context.channelPolicy.getPolicy(input.surface), updatedAt: undefined }) !== policySource) {
-        throw new Error('Work proposal owner policy is no longer current');
+        || JSON.stringify({ ...this.context.channelPolicy.getPolicy(replySurface), updatedAt: undefined }) !== policySource) {
+        throw new Error('The original reply owner policy is no longer current');
       }
     };
+    let addressedPayment: PaymentReplyOffer | undefined;
+    if (typeof input.metadata?.['replyToMessageId'] === 'string') {
+      // An explicit provider reply names its notice before another pending
+      // dialogue can interpret the same short answer against different text.
+      addressedPayment = await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
+        { assertCurrent: assertReplyCurrent, signal: lifecycle });
+      if (addressedPayment.consumed) return { ...decision, allowed: false, reason: `payment-reply-${addressedPayment.answer}` };
+    }
     const proposalReply = await tryResolveWorkProposalReplyFromChannel(input, {
       readingOptions: { signal: lifecycle, beforeAttempt: assertReplyCurrent },
       proposals: this.context.workProposals,
@@ -355,7 +366,8 @@ export class DaemonSurfaceActionHelper {
     }
     // An answer to a purchase approval or veto notice, read against the notice
     // it follows. Consumed the same way: the window already has its answer.
-    const paymentReply = await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies);
+    const paymentReply = addressedPayment ?? await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
+      { assertCurrent: assertReplyCurrent, signal: lifecycle });
     if (paymentReply.consumed) {
       return { ...decision, allowed: false, reason: `payment-reply-${paymentReply.answer}` };
     }

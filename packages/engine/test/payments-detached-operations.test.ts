@@ -15,6 +15,8 @@ import { protectedPaymentRequest } from './helpers/protected-payment-request.ts'
 import { parseCurrencyCode, ownerSuppliedText } from '../sdk/src/platform/payments/types.js';
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
 import { paymentContinuationBinding } from '../sdk/src/platform/payments/host/continuation-binding.js';
+import { PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
+import { readPaymentOperation, paymentOperationDescription } from '../sdk/src/platform/payments/operation-view.js';
 
 const roots: string[] = [], cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -119,6 +121,26 @@ test('restart status cannot downgrade known submit-pending evidence when its jou
   const operations = new CheckoutOperations(store, new MemoryCheckoutJournal(), new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }), async (_input, id) => { executions++; return refusal(id); });
   cleanup.push(() => operations.close()); await operations.recover();
   expect(store.get('original-checkout')?.state).toBe('uncertain'); expect(executions).toBe(0);
+});
+
+test('a refused reply source reaches real durable status and the shared browser/terminal explanation', async () => {
+  const path = directory(), store = new DurablePaymentOperations(join(path, 'operations'));
+  const entered = barrier(), release = barrier(); cleanup.push(release.release, configureDecisionModelPolicy(() => 'Default - On'));
+  const operations = new CheckoutOperations(store, new MemoryCheckoutJournal(), new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }), async () => {
+    entered.release(); await release.wait; throw new PaymentReplyWindowError('source-unavailable');
+  });
+  cleanup.push(async () => { release.release(); await operations.close(); }); await operations.recover();
+  await operations.admit('source-unavailable', input, { principalId: 'pairing:owner', assertCurrent() {} }, () => {}, () => {});
+  await entered.wait; release.release();
+  const deadline = Date.now() + 2000;
+  while (store.get('source-unavailable')?.state !== 'failed') {
+    if (Date.now() >= deadline) throw new Error('Source failure was not accounted');
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
+  const view = readPaymentOperation(new DurablePaymentOperations(join(path, 'operations')).get('source-unavailable'));
+  expect(view.outcome).toBe('reply-source-unavailable');
+  expect(paymentOperationDescription(view)).toContain('Telegram polling');
+  expect(paymentOperationDescription(view)).toContain('Payments controls');
 });
 
 test('admission waits for durable original facts and binds original storage methods and request values', async () => {

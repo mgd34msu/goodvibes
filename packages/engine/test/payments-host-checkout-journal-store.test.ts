@@ -48,7 +48,7 @@ beforeEach(() => {
 
 test('the exact window notice and native delivery receipt survive real journal reopening', async () => {
   const notice = 'Approval needed: the full total exceeds your requested maximum.\nTOTAL: USD 55.78\nRequested maximum: USD 50.00';
-  const receipt = { surfaceKind: 'telegram' as const, conversationId: '-100123', messageId: '51', threadId: '7' };
+  const receipt = { surfaceKind: 'telegram' as const, conversationId: '-100123', messageId: '51', threadId: '7', accountId: '123' };
   const original = record({ phase: 'awaiting-window', windowKind: 'approval', windowDeadlineMs: 1_766_003_660_000,
     windowNotice: notice, windowDeliveries: [{ channel: 'telegram', delivered: true, backfillable: false, receipt }] });
   const journal = new DurableCheckoutJournal(filePath);
@@ -56,7 +56,7 @@ test('the exact window notice and native delivery receipt survive real journal r
   const restored = (await new DurableCheckoutJournal(filePath).list())[0];
   expect(restored?.windowNotice).toBe(notice);
   expect(restored?.windowDeliveries).toEqual([{ channel: 'telegram', delivered: true, backfillable: false,
-    receipt: { surfaceKind: 'telegram', conversationId: '-100123', messageId: '51', threadId: '7' } }]);
+    receipt: { surfaceKind: 'telegram', conversationId: '-100123', messageId: '51', threadId: '7', accountId: '123' } }]);
   expect(restored?.phase).toBe('awaiting-window');
 });
 

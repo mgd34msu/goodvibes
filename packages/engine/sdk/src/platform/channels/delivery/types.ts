@@ -72,6 +72,8 @@ export interface ChannelDeliveryReceipt {
   readonly conversationId: string;
   readonly messageId: string;
   readonly threadId?: string | undefined;
+  /** Public sender account acknowledged by the provider, never a token. */
+  readonly accountId?: string | undefined;
 }
 
 export interface ChannelDeliveryResult {

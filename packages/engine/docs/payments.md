@@ -784,6 +784,23 @@ journals and adapters without receipts leave this metadata absent. A receipt
 does not establish that history can be backfilled and cannot authorize a resumed
 checkout; native restart continuation and missed-reply recovery remain unfinished.
 
+Telegram receipts also retain the public sending-bot ID when the provider
+acknowledges it. A channel answer must match that account, recipient and topic.
+An explicit reply must name this notice; an ordinary answer must be newer than
+the notice and identify only one waiting purchase. Unrelated chats, topics,
+accounts and old messages do not trigger a payment reading.
+
+The current native account proof comes from the original verified polling
+session. Use Telegram polling for channel answers, or the paired terminal/browser
+Payments controls. A webhook secret or JSON account ID alone is not promoted to
+that account proof. Missing receipt evidence or interrupted account verification
+fails the wait instead of allowing a veto purchase as silence. Successfully
+consumed Telegram answers are acknowledged without creating a chat turn.
+
+Telegram's retained update queue is bounded and is not a complete chat-history
+service; restart recovery must establish which replies were actually received
+before applying any silence rule. See the [Telegram Bot API update contract](https://core.telegram.org/bots/api#getting-updates).
+
 One nuance that matters for a headless daemon: **the TUI is not a delivery
 strategy.** It renders in-process; there is no routed channel for it. So a daemon
 running with no surface attached and only Telegram configured is undeliverable

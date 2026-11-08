@@ -260,6 +260,7 @@ export class ChannelDeliveryRouter {
         ...(result.responseId === undefined ? {} : { responseId: result.responseId }),
         ...(receipt === undefined ? {} : { receipt: Object.freeze({ surfaceKind: receipt.surfaceKind,
           conversationId: receipt.conversationId, messageId: receipt.messageId,
+          ...(receipt.accountId === undefined ? {} : { accountId: receipt.accountId }),
           ...(receipt.threadId === undefined ? {} : { threadId: receipt.threadId }) }) }),
       });
     } catch (error) {

@@ -389,6 +389,8 @@ export interface ChannelPolicyAuditRecord {
 }
 
 export interface ChannelIngressPolicyInput {
+  /** Host-only polling capability. JSON metadata cannot supply this proof. */
+  readonly acquireTelegramAccount?: (() => Promise<import('./telegram/source-account.js').TelegramSourceAccountHandle | null>) | undefined;
   readonly surface: ChannelSurface;
   readonly userId?: string | undefined;
   readonly channelId?: string | undefined;

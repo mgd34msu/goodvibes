@@ -66,6 +66,8 @@ export function paymentOperationDescription(operation: PaymentOperationView): st
     case 'uncertain': return 'Submission or its recording is uncertain. Check purchase history and the merchant before taking further action. The daemon will not retry it.';
     case 'failed': return operation.outcome === 'decision-unavailable'
       ? 'No decision models are currently available. Check provider keys, endpoints, model access and any local model service, then review this checkout before starting a new one.'
+      : operation.outcome === 'reply-source-unavailable'
+        ? 'The purchase reply channel could not be verified. Check Telegram polling and account settings, or use the paired host’s Payments controls for a new checkout.'
       : operation.outcome === 'decision-disabled'
         ? 'Automated checkout requires decision models. Review the selected decision policy and this checkout before starting a new one.'
         : 'Processing stopped without a confirmed final outcome. Inspect the payment evidence before retrying.';
@@ -83,7 +85,7 @@ export function readPaymentOperation(value: unknown): PaymentOperationView {
     || typeof row['state'] !== 'string' || !(PAYMENT_OPERATION_STATES as readonly string[]).includes(row['state'])
     || !(row['phase'] === null || (typeof row['phase'] === 'string' && ['deciding', 'awaiting-window', 'arming-payment', 'submit-pending', 'submitted'].includes(row['phase'])))
     || !['createdAtMs', 'updatedAtMs'].every(key => typeof row[key] === 'number' && Number.isSafeInteger(row[key]) && row[key] >= 0 && row[key] <= 8_640_000_000_000_000)
-    || !(row['outcome'] === null || (typeof row['outcome'] === 'string' && /^(?:purchased|submitted-unverified|refunded|refused(?::[a-z-]+)?|cancelled|decision-unavailable|decision-disabled|challenge:(?:3d-secure|captcha|otp|unknown))$/.test(row['outcome'])))
+    || !(row['outcome'] === null || (typeof row['outcome'] === 'string' && /^(?:purchased|submitted-unverified|refunded|refused(?::[a-z-]+)?|cancelled|decision-unavailable|decision-disabled|reply-source-unavailable|challenge:(?:3d-secure|captcha|otp|unknown))$/.test(row['outcome'])))
     || !(row['totalMinorUnits'] === null || (typeof row['totalMinorUnits'] === 'number' && Number.isSafeInteger(row['totalMinorUnits']) && row['totalMinorUnits'] >= 0))
     || !(row['currency'] === null || (typeof row['currency'] === 'string' && /^[A-Z]{3}$/.test(row['currency'])))) return fail();
   return Object.freeze({ purchaseId: row['purchaseId'], operationId: row['operationId'], state: row['state'] as PaymentOperationState,

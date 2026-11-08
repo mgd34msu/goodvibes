@@ -71,6 +71,8 @@ export type TrySpawnAgentFn = (
 ) => TrySpawnAgentResult | Promise<TrySpawnAgentResult>;
 
 export interface SurfaceAdapterContext {
+  /** Avoid provider identity I/O for ordinary messages without payment waits. */
+  readonly hasPaymentReplyWindow?: (() => boolean) | undefined;
   /** Explicit daemon-owned selected lane; absence preserves existing Telegram behavior. */
   readonly delegatedTelegram?: import('../daemon/delegated-telegram-intake.js').DelegatedTelegramAdapter | undefined;
   readonly serviceRegistry: ServiceRegistry;

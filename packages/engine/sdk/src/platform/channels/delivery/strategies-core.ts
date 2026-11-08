@@ -411,6 +411,7 @@ export function createTelegramDeliveryStrategy(
       }
       const message = readRecord('result' in payload ? payload.result : undefined);
       const chat = readRecord(message?.['chat']);
+      const sender = readRecord(message?.['from']), accountId = sender?.['id'];
       const messageId = message?.['message_id'], conversationId = chat?.['id'], threadId = message?.['message_thread_id'];
       // Do not reconstruct this from a configured @alias/default chat: it can
       // select a different recipient on the next boot. Incomplete provider
@@ -419,6 +420,7 @@ export function createTelegramDeliveryStrategy(
         && typeof conversationId === 'number' && Number.isSafeInteger(conversationId) && conversationId !== 0
         && (threadId === undefined || typeof threadId === 'number' && Number.isSafeInteger(threadId) && threadId > 0)
         ? { surfaceKind: 'telegram' as const, conversationId: String(conversationId), messageId: String(messageId),
+          ...(sender?.['is_bot'] === true && typeof accountId === 'number' && Number.isSafeInteger(accountId) && accountId > 0 ? { accountId: String(accountId) } : {}),
           ...(threadId === undefined ? {} : { threadId: String(threadId) }) } : undefined;
       return { ...success(extractResponseId(payload)), ...(receipt === undefined ? {} : { receipt }) };
     },

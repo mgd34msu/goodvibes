@@ -12,9 +12,12 @@ export function capturePaymentNoticeReceipt(value: unknown, channel: CommandAuth
   try { captured = captureOwnedJson(value); } catch { return null; }
   if (!captured || typeof captured !== 'object' || Array.isArray(captured)) return null;
   const row = captured as Record<string, unknown>, keys = Object.keys(row);
-  if (keys.some(key => !['surfaceKind', 'conversationId', 'messageId', 'threadId'].includes(key))
+  if (keys.some(key => !['surfaceKind', 'conversationId', 'messageId', 'threadId', 'accountId'].includes(key))
     || row['surfaceKind'] !== channel || !CHANNEL_DELIVERY_SURFACE_KINDS.some(kind => kind === row['surfaceKind'])
     || !reference(row['conversationId']) || !reference(row['messageId'])
+    || (Object.hasOwn(row, 'accountId') && !reference(row['accountId']))
+    || (channel === 'telegram' && typeof row['accountId'] === 'string'
+      && (!/^[1-9]\d{0,15}$/.test(row['accountId']) || !Number.isSafeInteger(Number(row['accountId']))))
     || (Object.hasOwn(row, 'threadId') && !reference(row['threadId']))) return null;
   return captured as unknown as ChannelDeliveryReceipt;
 }

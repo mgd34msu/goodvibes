@@ -17,6 +17,7 @@ import { DaemonSurfaceActionHelper } from '../sdk/src/platform/daemon/surface-ac
 import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
 import type { ChannelPolicyDecision } from '../sdk/src/platform/channels/index.js';
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
+import { createTelegramSourceAccountOwner } from '../sdk/src/platform/channels/telegram/source-account.js';
 
 const readings = usePaymentsReadings();
 
@@ -100,10 +101,14 @@ describe('the inbox settles a waiting window from a reply', () => {
 describe('who may answer over a channel', () => {
   test('the actual daemon notifier captures an owner ingress reply while sending and consumes it only after its window arms', async () => {
     const inbox = new PaymentReplyInbox();
+    const accounts = createTelegramSourceAccountOwner(), lifetime = new AbortController();
+    const lease = accounts.attach({ lifetime: lifetime.signal, isCurrent: async () => true, isCurrentSync: () => true,
+      readIdentity: async () => ({ id: '123', username: 'synthetic_fixture_bot' }) });
     let delivered!: () => void;
     const delivery = new Promise<void>(done => { delivered = done; });
     const notifier = channelBackedPaymentNotifier({ get: key => key === 'payments.notifyChannels' ? 'telegram' : undefined },
-      { async deliver() { await delivery; return 'owner-notice'; } }, inbox);
+      { async deliver() { throw new Error('The receipt path must send once'); }, async deliverWithReceipt() { await delivery;
+        return { receipt: { surfaceKind: 'telegram', accountId: '123', conversationId: '-100123', messageId: '51' } }; } }, inbox);
     if (!notifier.prepareWindow) throw new Error('The native daemon notifier did not reserve reply reception');
     const reception = notifier.prepareWindow({ purchaseId: 'early-owner-ingress', kind: 'veto', notice: VETO_NOTICE });
     const admitted = decision();
@@ -112,17 +117,20 @@ describe('who may answer over a channel', () => {
         getPolicy: () => admitted.policy, listPolicies: () => [admitted.policy] },
       configManager: { get: () => undefined, getCategory: () => undefined },
       routeBindings: { getBinding: () => undefined }, paymentReplies: inbox,
+      telegramSourceAccounts: accounts.reader,
+      workProposals: { listPending() { throw new Error('An explicitly addressed payment reply must not enter work proposals'); }, resolve() { throw new Error('Unexpected work resolution'); } },
     } as unknown as ConstructorParameters<typeof DaemonSurfaceActionHelper>[0]);
     let offered!: () => void;
     const offeredToOriginalInbox = new Promise<void>(done => { offered = done; });
     const offer = inbox.offer.bind(inbox);
-    const observing = spyOn(inbox, 'offer').mockImplementation((channel, text) => {
-      const pending = offer(channel, text); offered(); return pending;
+    const observing = spyOn(inbox, 'offer').mockImplementation((channel, text, correlation) => {
+      const pending = offer(channel, text, correlation); offered(); return pending;
     });
     try {
       expect(await tryResolvePaymentReplyFromChannel({ surface: 'telegram', userId: 'stranger', text: 'stop' }, admitted, inbox))
         .toEqual({ consumed: false, reason: 'no-window' });
-      const ingress = helper.authorizeSurfaceIngress({ surface: 'telegram', userId: OWNER, text: 'stop' });
+      const ingress = helper.authorizeSurfaceIngress({ surface: 'telegram', userId: OWNER, text: 'stop', channelId: '-100123',
+        metadata: { messageId: '52', replyToMessageId: '51' }, acquireTelegramAccount: lease.acquire });
       await offeredToOriginalInbox;
       delivered(); await reception.deliveries;
       expect(inbox.inspect()).toEqual([]); expect(readings.requests).toEqual([]);
@@ -130,7 +138,7 @@ describe('who may answer over a channel', () => {
       expect(await ingress).toMatchObject({ allowed: false, reason: 'payment-reply-object' });
       expect(await waiting).toEqual({ answer: 'object', channel: 'telegram' });
       expect(readings.requests[0]?.state).toEqual({ proposal: VETO_NOTICE, reply: 'stop' });
-    } finally { observing.mockRestore(); delivered(); reception.cancel(); await inbox.close(); }
+    } finally { observing.mockRestore(); delivered(); reception.cancel(); await inbox.close(); lifetime.abort(); }
   });
 
   test('the owner on a command-authority channel answers', async () => {

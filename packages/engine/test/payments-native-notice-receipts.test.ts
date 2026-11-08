@@ -32,11 +32,11 @@ function fixture(payload: unknown) {
 }
 
 test('native Telegram acknowledgement survives the real router and payment adapter as the original recipient and message', async () => {
-  const f = fixture({ ok: true, result: { message_id: 51, chat: { id: -100123 }, message_thread_id: 7 } });
+  const f = fixture({ ok: true, result: { message_id: 51, chat: { id: -100123 }, message_thread_id: 7, from: { id: 123, is_bot: true } } });
   const deliveries = await f.notifier.deliver({ kind: 'approval', message: 'The exact original purchase notice' });
   expect(f.sent).toHaveLength(1); expect(f.sent[0]?.['chat_id']).toBe('@original-alias');
   expect(deliveries).toEqual([{ channel: 'telegram', delivered: true, backfillable: false,
-    receipt: { surfaceKind: 'telegram', conversationId: '-100123', messageId: '51', threadId: '7' } }]);
+    receipt: { surfaceKind: 'telegram', conversationId: '-100123', messageId: '51', threadId: '7', accountId: '123' } }]);
   expect(Object.isFrozen(deliveries[0]?.receipt)).toBe(true);
   expect(JSON.stringify(deliveries)).not.toContain('synthetic-not-a-live-token');
   expect(JSON.stringify(deliveries)).not.toContain('@replacement-alias');

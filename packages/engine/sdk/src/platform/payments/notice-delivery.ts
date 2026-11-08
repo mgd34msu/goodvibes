@@ -106,6 +106,8 @@ export interface PaymentReplySource {
     readonly channels: readonly CommandAuthorityChannel[];
     readonly notice: string;
     readonly signal?: AbortSignal | undefined;
+    readonly requireDeliveryReceipt?: boolean | undefined;
+    readonly deliveries?: readonly ChannelDelivery[] | undefined;
   }): Promise<{
     readonly answer: 'approve' | 'deny' | 'acknowledge' | 'object';
     readonly channel: PaymentAnswerChannel;
@@ -113,11 +115,14 @@ export interface PaymentReplySource {
 }
 
 export interface PreparedPaymentReply {
-  waitForAnswer(input: { readonly deadlineMs: number; readonly channels: readonly CommandAuthorityChannel[] }): ReturnType<PaymentReplySource['waitForAnswer']>;
+  waitForAnswer(input: { readonly deadlineMs: number; readonly channels: readonly CommandAuthorityChannel[];
+    readonly deliveries?: readonly ChannelDelivery[] | undefined }): ReturnType<PaymentReplySource['waitForAnswer']>;
   cancel(): void;
 }
 
 export interface ChannelPaymentNotifierDeps {
+  /** Native channel replies must identify the actual delivered notice. */
+  readonly requireDeliveryReceipt?: boolean | undefined;
   readonly router: PaymentNoticeRouter;
   readonly targets: readonly PaymentNoticeTarget[];
   readonly replies: PaymentReplySource;
@@ -149,20 +154,22 @@ export async function readPaymentReply(
   kind: 'approval' | 'veto',
   notice: string,
   signal?: AbortSignal,
+  assertCurrent?: () => void,
 ): Promise<PaymentAnswer | null> {
   requireDecisionFeature('interpreting a purchase approval or veto reply');
-  signal?.throwIfAborted();
+  const current = () => { signal?.throwIfAborted(); assertCurrent?.(); };
+  current();
   if (reply.trim().length === 0) return null;
   const port = judgmentPort(PAYMENT_REPLY_SITE);
   if (kind === 'approval') {
-    const read = await approvalReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE, ...(signal === undefined ? {} : { signal }) });
-    signal?.throwIfAborted();
+    const read = await approvalReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE, beforeAttempt: current, ...(signal === undefined ? {} : { signal }) });
+    current();
     const answer = read.reading.outcome === 'act' && read.reading.choice !== 'unclear' ? read.reading.choice : null;
     read.recordAction(answer ?? 'no answer');
     return answer;
   }
-  const read = await vetoReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE, ...(signal === undefined ? {} : { signal }) });
-  signal?.throwIfAborted();
+  const read = await vetoReply.read(port, notice, reply, { site: PAYMENT_REPLY_SITE, beforeAttempt: current, ...(signal === undefined ? {} : { signal }) });
+  current();
   const answer = read.reading.outcome === 'act' && read.reading.choice !== 'unclear' ? read.reading.choice : null;
   read.recordAction(answer ?? 'no answer');
   return answer;
@@ -233,6 +240,7 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
         channels,
         notice: input.notice,
         signal: input.signal,
+        requireDeliveryReceipt: deps.requireDeliveryReceipt,
       });
     },
   };
@@ -242,7 +250,7 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
     const signal = input.signal, assertCurrent = input.assertCurrent;
     signal?.throwIfAborted(); assertCurrent?.();
     const channels = Object.freeze(deps.targets.map(target => target.channel));
-    const prepared = prepareReply({ purchaseId, kind, channels, notice, signal });
+    const prepared = prepareReply({ purchaseId, kind, channels, notice, signal, requireDeliveryReceipt: deps.requireDeliveryReceipt });
     let active = true;
     let report: readonly ChannelDelivery[] | undefined;
     const cancel = () => { if (active) { active = false; prepared.cancel(); } };
@@ -258,7 +266,7 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
     return Object.freeze({ deliveries, cancel, awaitAnswer(deadlineMs: number) {
       signal?.throwIfAborted(); assertCurrent?.();
       if (!active || report === undefined) throw new Error('Payment notice delivery has not completed');
-      return prepared.waitForAnswer({ deadlineMs, channels: report.filter(delivery => delivery.delivered).map(delivery => delivery.channel) });
+      return prepared.waitForAnswer({ deadlineMs, channels: report.filter(delivery => delivery.delivered).map(delivery => delivery.channel), deliveries: report });
     } });
   };
   return notifier;

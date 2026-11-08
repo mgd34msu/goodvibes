@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Bind native purchase replies to the acknowledged bot account, chat, topic and
+  notice reference. Reuse the original verified polling owner; wrong/stale
+  sources do no model work. Account verification stays inside reply drainage,
+  and missing source evidence cannot expire as approval by silence. A consumed
+  Telegram reply receives an acknowledgement rather than a policy error.
+  Actual restart backfill and webhook account provenance remain unfinished.
+
 - Retain a real, original-owner-issued payment continuation with protected
   checkout facts. Bind it losslessly to the existing operation ID, retire it
   before known-safe cleanup, and drain delayed retirement through shutdown.

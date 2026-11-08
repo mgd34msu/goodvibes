@@ -152,7 +152,9 @@ test('the composed notifier waits on the returned ingress inbox and owner veto s
     await until(() => f.services.paymentReplies.inspect().length === 1);
     expect(f.services.paymentReplies.pending).toBe(1);
     expect(f.deliveries).toHaveLength(1);
-    expect(await f.services.paymentReplies.offer('telegram', 'stop')).toEqual({ consumed: true, answer: 'object' });
+    const selected = f.services.paymentReplies.inspect()[0]; if (!selected) throw new Error('Missing actual operator window');
+    expect(await invoke(f.catalog, 'payments.purchase.cancel', { purchaseId: selected.purchaseId, windowId: selected.windowId, confirm: true }))
+      .toMatchObject({ accepted: true, answer: 'object' });
     await until(async () => readPaymentWindowStatus(await invoke(f.catalog, 'payments.purchase.status')).operations[0]?.state === 'cancelled');
     const requestRoot = join(f.root, 'home', '.goodvibes', 'tui', 'control-plane', 'payments-requests');
     await until(() => !existsSync(join(requestRoot, `${Buffer.from('product-owner-veto').toString('base64url')}.json`)));

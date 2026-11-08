@@ -256,6 +256,7 @@ export class CodeIndexStore {
   }
 
   close(): void {
+    this.authorizedIndex = null;
     if (!this.db) return;
     this.epoch++;
     this.db.close();
@@ -437,7 +438,10 @@ export class CodeIndexStore {
     checkLifecycle();
     await this.ensureIntelligenceReady();
     checkLifecycle();
-    this.authorizedIndex = await prepareAuthorizedCodeSnapshots(input, this.embeddingRegistry, db, this.intelligence, checkLifecycle);
+    const authorized = await prepareAuthorizedCodeSnapshots(input, this.embeddingRegistry, db, this.intelligence, checkLifecycle);
+    input.signal.throwIfAborted();
+    checkLifecycle();
+    this.authorizedIndex = authorized;
   }
 
   async statsAuthorized(): Promise<CodeIndexStats> {

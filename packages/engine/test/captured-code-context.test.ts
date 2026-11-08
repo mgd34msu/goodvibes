@@ -114,6 +114,47 @@ test('mutable edits, same-line rewrites, generated and deleted files refresh gen
   expect((await source.search('captured')).some((result) => result.chunk.path === 'generated.txt')).toBe(false);
 }), 30_000);
 
+test('finished mutable code generations cannot serve retained text or embeddings to another turn', async () => fixture(async ({ view, source, calls }) => {
+  await source.prepare?.(); const first = source.generation?.(), count = calls.length;
+  source.finishTurn?.();
+  expect(source.generation?.()).toBeUndefined();
+  await expect(source.assertCurrent?.(first)).rejects.toThrow();
+  expect(await source.search('captured')).toEqual([]); expect(calls.length).toBe(count);
+  writeFileSync(join(view, 'allowed.txt'), REVISED);
+  await source.prepare?.();
+  expect(source.generation?.()).not.toBe(first);
+  expect((await source.search('captured')).some(result => result.chunk.path === 'allowed.txt')).toBe(true);
+  expect(calls.slice(count).some(call => call.text.includes(REVISED))).toBe(true);
+  expect(calls.slice(count).some(call => call.text.includes(ORIGINAL))).toBe(false);
+  source.dispose?.();
+  expect(source.generation?.()).toBeUndefined();
+  await expect(source.search('captured')).rejects.toThrow('closed');
+}), 30_000);
+
+test('a superseded preparation cannot close or publish over the replacement code generation', async () => fixture(async ({ source, registry, calls }) => {
+  const provider = registry.getDefaultProvider();
+  let entered!: () => void, release!: () => void, first = true;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const pending = new Promise<void>(resolve => { release = resolve; });
+  registry.register({ ...provider, async embed(request) {
+    calls.push(request); await request.beforeAttempt?.();
+    if (first) { first = false; entered(); await pending; }
+    const vector = new Float32Array(384); vector[0] = 1; return { vector, dimensions: 384 };
+  } }, { makeDefault: true });
+  const original = source.prepare!();
+  void original.catch(() => {});
+  try {
+    await started;
+    const replacement = source.prepare!();
+    release();
+    await expect(original).rejects.toThrow();
+    await replacement;
+    const current = source.generation?.(); expect(current).toBeDefined();
+    await source.assertCurrent?.(current);
+    expect((await source.search('captured')).some(result => result.chunk.path === 'allowed.txt')).toBe(true);
+  } finally { release(); }
+}), 30_000);
+
 test('stored policy revocation prevents cached results and any later query embedding', async () => fixture(async ({ root, source, calls, deny }) => {
   await source.prepare?.();
   const count = calls.length;

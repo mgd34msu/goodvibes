@@ -53,6 +53,8 @@ import { approvalReply, vetoReply } from './batteries/payment-reply.js';
 import type { ChannelDelivery } from './windows.js';
 import type { PaymentNotifier } from './checkout-flow.js';
 import type { CommandAuthorityChannel, PaymentAnswerChannel } from './types.js';
+import type { ChannelDeliveryResult } from '../channels/delivery/types.js';
+import { capturePaymentNoticeReceipt } from './notice-receipt.js';
 
 /**
  * One place a payment notice can be sent, already resolved to a routable target.
@@ -71,6 +73,7 @@ export interface PaymentNoticeTarget {
 /** The narrow slice of `ChannelDeliveryRouter` this needs. */
 export interface PaymentNoticeRouter {
   deliver(request: never): Promise<string | undefined>;
+  deliverWithReceipt?(request: never): Promise<ChannelDeliveryResult>;
 }
 
 /**
@@ -176,6 +179,8 @@ export async function readPaymentReply(
  */
 export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): PaymentNotifier {
   const prepareReply = deps.replies.prepareAnswer?.bind(deps.replies);
+  const deliver = deps.router.deliver.bind(deps.router);
+  const deliverWithReceipt = deps.router.deliverWithReceipt?.bind(deps.router);
   const notifier: PaymentNotifier = {
     async deliver(input): Promise<readonly ChannelDelivery[]> {
       const current = () => { input.signal?.throwIfAborted(); input.assertCurrent?.(); };
@@ -184,12 +189,18 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
       for (const target of deps.targets) {
         current();
         let delivered = false;
+        let receipt: ChannelDelivery['receipt'];
         try {
           // The router's request shape belongs to the channels layer; this
           // module carries it through untouched rather than reconstructing it,
           // so a change there does not silently reshape a payment notice.
           const request = { ...(target.request as Record<string, unknown>), content: input.message, assertCurrent: input.assertCurrent, signal: input.signal };
-          await deps.router.deliver(request as never);
+          if (deliverWithReceipt) {
+            const result = await deliverWithReceipt(request as never);
+            current();
+            const acknowledged = result.receipt;
+            receipt = acknowledged === undefined ? undefined : capturePaymentNoticeReceipt(acknowledged, target.channel) ?? undefined;
+          } else await deliver(request as never);
           current();
           delivered = true;
         } catch (error) {
@@ -206,6 +217,7 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
           channel: target.channel,
           delivered,
           backfillable: target.backfillable,
+          ...(receipt === undefined ? {} : { receipt }),
         });
       }
       current();
@@ -224,7 +236,7 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
       });
     },
   };
-  const deliver = notifier.deliver.bind(notifier);
+  const deliverNotice = notifier.deliver.bind(notifier);
   if (prepareReply) notifier.prepareWindow = input => {
     const purchaseId = input.purchaseId, kind = input.kind, notice = input.notice;
     const signal = input.signal, assertCurrent = input.assertCurrent;
@@ -234,7 +246,7 @@ export function createChannelPaymentNotifier(deps: ChannelPaymentNotifierDeps): 
     let active = true;
     let report: readonly ChannelDelivery[] | undefined;
     const cancel = () => { if (active) { active = false; prepared.cancel(); } };
-    const deliveries = deliver({ kind, message: notice, signal, assertCurrent }).then(result => {
+    const deliveries = deliverNotice({ kind, message: notice, signal, assertCurrent }).then(result => {
       signal?.throwIfAborted(); assertCurrent?.();
       if (!active) throw new Error('Payment notice reception was retired');
       // Retain the actual completed deliveries privately. A later caller

@@ -776,6 +776,14 @@ delivered. Operator controls become available when the window is armed. A
 cancelled send or failed journal write retires its queued replies; an unresolved
 reply at the deadline fails the window instead of counting as silence.
 
+The journal retains the exact rendered window notice. When Telegram supplies a
+complete native acknowledgement, its actual numeric chat, message and optional
+thread IDs are retained with that channel's delivery report. A configured chat
+alias is not substituted for the acknowledged recipient after sending. Earlier
+journals and adapters without receipts leave this metadata absent. A receipt
+does not establish that history can be backfilled and cannot authorize a resumed
+checkout; native restart continuation and missed-reply recovery remain unfinished.
+
 One nuance that matters for a headless daemon: **the TUI is not a delivery
 strategy.** It renders in-process; there is no routed channel for it. So a daemon
 running with no surface attached and only Telegram configured is undeliverable

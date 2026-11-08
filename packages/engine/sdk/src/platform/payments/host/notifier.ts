@@ -37,27 +37,30 @@ function surfaceTarget(surfaceKind: string): ChannelDeliveryTarget {
 }
 
 /** Adapts the daemon's router to the notifier's narrow, opaque-`request` shape. */
-function daemonNoticeRouter(router: Pick<ChannelDeliveryRouter, 'deliver'>): PaymentNoticeRouter {
+function daemonNoticeRouter(router: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>): PaymentNoticeRouter {
+  const deliver = router.deliver.bind(router), deliverWithReceipt = router.deliverWithReceipt?.bind(router);
+  const requestFor = (request: never): Parameters<ChannelDeliveryRouter['deliver']>[0] => {
+    const merged = request as unknown as Record<string, unknown> & { readonly content: string };
+    return {
+      target: merged['target'] as ChannelDeliveryTarget,
+      body: merged.content,
+      title: 'Purchase',
+      jobId: PAYMENTS_NOTICE_JOB_ID,
+      runId: `${PAYMENTS_NOTICE_JOB_ID}-${String(Date.now())}`,
+      includeLinks: false,
+      assertCurrent: merged['assertCurrent'] as (() => void) | undefined,
+      signal: merged['signal'] as AbortSignal | undefined,
+    };
+  };
   return {
-    deliver: async (request) => {
-      const merged = request as unknown as Record<string, unknown> & { readonly content: string };
-      return router.deliver({
-        target: merged['target'] as ChannelDeliveryTarget,
-        body: merged.content,
-        title: 'Purchase',
-        jobId: PAYMENTS_NOTICE_JOB_ID,
-        runId: `${PAYMENTS_NOTICE_JOB_ID}-${String(Date.now())}`,
-        includeLinks: false,
-        assertCurrent: merged['assertCurrent'] as (() => void) | undefined,
-        signal: merged['signal'] as AbortSignal | undefined,
-      });
-    },
+    deliver: request => deliver(requestFor(request)),
+    ...(deliverWithReceipt === undefined ? {} : { deliverWithReceipt: (request: never) => deliverWithReceipt(requestFor(request)) }),
   };
 }
 
 export function channelBackedPaymentNotifier(
   config: PaymentsConfigReader,
-  router: Pick<ChannelDeliveryRouter, 'deliver'>,
+  router: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>,
   replies: PaymentReplySource,
 ): PaymentNotifier {
   const targets: PaymentNoticeTarget[] = [];

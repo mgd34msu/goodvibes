@@ -65,8 +65,18 @@ export interface ChannelDeliveryRequest extends DeliveryLifetime {
   readonly metadata?: Record<string, unknown> | undefined;
 }
 
+/** Native provider acknowledgement. No credentials or configuration aliases:
+ * recipient identity is what the provider actually acknowledged. */
+export interface ChannelDeliveryReceipt {
+  readonly surfaceKind: ChannelDeliverySurfaceKind;
+  readonly conversationId: string;
+  readonly messageId: string;
+  readonly threadId?: string | undefined;
+}
+
 export interface ChannelDeliveryResult {
   readonly responseId?: string | undefined;
+  readonly receipt?: ChannelDeliveryReceipt | undefined;
 }
 
 export interface ChannelDeliveryStrategy {

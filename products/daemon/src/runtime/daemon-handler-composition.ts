@@ -60,7 +60,7 @@ export interface DaemonHandlerCompositionOptions {
   readonly distributedRuntimeReady: Promise<void>;
   readonly clusterCoordinator: ClusterCoordinator;
   readonly checkoutSeam: BrowserCheckoutSeamHolder['get'];
-  readonly channelDeliveryRouter: Pick<ChannelDeliveryRouter, 'deliver'>;
+  readonly channelDeliveryRouter: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>;
   readonly inboxFactory: DaemonInboxFactory;
 }
 

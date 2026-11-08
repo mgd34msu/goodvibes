@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Retain the exact purchase-window notice and Telegram's actual acknowledged
+  chat/message/thread identities in checkout evidence. Notification delivery can
+  return this receipt without sending twice; existing string-result callers keep
+  their response IDs. This prepares correlation evidence; automatic checkout
+  continuation and missed-reply backfill remain unfinished.
+
 - Enforce the owner's request-specific maximum against the complete payable
   total, including tax, fees and delivery. Exceeding it requires explicit
   approval even with available daily budget; silence or an undeliverable notice

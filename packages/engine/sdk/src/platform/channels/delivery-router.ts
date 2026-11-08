@@ -37,11 +37,13 @@ import { describeStructuralDeliveryError } from '../integrations/delivery-diagno
 import { CHANNEL_DELIVERY_SURFACE_KINDS } from './delivery/types.js';
 import type {
   ChannelDeliveryRequest,
+  ChannelDeliveryResult,
   ChannelDeliveryRouterConfig,
   ChannelDeliveryStrategy,
 } from './delivery/types.js';
 
 export type {
+  ChannelDeliveryReceipt,
   ChannelDeliveryResult,
   ChannelDeliveryRouteBinding,
   ChannelDeliveryRouterConfig,
@@ -214,6 +216,12 @@ export class ChannelDeliveryRouter {
   }
 
   async deliver(request: ChannelDeliveryRequest): Promise<string | undefined> {
+    return (await this.deliverWithReceipt(request)).responseId;
+  }
+
+  /** Same dispatch and lifetime checks as deliver(), retaining actual native
+   * acknowledgement metadata for callers that need durable correlation. */
+  async deliverWithReceipt(request: ChannelDeliveryRequest): Promise<ChannelDeliveryResult> {
     const surfaceKind = resolveChannelDeliverySurfaceKind(request.target);
     const strategy = this.strategies.find((entry) => entry.canHandle(request));
     if (!strategy) {
@@ -247,7 +255,13 @@ export class ChannelDeliveryRouter {
       } : request;
       assertDeliveryCurrent(deliveryRequest);
       const result = await strategy.deliver(deliveryRequest);
-      return result.responseId;
+      const receipt = result.receipt;
+      return Object.freeze({
+        ...(result.responseId === undefined ? {} : { responseId: result.responseId }),
+        ...(receipt === undefined ? {} : { receipt: Object.freeze({ surfaceKind: receipt.surfaceKind,
+          conversationId: receipt.conversationId, messageId: receipt.messageId,
+          ...(receipt.threadId === undefined ? {} : { threadId: receipt.threadId }) }) }),
+      });
     } catch (error) {
       // The original failure remains private retry evidence. Published diagnostics
       // contain only closed routing facts and a validated HTTP status, if present.

@@ -46,6 +46,33 @@ beforeEach(() => {
   filePath = join(dir, 'payments-checkout-journal.json');
 });
 
+test('the exact window notice and native delivery receipt survive real journal reopening', async () => {
+  const notice = 'Approval needed: the full total exceeds your requested maximum.\nTOTAL: USD 55.78\nRequested maximum: USD 50.00';
+  const receipt = { surfaceKind: 'telegram' as const, conversationId: '-100123', messageId: '51', threadId: '7' };
+  const original = record({ phase: 'awaiting-window', windowKind: 'approval', windowDeadlineMs: 1_766_003_660_000,
+    windowNotice: notice, windowDeliveries: [{ channel: 'telegram', delivered: true, backfillable: false, receipt }] });
+  const journal = new DurableCheckoutJournal(filePath);
+  await journal.put(original); receipt.messageId = 'replacement';
+  const restored = (await new DurableCheckoutJournal(filePath).list())[0];
+  expect(restored?.windowNotice).toBe(notice);
+  expect(restored?.windowDeliveries).toEqual([{ channel: 'telegram', delivered: true, backfillable: false,
+    receipt: { surfaceKind: 'telegram', conversationId: '-100123', messageId: '51', threadId: '7' } }]);
+  expect(restored?.phase).toBe('awaiting-window');
+});
+
+test.each([
+  { surfaceKind: 'slack', conversationId: 'chat', messageId: '51' },
+  { surfaceKind: 'telegram', conversationId: '', messageId: '51' },
+  { surfaceKind: 'telegram', conversationId: 'chat', messageId: '51\nother' },
+  { surfaceKind: 'telegram', conversationId: 'chat', messageId: '51', secret: 'not-a-receipt-field' },
+])('invalid persisted notice receipt %j cannot be erased into missing correlation', async receipt => {
+  const contents = JSON.stringify({ version: 1, records: [record({ phase: 'awaiting-window',
+    windowDeliveries: [{ channel: 'telegram', delivered: true, backfillable: false, receipt } as unknown as NonNullable<InFlightCheckout['windowDeliveries']>[number]] })] });
+  writeFileSync(filePath, contents);
+  await expect(new DurableCheckoutJournal(filePath).list()).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+  expect(readFileSync(filePath, 'utf8')).toBe(contents);
+});
+
 describe('DurableCheckoutJournal: durable before put resolves', () => {
   test('a put record is on disk before the promise resolves, not merely in memory', async () => {
     const journal = new DurableCheckoutJournal(filePath);

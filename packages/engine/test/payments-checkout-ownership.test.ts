@@ -255,7 +255,11 @@ test.each([
   }));
   const put = f.journal.put.bind(f.journal);
   f.journal.put = async record => {
-    if (record.windowDeliveries) { flushing.release(); await durable.wait; }
+    if (record.windowDeliveries) {
+      expect(record.windowNotice).toBeTruthy();
+      expect(record.windowNotice).toContain(kind === 'approval' ? 'Approval needed' : 'About to buy');
+      flushing.release(); await durable.wait;
+    }
     await put(record);
   };
   const purchase = f.run();

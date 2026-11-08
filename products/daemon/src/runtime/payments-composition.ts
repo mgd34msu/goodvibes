@@ -56,7 +56,7 @@ export interface PaymentsCompositionOptions {
   /** Where the checkout pair reads the browser-checkout seam; see this file's header. */
   readonly checkoutSeam: BrowserCheckoutSeamHolder['get'];
   /** Delivers a purchase notice; the SAME router every other channel send in this daemon uses. */
-  readonly channelDeliveryRouter: Pick<ChannelDeliveryRouter, 'deliver'>;
+  readonly channelDeliveryRouter: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>;
 }
 
 export interface PaymentsServices {

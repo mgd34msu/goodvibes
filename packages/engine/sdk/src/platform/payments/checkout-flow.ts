@@ -680,7 +680,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
       const deadlineMs = windowDeadlineMs(now(), deps.approvalMinutes);
       // Persisted so a restart can apply the delivery-keyed recovery rules.
-      await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
+      await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
       addressCurrent();
       state = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
       if (state === 'awaiting-approval') {
@@ -772,7 +772,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
       const deadlineMs = windowDeadlineMs(now(), deps.vetoMinutes);
       // Persisted so a restart can apply the delivery-keyed recovery rules.
-      await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind }, now());
+      await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
       addressCurrent();
       state = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
       if (state === 'open') {

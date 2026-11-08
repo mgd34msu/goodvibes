@@ -409,7 +409,18 @@ export function createTelegramDeliveryStrategy(
       if (payload === null || typeof payload !== 'object' || !('ok' in payload) || payload.ok !== true) {
         throw new Error('Telegram did not acknowledge the send request');
       }
-      return success(extractResponseId(payload));
+      const message = readRecord('result' in payload ? payload.result : undefined);
+      const chat = readRecord(message?.['chat']);
+      const messageId = message?.['message_id'], conversationId = chat?.['id'], threadId = message?.['message_thread_id'];
+      // Do not reconstruct this from a configured @alias/default chat: it can
+      // select a different recipient on the next boot. Incomplete provider
+      // acknowledgements still prove a send, but cannot supply a recovery receipt.
+      const receipt = typeof messageId === 'number' && Number.isSafeInteger(messageId) && messageId > 0
+        && typeof conversationId === 'number' && Number.isSafeInteger(conversationId) && conversationId !== 0
+        && (threadId === undefined || typeof threadId === 'number' && Number.isSafeInteger(threadId) && threadId > 0)
+        ? { surfaceKind: 'telegram' as const, conversationId: String(conversationId), messageId: String(messageId),
+          ...(threadId === undefined ? {} : { threadId: String(threadId) }) } : undefined;
+      return { ...success(extractResponseId(payload)), ...(receipt === undefined ? {} : { receipt }) };
     },
   };
 }

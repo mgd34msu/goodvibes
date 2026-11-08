@@ -41,6 +41,7 @@
  */
 import type { BudgetDraw } from './decide.js';
 import type { ChannelDelivery } from './windows.js';
+import { capturePaymentNoticeReceipt } from './notice-receipt.js';
 import type { CurrencyCode, MinorUnits, OwnerSuppliedText, ShippingStepDown, ShippingTier } from './types.js';
 
 export type CheckoutPhase =
@@ -96,6 +97,8 @@ export interface InFlightCheckout {
   readonly windowDeadlineMs?: number | undefined;
   /** Which window governed this checkout: approval (silence denies) or veto (silence proceeds). */
   readonly windowKind?: 'approval' | 'veto' | undefined;
+  /** Exact rendered notice sent for this quote. Storage alone grants no act. */
+  readonly windowNotice?: string | undefined;
 }
 
 /**
@@ -143,7 +146,11 @@ function ownCheckout(record: InFlightCheckout): InFlightCheckout {
     draw: record.draw === null ? null : Object.freeze({ ...record.draw }),
     stepDown: record.stepDown === null ? null : Object.freeze({ ...record.stepDown }),
     ...(record.windowDeliveries === undefined ? {} : {
-      windowDeliveries: Object.freeze(record.windowDeliveries.map(delivery => Object.freeze({ ...delivery }))),
+      windowDeliveries: Object.freeze(record.windowDeliveries.map(delivery => {
+        const receipt = delivery.receipt === undefined ? undefined : capturePaymentNoticeReceipt(delivery.receipt, delivery.channel);
+        if (receipt === null) throw new CheckoutRegistryError('The purchase notice receipt is invalid.', 'Inspect the original delivery evidence.');
+        return Object.freeze({ ...delivery, ...(receipt === undefined ? {} : { receipt }) });
+      })),
     }),
   });
 }

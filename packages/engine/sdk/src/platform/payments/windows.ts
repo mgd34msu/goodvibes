@@ -43,6 +43,7 @@
  * Only an explicit acknowledgement short-circuits it.
  */
 import type { CommandAuthorityChannel, PaymentAnswerChannel } from './types.js';
+import type { ChannelDeliveryReceipt } from '../channels/delivery/types.js';
 
 /**
  * What happens when a window closes with no answer.
@@ -70,6 +71,8 @@ export interface ChannelDelivery {
   readonly delivered: boolean;
   /** Whether this channel's history can be re-read for a span we were down. */
   readonly backfillable: boolean;
+  /** Exact provider acknowledgement, when available. Not a backfill capability. */
+  readonly receipt?: ChannelDeliveryReceipt | undefined;
 }
 
 export type ApprovalState =

@@ -86,6 +86,7 @@ export { ChannelProviderRuntimeManager } from './provider-runtime.js';
 export type { ProviderRuntimeActionResult, ProviderRuntimeStatus, ProviderRuntimeSurface } from './provider-runtime.js';
 export { ChannelDeliveryRouter, createDefaultChannelDeliveryStrategies, resolveChannelDeliverySurfaceKind } from './delivery-router.js';
 export type {
+  ChannelDeliveryReceipt,
   ChannelDeliveryResult,
   ChannelDeliveryRouteBinding,
   ChannelDeliveryRouterConfig,

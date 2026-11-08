@@ -1,5 +1,7 @@
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import type { InFlightCheckout } from './checkout-registry.js';
+import { capturePaymentNoticeReceipt } from './notice-receipt.js';
+import { parseCommandAuthorityChannel } from './types.js';
 
 const phases = ['deciding', 'awaiting-window', 'arming-payment', 'submit-pending', 'submitted'];
 const tiers = ['normal', 'fast', 'fastest'];
@@ -18,6 +20,10 @@ function deliveriesValid(value: unknown): boolean {
   for (const entry of entries) {
     if (!object(entry) || typeof entry['channel'] !== 'string' || !channels.includes(entry['channel'])
       || seen.has(entry['channel']) || typeof entry['delivered'] !== 'boolean' || typeof entry['backfillable'] !== 'boolean') return false;
+    if (Object.hasOwn(entry, 'receipt')) {
+      const channel = parseCommandAuthorityChannel(entry['channel']);
+      if (!channel || entry['delivered'] !== true || capturePaymentNoticeReceipt(entry['receipt'], channel) === null) return false;
+    }
     seen.add(entry['channel']);
   }
   return true;
@@ -45,6 +51,8 @@ export function captureCheckoutRecord(value: unknown): InFlightCheckout | null {
   if (row['recoveryNotifiedAtMs'] !== undefined && !timestamp(row['recoveryNotifiedAtMs'])) return null;
   if (row['windowDeadlineMs'] !== undefined && !timestamp(row['windowDeadlineMs'])) return null;
   if (row['windowKind'] !== undefined && row['windowKind'] !== 'approval' && row['windowKind'] !== 'veto') return null;
+  if (Object.hasOwn(row, 'windowNotice') && (typeof row['windowNotice'] !== 'string'
+    || !row['windowNotice'].trim() || row['windowNotice'].length > 16_384)) return null;
   const deliveries = row['windowDeliveries'];
   if (deliveries !== undefined && !deliveriesValid(deliveries)) return null;
   return row as unknown as InFlightCheckout;

@@ -309,6 +309,7 @@ interface BudgetReservation {
   readonly toleranceMinorUnits: number;
   readonly createdAtMs: number;     // UTC
   readonly expiresAtMs: number;
+  readonly retainUntilSettled?: true;
 }
 ```
 
@@ -332,20 +333,25 @@ Until the ledger itself replicates, `checkPaymentGates` refuses on any node that
 is not the elected payments leader, and `isPaymentsLeader` is a required input
 with no default so a caller cannot omit it into a pass.
 
-Reservations are persisted so a daemon restart does not
-release money that is mid-flight, and, per the platform rule that anything
-persisted across restarts reaps, bounds, validates by content, sweeps
-periodically and discloses, they are swept on a timer, capped in count, dropped
-when they fail content validation, and the sweep's actions appear in the audit
-ledger rather than happening silently.
+Reservations persist across restart. A checkout sets `retainUntilSettled`, so
+neither the four-hour temporary-reservation TTL nor a day rollover releases its
+money. A configured window may last longer than four hours, and a merchant
+submission may remain uncertain for longer still. Recovery releases a hold
+only when it establishes that the purchase was not submitted, or commits it
+when submission is accounted for. An unresolved hold continues to reduce the
+current available pools until settlement. Completed purchases retain the normal
+daily reset; pending charges cannot acquire a fresh allowance at midnight.
 
-The two numbers behind that are `RESERVATION_TTL_MS` (4 hours) and
-`MAX_RESERVATIONS` (256). Four hours is deliberately longer than the longest
-window this capability opens, so a reservation never expires out from under a
-purchase that is still legitimately waiting on an answer, while still being
-short enough that a crashed purchase does not hold budget hostage for a whole
-day. The count cap is a bound on the persisted file, not a limit anyone is
-expected to reach in ordinary use.
+`RESERVATION_TTL_MS` (4 hours) still applies to ordinary temporary reservations.
+`MAX_RESERVATIONS` (256) bounds all holds; capacity refuses a new reservation
+instead of evicting a purchase. Reservation and spend records are detached and
+immutable when the ledger admits them.
+
+The daemon writes budget schema 2. Existing schema-1 reservations upgrade to
+checkout-held records before accounting becomes available, because those files
+cannot establish that an old hold is safe to expire. Unsupported, unreadable or
+malformed accounting disables payment budget operations while preserving the
+file. Repair the original accounting and restart the daemon to reload it.
 
 ---
 

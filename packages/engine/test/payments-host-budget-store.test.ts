@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, spyOn, test } from 'bun:test';
 import { logger } from '../sdk/src/platform/utils/logger.js';
 import { dayKey } from '../sdk/src/platform/payments/day.js';
 import type { BudgetLimits } from '../sdk/src/platform/payments/budget.js';
-import { DurableBudgetLedger } from '../sdk/src/platform/payments/host/budget-store.js';
+import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../sdk/src/platform/payments/host/budget-store.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const LIMITS: BudgetLimits = {
@@ -56,6 +56,17 @@ function withCapturedInfo<T>(fn: () => T): { result: T; infos: Array<{ message: 
   } finally {
     spy.mockRestore();
   }
+}
+
+function expectUnavailable(ledger: DurableBudgetLedger): void {
+  const original = readFileSync(filePath, 'utf8');
+  expect(() => ledger.snapshot(LIMITS, Date.now(), 'UTC')).toThrow(PaymentBudgetUnavailableError);
+  expect(() => ledger.state()).toThrow(PaymentBudgetUnavailableError);
+  expect(() => ledger.reserve({ id: 'unavailable', itemMinorUnits: 1, overageMinorUnits: 0, toleranceMinorUnits: 0,
+    limits: LIMITS, nowMs: Date.now(), timezone: 'UTC' })).toThrow(PaymentBudgetUnavailableError);
+  expect(() => ledger.release('unavailable')).toThrow(PaymentBudgetUnavailableError);
+  expect(() => ledger.sweep(Date.now())).toThrow(PaymentBudgetUnavailableError);
+  expect(readFileSync(filePath, 'utf8')).toBe(original);
 }
 
 describe('a reservation survives a restart', () => {
@@ -118,44 +129,31 @@ describe('a commit survives a restart', () => {
   });
 });
 
-describe('a missing or corrupt file starts empty rather than crashing', () => {
-  test('a file that has never been written starts empty with no warning', () => {
-    expect(existsSync(filePath)).toBe(false);
+describe('an unused ledger starts empty; damaged accounting disables payments without crashing construction', () => {
+  test('a missing file starts empty with no warning', () => {
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    const snapshot = ledger.snapshot(LIMITS, Date.now(), 'UTC');
-    expect(snapshot.item.spent).toBe(0);
-    expect(snapshot.item.reserved).toBe(0);
-    // The ordinary first-boot case: no file, nothing to warn about.
-    expect(warnings).toHaveLength(0);
+    expect(ledger.snapshot(LIMITS, Date.now(), 'UTC').item.remaining).toBe(10_000);
+    expect(existsSync(filePath)).toBe(false); expect(warnings).toHaveLength(0);
   });
 
-  test('a corrupt file starts empty with a logged warning, not a thrown error', () => {
-    writeFileSync(filePath, '{"version":1,"spend":[{"purchaseId":');
-    const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    const snapshot = ledger.snapshot(LIMITS, Date.now(), 'UTC');
-    expect(snapshot.item.spent).toBe(0);
-    expect(snapshot.item.reserved).toBe(0);
-    expect(warnings.length).toBeGreaterThan(0);
-    expect(warnings.some((entry) => entry.message.toLowerCase().includes('budget ledger'))).toBe(true);
-  });
+  test.each(['{"version":1,"spend":[{"purchaseId":', '"not budget state"', '{"version":99,"spend":[],"reservations":[]}'])(
+    'damaged/unsupported state remains intact and cannot fund purchases: %s', raw => {
+      writeFileSync(filePath, raw);
+      const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
+      expectUnavailable(ledger);
+      expect(warnings.length).toBeGreaterThan(0);
+    },
+  );
 
-  test('a file holding the wrong shape (not an object) starts empty with a warning', () => {
-    writeFileSync(filePath, '"just a string, not budget state"');
-    const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state()).toEqual({ spend: [], reservations: [] });
-    expect(warnings.length).toBeGreaterThan(0);
-  });
-
-  test('the ledger keeps running after a corrupt boot: new reservations persist normally', () => {
+  test('repair requires reopening the original accounting state, not silently overwriting it', () => {
     writeFileSync(filePath, 'not json at all {{{');
     const { result: ledger } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    const reserved = ledger.reserve({
-      id: 'pur-after-corruption', itemMinorUnits: 1_000, overageMinorUnits: 0, toleranceMinorUnits: 0,
-      limits: LIMITS, nowMs: Date.now(), timezone: 'UTC',
-    });
-    expect(reserved).not.toBeNull();
+    expectUnavailable(ledger);
+    writeFileSync(filePath, JSON.stringify({ version: 2, spend: [{ purchaseId: 'known-spend', atMs: Date.now(),
+      itemMinorUnits: 3_000, overageMinorUnits: 0, toleranceMinorUnits: 0 }], reservations: [] }));
+    expect(() => ledger.snapshot(LIMITS, Date.now(), 'UTC')).toThrow(PaymentBudgetUnavailableError);
     const reopened = new DurableBudgetLedger(filePath);
-    expect(reopened.state().reservations).toHaveLength(1);
+    expect(reopened.snapshot(LIMITS, Date.now(), 'UTC').item.remaining).toBe(7_000);
   });
 });
 
@@ -196,30 +194,30 @@ describe('day rollover is unaffected by persistence', () => {
     });
     expect(reserved).not.toBeNull();
     const onDisk = JSON.parse(readFileSync(filePath, 'utf-8')) as { version: number; reservations: unknown[] };
-    expect(onDisk.version).toBe(1);
+    expect(onDisk.version).toBe(2);
     expect(onDisk.reservations).toHaveLength(1);
   });
 });
 
-describe('every stored amount must be finite and non-negative, or the entry is dropped', () => {
+describe('every stored amount must be finite and non-negative, or accounting refuses', () => {
   // The reviewer reproduced pool inflation to Infinity from an entry like
   // these surviving into `snapshot()`'s running sum: a negative amount makes
   // "spent" look smaller than it is, and an amount that parses to `Infinity`
   // (which is what the valid JSON number syntax `1e999` parses to) turns
   // "remaining" into a value nothing can ever compare below a limit again.
 
-  test('a spend record with a negative amount is dropped, not trusted', () => {
+  test('a spend record with a negative amount blocks accounting', () => {
     writeFileSync(filePath, JSON.stringify({
       version: 1,
       spend: [{ purchaseId: 'pur-negative', atMs: 1, itemMinorUnits: -500, overageMinorUnits: 0, toleranceMinorUnits: 0 }],
       reservations: [],
     }));
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state().spend).toHaveLength(0);
+    expectUnavailable(ledger);
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  test('a spend record whose amount is 1e999 (parses to Infinity) is dropped, not trusted', () => {
+  test('a spend record whose amount is 1e999 (parses to Infinity) blocks accounting', () => {
     // Written as raw text rather than through JSON.stringify/parse in JS
     // first: `1e999` is valid JSON number syntax, and `JSON.parse` resolves it
     // to `Infinity`, the exact value this validator has to catch.
@@ -228,11 +226,11 @@ describe('every stored amount must be finite and non-negative, or the entry is d
       '{"version":1,"spend":[{"purchaseId":"pur-inf","atMs":1,"itemMinorUnits":1e999,"overageMinorUnits":0,"toleranceMinorUnits":0}],"reservations":[]}',
     );
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state().spend).toHaveLength(0);
+    expectUnavailable(ledger);
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  test('a reservation with a negative amount is dropped, not trusted', () => {
+  test('a reservation with a negative amount blocks accounting', () => {
     writeFileSync(filePath, JSON.stringify({
       version: 1,
       spend: [],
@@ -242,18 +240,18 @@ describe('every stored amount must be finite and non-negative, or the entry is d
       }],
     }));
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state().reservations).toHaveLength(0);
+    expectUnavailable(ledger);
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  test('a reservation whose amount is 1e999 (parses to Infinity) is dropped, not trusted', () => {
+  test('a reservation whose amount is 1e999 (parses to Infinity) blocks accounting', () => {
     writeFileSync(
       filePath,
       '{"version":1,"spend":[],"reservations":[{"id":"pur-inf","dayKey":"2026-08-19","itemMinorUnits":1e999,'
       + '"overageMinorUnits":0,"toleranceMinorUnits":0,"createdAtMs":1,"expiresAtMs":999999999999}]}',
     );
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state().reservations).toHaveLength(0);
+    expectUnavailable(ledger);
     expect(warnings.length).toBeGreaterThan(0);
   });
 
@@ -354,7 +352,7 @@ describe('a disk write that fails on commit never loses the spend, and retries o
   });
 });
 
-describe('every stored timestamp must be a value Date can hold, or the entry is dropped', () => {
+describe('every stored timestamp must be a value Date can hold, or accounting refuses', () => {
   // The reviewer reproduced a permanent RangeError: a bare `typeof value ===
   // 'number'` check on `atMs`/`createdAtMs`/`expiresAtMs` let a value like
   // `1e999` (valid JSON number syntax, parses to `Infinity`) or `1e18`
@@ -363,40 +361,40 @@ describe('every stored timestamp must be a value Date can hold, or the entry is 
   // computing a day key from it, forever, since nothing mutates the record to
   // fix it and no read path ever calls `persist()` to rewrite the file.
 
-  test('a spend record whose atMs is 1e999 (parses to Infinity) is dropped, not trusted', () => {
+  test('a spend record whose atMs is 1e999 (parses to Infinity) blocks accounting', () => {
     writeFileSync(
       filePath,
       '{"version":1,"spend":[{"purchaseId":"pur-inf-ts","atMs":1e999,"itemMinorUnits":500,'
       + '"overageMinorUnits":0,"toleranceMinorUnits":0}],"reservations":[]}',
     );
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state().spend).toHaveLength(0);
+    expectUnavailable(ledger);
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  test('a spend record whose atMs is 1e18 (past what Date can represent) is dropped, not trusted', () => {
+  test('a spend record whose atMs is 1e18 (past what Date can represent) blocks accounting', () => {
     writeFileSync(filePath, JSON.stringify({
       version: 1,
       spend: [{ purchaseId: 'pur-huge-ts', atMs: 1e18, itemMinorUnits: 500, overageMinorUnits: 0, toleranceMinorUnits: 0 }],
       reservations: [],
     }));
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state().spend).toHaveLength(0);
+    expectUnavailable(ledger);
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  test('a reservation whose createdAtMs/expiresAtMs is 1e999 (parses to Infinity) is dropped, not trusted', () => {
+  test('a reservation whose createdAtMs/expiresAtMs is 1e999 (parses to Infinity) blocks accounting', () => {
     writeFileSync(
       filePath,
       '{"version":1,"spend":[],"reservations":[{"id":"pur-inf-ts","dayKey":"2026-08-19","itemMinorUnits":1,'
       + '"overageMinorUnits":0,"toleranceMinorUnits":0,"createdAtMs":1e999,"expiresAtMs":1e999}]}',
     );
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state().reservations).toHaveLength(0);
+    expectUnavailable(ledger);
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  test('a reservation whose expiresAtMs is 1e18 (past what Date can represent) is dropped, not trusted', () => {
+  test('a reservation whose expiresAtMs is 1e18 (past what Date can represent) blocks accounting', () => {
     writeFileSync(filePath, JSON.stringify({
       version: 1,
       spend: [],
@@ -406,28 +404,14 @@ describe('every stored timestamp must be a value Date can hold, or the entry is 
       }],
     }));
     const { result: ledger, warnings } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
-    expect(ledger.state().reservations).toHaveLength(0);
+    expectUnavailable(ledger);
     expect(warnings.length).toBeGreaterThan(0);
   });
 
-  test('snapshot and reserve keep working after loading a file with a poisoned timestamp entry', () => {
-    writeFileSync(
-      filePath,
-      '{"version":1,"spend":[{"purchaseId":"pur-inf-ts","atMs":1e999,"itemMinorUnits":500,'
-      + '"overageMinorUnits":0,"toleranceMinorUnits":0}],"reservations":[]}',
-    );
-    // Before the fix, constructing this ledger loaded the poisoned record, and
-    // the very first snapshot()/reserve() call afterward threw a RangeError
-    // computing a day key from Infinity. Now the record is dropped at load, so
-    // this is an ordinary call over what is, in effect, an empty ledger.
-    const ledger = new DurableBudgetLedger(filePath);
-    const snapshot = ledger.snapshot(LIMITS, Date.now(), 'UTC');
-    expect(snapshot.item.spent).toBe(0);
-    const reserved = ledger.reserve({
-      id: 'pur-ok', itemMinorUnits: 1_000, overageMinorUnits: 0, toleranceMinorUnits: 0,
-      limits: LIMITS, nowMs: Date.now(), timezone: 'UTC',
-    });
-    expect(reserved).not.toBeNull();
+  test('a poisoned timestamp cannot turn unknown spend into an empty pool', () => {
+    writeFileSync(filePath, '{"version":1,"spend":[{"purchaseId":"poisoned","atMs":1e999,"itemMinorUnits":500,"overageMinorUnits":0,"toleranceMinorUnits":0}],"reservations":[]}');
+    const { result: ledger } = withCapturedWarnings(() => new DurableBudgetLedger(filePath));
+    expectUnavailable(ledger);
   });
 });
 

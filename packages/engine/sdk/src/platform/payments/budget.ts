@@ -23,10 +23,8 @@
  * money is unavailable to anything else from that moment until the purchase
  * either commits or releases.
  *
- * Reservations are persisted, because a daemon restart mid-window must not
- * release money that is still mid-flight, and they are swept, because a
- * reservation whose purchase died is a slow leak of budget that a restart would
- * otherwise make permanent.
+ * Checkout reservations remain held until commit or a known-safe release,
+ * including across restarts. Elapsed time cannot prove that a charge failed.
  */
 import { dayKey, type DayKey } from './day.js';
 import type { BudgetPool, MinorUnits } from './types.js';
@@ -61,6 +59,9 @@ export interface BudgetReservation {
   readonly toleranceMinorUnits: MinorUnits;
   readonly createdAtMs: number;
   readonly expiresAtMs: number;
+  /** A live/uncertain checkout owns this hold until explicit settlement.
+   * TTL and day rollover cannot make an unresolved charge spendable again. */
+  readonly retainUntilSettled?: true;
 }
 
 export interface PoolSnapshot {
@@ -72,12 +73,8 @@ export interface PoolSnapshot {
 }
 
 /**
- * How long a reservation may sit before the sweeper reclaims it.
- *
- * Comfortably longer than the longest window (the 60-minute approval) plus the
- * time a checkout can plausibly take, so a live purchase is never swept out from
- * under itself; short enough that a crashed purchase does not hold budget for a
- * day.
+ * TTL for ordinary temporary reservations. A checkout-owned reservation ignores
+ * it: configured windows and unknown merchant outcomes have no safe age limit.
  */
 export const RESERVATION_TTL_MS = 4 * 60 * 60 * 1000;
 
@@ -102,8 +99,8 @@ export class BudgetLedger {
 
   constructor(initial?: BudgetStateSnapshot) {
     if (initial !== undefined) {
-      this.spend = [...initial.spend];
-      this.reservations = [...initial.reservations];
+      this.spend = initial.spend.map(record => Object.freeze({ ...record }));
+      this.reservations = initial.reservations.map(record => Object.freeze({ ...record }));
     }
   }
 
@@ -123,8 +120,8 @@ export class BudgetLedger {
     let overageReserved = 0;
     let toleranceReserved = 0;
     for (const reservation of this.reservations) {
-      if (reservation.expiresAtMs <= nowMs) continue;
-      if (reservation.dayKey !== today) continue;
+      if (reservation.retainUntilSettled !== true
+        && (reservation.expiresAtMs <= nowMs || reservation.dayKey !== today)) continue;
       itemReserved += reservation.itemMinorUnits;
       overageReserved += reservation.overageMinorUnits;
       toleranceReserved += reservation.toleranceMinorUnits;
@@ -158,17 +155,19 @@ export class BudgetLedger {
     readonly nowMs: number;
     readonly timezone: string;
     readonly ttlMs?: number;
+    readonly retainUntilSettled?: true;
   }): BudgetReservation | null {
     // A reservation belongs to one purchase. Never create a second hold with
     // the same ID: releasing a failed attempt could otherwise release another's.
     if (this.reservations.some(entry => entry.id === input.id)
+      || this.spend.some(entry => entry.purchaseId === input.id)
       || this.reservations.length >= MAX_RESERVATIONS) return null;
     const snapshot = this.snapshot(input.limits, input.nowMs, input.timezone);
     if (input.itemMinorUnits > snapshot.item.remaining) return null;
     if (input.overageMinorUnits > snapshot.overage.remaining) return null;
     if (input.toleranceMinorUnits > snapshot.tolerance.remaining) return null;
 
-    const reservation: BudgetReservation = {
+    const reservation: BudgetReservation = Object.freeze({
       id: input.id,
       dayKey: snapshot.dayKey,
       itemMinorUnits: input.itemMinorUnits,
@@ -176,7 +175,8 @@ export class BudgetLedger {
       toleranceMinorUnits: input.toleranceMinorUnits,
       createdAtMs: input.nowMs,
       expiresAtMs: input.nowMs + (input.ttlMs ?? RESERVATION_TTL_MS),
-    };
+      ...(input.retainUntilSettled === true ? { retainUntilSettled: true as const } : {}),
+    });
     this.reservations.push(reservation);
     return reservation;
   }
@@ -187,13 +187,13 @@ export class BudgetLedger {
     if (index === -1) return null;
     const [reservation] = this.reservations.splice(index, 1);
     if (reservation === undefined) return null;
-    const record: SpendRecord = {
+    const record: SpendRecord = Object.freeze({
       purchaseId: reservation.id,
       atMs,
       itemMinorUnits: reservation.itemMinorUnits,
       overageMinorUnits: reservation.overageMinorUnits,
       toleranceMinorUnits: reservation.toleranceMinorUnits,
-    };
+    });
     this.spend.push(record);
     return record;
   }
@@ -214,9 +214,9 @@ export class BudgetLedger {
    * an audit record naming what was reclaimed, not a silent tidy-up.
    */
   sweep(nowMs: number): readonly BudgetReservation[] {
-    const expired = this.reservations.filter((entry) => entry.expiresAtMs <= nowMs);
+    const expired = this.reservations.filter((entry) => entry.retainUntilSettled !== true && entry.expiresAtMs <= nowMs);
     if (expired.length > 0) {
-      this.reservations = this.reservations.filter((entry) => entry.expiresAtMs > nowMs);
+      this.reservations = this.reservations.filter((entry) => entry.retainUntilSettled === true || entry.expiresAtMs > nowMs);
     }
     return expired;
   }

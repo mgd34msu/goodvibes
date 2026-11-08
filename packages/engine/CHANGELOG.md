@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Keep checkout-owned budget reservations across expiry, day rollover and restart
+  until explicit settlement. Preserve damaged accounting and disable payment
+  budget operations instead of reopening empty pools. Upgrade existing holds
+  conservatively into budget schema 2.
+
 - Share terminal selection queues and cancel active/queued picker owners on exit.
   Expose purchase-window notices and explicit approve/deny/cancel through
   `/payments pending` in TUI and Agent, retaining the displayed paired host and

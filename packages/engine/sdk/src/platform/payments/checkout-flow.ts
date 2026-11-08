@@ -390,6 +390,7 @@ export async function runCheckout(
     limits: reservationLimits,
     nowMs: now(),
     timezone: deps.timezone,
+    retainUntilSettled: true,
   });
   if (reservation === null) {
     return refused(

@@ -382,7 +382,7 @@ function buildPaymentsGatewayService(deps: PaymentsHandlerDeps): PaymentsGateway
       const config = readPaymentsServiceConfig(deps.config);
       const nowMs = now();
       const pools = deps.budget.snapshot(config.limits, nowMs, config.timezone);
-      const live = deps.budget.state().reservations.filter((entry) => entry.expiresAtMs > nowMs);
+      const live = deps.budget.state().reservations.filter((entry) => entry.retainUntilSettled === true || entry.expiresAtMs > nowMs);
       return {
         enabled: readPaymentsEnabled(deps.config),
         currency: String(config.budgetCurrency),

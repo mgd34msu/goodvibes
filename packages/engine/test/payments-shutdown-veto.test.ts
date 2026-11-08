@@ -13,10 +13,10 @@ import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 usePaymentsReadings();
 
-function checkoutFixture(signal?: AbortSignal, journal: CheckoutJournal = new MemoryCheckoutJournal()) {
+function checkoutFixture(signal?: AbortSignal, journal: CheckoutJournal = new MemoryCheckoutJournal(), now: () => number = Date.now, vetoMinutes = 10) {
   const currency = parseCurrencyCode('USD');
   if (currency === null) throw new Error('Invalid fixture currency');
-  const inbox = new PaymentReplyInbox();
+  const inbox = new PaymentReplyInbox({ now });
   const registry = new CheckoutRegistry(journal);
   const outward: string[] = [];
   const delivered: string[] = [];
@@ -54,7 +54,7 @@ function checkoutFixture(signal?: AbortSignal, journal: CheckoutJournal = new Me
     limits: { dailyItemMinorUnits: 10_000, dailyOverageMinorUnits: 10_000, perPurchaseCeiling: { enabled: false, minorUnits: 0 }, overageTolerance: { enabled: false, dailyAllowanceMinorUnits: 0 } },
     budgetCurrency: currency, timezone: 'UTC',
     gates: { enabled: true, hasUsableCard: true, hasShippingAddress: true, isOwnerDirectRequest: true, isPaymentsLeader: true },
-    approvalMinutes: 60, vetoMinutes: 10, now: Date.now,
+    approvalMinutes: 60, vetoMinutes, now,
     merchantJudge: { async judge() { return { qualifies: true, confident: true, recourse: 'Fixture returns policy' }; } },
   };
   const purchase = runCheckout({
@@ -137,5 +137,22 @@ test('failure to journal the initial checkout releases only its hold and never s
     expect(delivered).toEqual([]);
     expect(deps.ledger.snapshot(deps.limits, Date.now(), deps.timezone).item.remaining).toBe(10_000);
     expect(deps.ledger.state().reservations).toHaveLength(0);
+  } finally { await inbox.close(); }
+});
+
+test('a configured window longer than the reservation TTL retains its real checkout budget', async () => {
+  let clock = Date.parse('2026-11-07T10:00:00Z');
+  const { inbox, outward, opened, deps, purchase } = checkoutFixture(undefined, new MemoryCheckoutJournal(), () => clock, 6 * 60);
+  try {
+    await Promise.race([opened, purchase.then(() => { throw new Error('Checkout never opened its veto window'); })]);
+    clock += 5 * 60 * 60 * 1000;
+    expect(inbox.inspect()).toHaveLength(1);
+    expect(deps.ledger.sweep(clock)).toEqual([]);
+    expect(deps.ledger.snapshot(deps.limits, clock, 'UTC').item.reserved).toBe(1_000);
+    expect(deps.ledger.reserve({ id: 'competing', itemMinorUnits: 9_500, overageMinorUnits: 0, toleranceMinorUnits: 0,
+      limits: deps.limits, nowMs: clock, timezone: 'UTC' })).toBeNull();
+    expect(outward).toEqual([]);
+    await inbox.close(); await expect(purchase).rejects.toBeInstanceOf(PaymentReplyInboxClosedError);
+    expect(deps.ledger.snapshot(deps.limits, clock, 'UTC').item.remaining).toBe(10_000);
   } finally { await inbox.close(); }
 });

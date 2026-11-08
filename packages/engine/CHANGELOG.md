@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Attribute optional calibration reports to the Git revision and local file
+  versions instead of hashing every source file and the complete digest list.
+  Version 2 source observations detect edits, replacements, additions and
+  deletions without copying source contents into the report.
+
 - Bind native purchase replies to the acknowledged bot account, chat, topic and
   notice reference. Reuse the original verified polling owner; wrong/stale
   sources do no model work. Account verification stays inside reply drainage,

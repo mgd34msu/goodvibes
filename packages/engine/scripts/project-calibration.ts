@@ -7,7 +7,6 @@
  * Add --inventory-only to enumerate without contacting the service, --only a,b
  * for a repair run, or --provisional while the integrated source is changing.
  */
-import { createHash } from 'node:crypto';
 import { mkdirSync, renameSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -17,33 +16,14 @@ import {
   type CalibrationReport, type DecisionReport, type NamedDecision,
 } from '@goodvibes-jev/judgment';
 import { ENGINE_ROOT, loadEngineRegistries } from './judgment-registries.ts';
+import { observeProjectSource, sameProjectSource } from './project-source-observation.ts';
 
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 const THIS_SCRIPT = relative(REPO_ROOT, import.meta.path);
 
-function git(...args: string[]): string {
-  const result = Bun.spawnSync(['git', ...args], { cwd: REPO_ROOT });
-  if (result.exitCode !== 0) throw new Error(`git ${args[0]} failed`);
-  return result.stdout.toString();
-}
-
-async function sourceSnapshot() {
-  const files = [...new Set([
-    ...git('ls-files', '--cached', '--others', '--exclude-standard', '-z', 'packages/engine', 'packages/judgment', 'products',
-      'package.json', 'bun.lock', 'tsconfig.base.json').split('\0').filter(Boolean),
-    THIS_SCRIPT,
-  ])].sort();
-  const hashes: { path: string; sha256: string | null }[] = [];
-  for (const path of files) {
-    const file = Bun.file(resolve(REPO_ROOT, path));
-    hashes.push({ path, sha256: await file.exists() ? createHash('sha256').update(new Uint8Array(await file.arrayBuffer())).digest('hex') : null });
-  }
-  return {
-    sha: git('rev-parse', 'HEAD').trim(),
-    trackedChanges: git('status', '--porcelain=v1', '--untracked-files=no').trim(),
-    digest: createHash('sha256').update(JSON.stringify(hashes)).digest('hex'),
-    files: hashes,
-  };
+function sourceSnapshot() {
+  return observeProjectSource(REPO_ROOT, ['packages/engine', 'packages/judgment', 'products',
+    'package.json', 'bun.lock', 'tsconfig.base.json'], [THIS_SCRIPT]);
 }
 
 export async function loadProjectCalibration() {
@@ -134,7 +114,7 @@ async function main(): Promise<void> {
   const persist = async (complete: boolean) => {
     const entries = log.query({ limit: 1_000_000 }).filter((entry) => !previousIds.has(entry.id));
     const after = complete ? await sourceSnapshot() : undefined;
-    const sourceStable = after === undefined ? null : source.digest === after.digest && source.sha === after.sha;
+    const sourceStable = after === undefined ? null : sameProjectSource(source, after);
     const coverage = decisions.flatMap((declared) => {
       const report = reports.find((candidate) => candidate.name === declared.name);
       if (report === undefined) return [];

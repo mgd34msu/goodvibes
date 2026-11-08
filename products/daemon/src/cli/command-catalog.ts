@@ -56,6 +56,7 @@ export type DaemonCommand =
   | 'cluster'
   | 'webui'
   | 'provision-wake-model'
+  | 'check-install-reader'
   | 'completion'
   | 'help'
   | 'version';
@@ -710,6 +711,17 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     ],
     flags: [JSON_FLAG],
     passthrough: false,
+    subcommands: [],
+  },
+  {
+    name: 'check-install-reader',
+    aliases: [],
+    summary: 'Check whether this release can read an installation’s saved data.',
+    usage: 'goodvibes-daemon check-install-reader <installed-executable>',
+    detail: ['Read the selected installation’s data-reader requirements without loading settings, starting services or changing files.',
+      'The release installer invokes its verified staged binary before replacing installed programs.'],
+    flags: [],
+    passthrough: true,
     subcommands: [],
   },
   {

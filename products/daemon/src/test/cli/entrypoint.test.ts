@@ -12,6 +12,7 @@ import { prepareDaemonCliServe } from '../../cli/serve.js';
 import * as shell from '@goodvibes-jev/engine/terminal-shell';
 import * as serviceCommands from '../../daemon/service-commands.js';
 import * as wakeCommand from '../../daemon/provision-wake-model.js';
+import { NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 
 const entrypoint = fileURLToPath(new URL('../../../dist/cli/entrypoint.js', import.meta.url));
 const packageVersion = (JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
@@ -83,6 +84,17 @@ async function oneShot(args: string[], root?: string) {
   const fixture = launch(args, false, root);
   return { code: await fixture.waitForExit(), ...fixture.output(), root: fixture.root, home: fixture.home };
 }
+
+test('emitted staged-reader command refuses incompatible data without initializing the selected home', async () => {
+  const root = makeOwnedTempDir('daemon-built-reader-inspection');
+  const floor = join(root, NATIVE_READER_REQUIREMENT_FILE);
+  const original = JSON.stringify({ schema: 1, minimumReader: '3.2.0', formats: ['payment-retained-holds-v2'] });
+  writeFileSync(floor, original);
+  const result = await oneShot(['check-install-reader', join(root, 'goodvibes-daemon')], root);
+  expect(result.code).toBe(2); expect(result.stdout).toBe(''); expect(result.stderr).toContain('requires GoodVibes 3.2.0');
+  expect(readFileSync(floor, 'utf8')).toBe(original); expect(existsSync(join(root, 'daemon'))).toBe(false);
+  expect(existsSync(join(result.home, '.goodvibes'))).toBe(false);
+});
 
 test('emitted package entry retains the Bun shebang and canonical bin path', () => {
   const manifest = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')) as { bin: Record<string, string> };

@@ -15,9 +15,6 @@
 set -eu
 
 REPO="mgd34msu/goodvibes-jev"
-DAEMON_REPO="$REPO"
-AGENT_REPO="$REPO"
-WEBUI_REPO="$REPO"
 INSTALL_DIR="${GOODVIBES_INSTALL_DIR:-$HOME/.local/bin}"
 REQUESTED_VERSION="${GOODVIBES_VERSION:-latest}"
 REQUESTED_DAEMON_VERSION="${GOODVIBES_DAEMON_VERSION:-$REQUESTED_VERSION}"
@@ -45,6 +42,15 @@ WEBUI_ROOT="$INSTALL_DIR/webui"
 # receipt, never rebuilt here.
 WEBUI_INSTALLED=0
 WEBUI_URL=""
+
+# The daemon native publisher checks the same executable transaction slots.
+# Keep private hardlink references until the whole suite has landed;
+# a failed partial replacement retains the claims for explicit recovery.
+INSTALL_CLAIM_OWNER=""
+INSTALL_CLAIM_DIR=""
+INSTALL_CLAIM_COUNT=0
+INSTALL_SWAP_BEGUN=0
+INSTALL_SWAP_FINISHED=0
 
 # The marker string written into every installer-created service unit/plist.
 # The uninstall path keys on it to tell an installer-managed unit (safe to
@@ -337,9 +343,129 @@ prepare_release() {
   if [ "$WITH_VECTOR" = 1 ] || [ "$os_tag" = linux ]; then fetch_release_asset "sqlite-vec-$VEC_OS-$arch_tag.$VEC_SUFFIX"; fi
   fetch_release_asset browser-driver.tar.gz
   if [ "$WITH_WEBUI" = 1 ]; then fetch_release_asset "goodvibes-webui-bundle-${VERSION#v}.tar.gz"; fi
-  for _manifest in daemon agent webui; do cp "$WORKDIR/SHA256SUMS.txt" "$WORKDIR/$_manifest-SHA256SUMS.txt"; done
+  # Validate required archive contents before any installed program is changed.
+  mkdir -p "$WORKDIR/browser-driver-staging"
+  tar -xzf "$WORKDIR/browser-driver.tar.gz" -C "$WORKDIR/browser-driver-staging" || fail 'Could not extract the verified browser driver.'
+  for _driver_entry in package.json index.js cli.js; do
+    [ -f "$WORKDIR/browser-driver-staging/playwright-core/$_driver_entry" ] || fail "The verified browser driver is missing playwright-core/$_driver_entry."
+  done
+  if [ "$WITH_WEBUI" = 1 ]; then
+    mkdir -p "$WORKDIR/webui-staging"
+    tar -xzf "$WORKDIR/goodvibes-webui-bundle-${VERSION#v}.tar.gz" -C "$WORKDIR/webui-staging" || fail 'Could not extract the verified WebUI.'
+    [ -f "$WORKDIR/webui-staging/goodvibes-webui/index.html" ] || fail 'The verified WebUI is missing goodvibes-webui/index.html.'
+  fi
 }
+
+release_install_claims() {
+  [ -n "$INSTALL_CLAIM_OWNER" ] || return 0
+  _claim_failed=0
+  _claim_index=0
+  for _claim_product in goodvibes-daemon goodvibes goodvibes-agent; do
+    _claim_index=$((_claim_index + 1))
+    [ "$_claim_index" -le "$INSTALL_CLAIM_COUNT" ] || break
+    _claim_path="$INSTALL_CLAIM_DIR/$_claim_product.update-transaction"
+    if [ -L "$_claim_path" ]; then
+      _claim_failed=1
+    elif [ -e "$_claim_path" ]; then
+      if [ "$_claim_path" -ef "$INSTALL_CLAIM_OWNER/$_claim_product" ]; then
+        if rm -f "$_claim_path"; then rm -f "$INSTALL_CLAIM_OWNER/$_claim_product" || _claim_failed=1
+        else _claim_failed=1
+        fi
+      else _claim_failed=1
+      fi
+    else _claim_failed=1
+    fi
+  done
+  [ "$_claim_failed" = 0 ] || return 1
+  rmdir "$INSTALL_CLAIM_OWNER" || return 1
+  INSTALL_CLAIM_OWNER=""
+  INSTALL_CLAIM_COUNT=0
+  exec 9<&-
+}
+
+assert_install_claims() {
+  [ "$INSTALL_CLAIM_COUNT" = 3 ] || fail 'The complete suite installation claims are not retained.'
+  [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/9 ] || fail 'The selected installation directory changed; no further program replacement is allowed.'
+  for _assert_product in goodvibes-daemon goodvibes goodvibes-agent; do
+    _assert_claim="$INSTALL_CLAIM_DIR/$_assert_product.update-transaction"
+    [ ! -L "$_assert_claim" ] && [ "$_assert_claim" -ef "$INSTALL_CLAIM_OWNER/$_assert_product" ] || fail 'Installation ownership changed; no further program replacement is allowed.'
+  done
+}
+
+cleanup_release_install() {
+  _install_exit=$?
+  trap - EXIT INT TERM
+  if [ -n "$INSTALL_CLAIM_OWNER" ]; then
+    if [ "$INSTALL_SWAP_BEGUN" = 0 ] || [ "$INSTALL_SWAP_FINISHED" = 1 ]; then
+      if ! release_install_claims; then
+        say 'install.sh: installation claims changed; retained ownership evidence requires inspection.' >&2
+        _install_exit=1
+      fi
+    else
+      say "install.sh: suite replacement did not finish. Inspect retained *.update-transaction files in $INSTALL_CLAIM_DIR before recovery; do not remove them and retry blindly." >&2
+      _install_exit=1
+    fi
+  fi
+  rm -rf "$WORKDIR"
+  exit "$_install_exit"
+}
+
+claim_release_install() {
+  mkdir -p "$INSTALL_DIR"
+  INSTALL_CLAIM_DIR=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the installation directory.'
+  # Publish only to the selected directory, even when the original option was
+  # a relative path or symlink. The open descriptor detects its replacement.
+  exec 9< "$INSTALL_CLAIM_DIR"
+  [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/9 ] || fail 'Could not retain the selected installation directory.'
+  INSTALL_DIR=$INSTALL_CLAIM_DIR
+  WEBUI_ROOT="$INSTALL_DIR/webui"
+  INSTALL_CLAIM_OWNER=$(mktemp -d "$INSTALL_CLAIM_DIR/.goodvibes-install-claim.XXXXXX")
+  for _claim_product in goodvibes-daemon goodvibes goodvibes-agent; do
+    # Occupied native transaction slots never grant execution, even while
+    # their owner writes the receipt. Noclobber creates exclusively without
+    # following a symlink or treating an existing directory as a destination.
+    _claim_path="$INSTALL_CLAIM_DIR/$_claim_product.update-transaction"
+    [ ! -e "$_claim_path" ] && [ ! -L "$_claim_path" ] || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
+    (set -C; printf 'GoodVibes suite installation %s\nInterrupted replacement: inspect installed programs and retained claims before recovery.\n' "$VERSION" > "$_claim_path") || fail 'Another update or interrupted installation owns this directory. Inspect its retained transaction files first.'
+    INSTALL_CLAIM_COUNT=$((INSTALL_CLAIM_COUNT + 1))
+    ln "$_claim_path" "$INSTALL_CLAIM_OWNER/$_claim_product" || fail 'The installer could not retain its transaction ownership. Inspect the retained claim before retrying.'
+  done
+  # An interrupted updater may have retained a companion slot even when its
+  # primary claim is missing. Never overwrite that recovery evidence.
+  for _idle_product in goodvibes-daemon goodvibes goodvibes-agent; do
+    for _idle_companion in '' .bun .bun.json .bun.LICENSE.md; do
+      for _idle_tail in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
+        [ -n "$_idle_companion" ] || [ "$_idle_tail" != .update-transaction ] || continue
+        _idle_path="$INSTALL_CLAIM_DIR/$_idle_product$_idle_companion$_idle_tail"
+        [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail 'Retained program transaction files require inspection before installation.'
+      done
+    done
+  done
+  for _idle_file in daemon-installation.json "lib/sqlite-vec-${VEC_OS}-${arch_tag}/vec0.${VEC_SUFFIX}"; do
+    for _idle_tail in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
+      _idle_path="$INSTALL_CLAIM_DIR/$_idle_file$_idle_tail"
+      [ ! -e "$_idle_path" ] && [ ! -L "$_idle_path" ] || fail 'Retained companion transaction files require inspection before installation.'
+    done
+  done
+}
+
+check_release_reader() {
+  assert_install_claims
+  _reader_floor="$INSTALL_CLAIM_DIR/.goodvibes-reader-requirements.json"
+  [ -e "$_reader_floor" ] || [ -L "$_reader_floor" ] || return 0
+  _reader_binary="$WORKDIR/goodvibes-daemon-$PLATFORM_SUFFIX"
+  chmod 755 "$_reader_binary"
+  if [ "$os_tag" = linux ]; then chmod 755 "$_reader_binary.bun"; fi
+  # This release’s own parser checks its compiled version. No installed binary,
+  # system interpreter, settings bootstrap or live service is needed.
+  _reader_receipt=$("$_reader_binary" check-install-reader "$INSTALL_CLAIM_DIR/goodvibes-daemon") || fail 'This release cannot confirm compatibility with the saved data. The installed programs were kept; choose a compatible newer release.'
+  assert_install_claims
+  _reader_expected="{\"schema\":\"goodvibes.install.reader-check\",\"schemaVersion\":1,\"readerVersion\":\"${VERSION#v}\"}"
+  [ "$_reader_receipt" = "$_reader_expected" ] || fail 'The staged release did not return its matching reader capability. The installed programs were kept.'
+}
+
 install_release_binary() {
+  assert_install_claims
   _binary=$1
   _binary_asset="$_binary-$PLATFORM_SUFFIX"
   _installed_binary=$_binary
@@ -349,11 +475,13 @@ install_release_binary() {
     for _binary_suffix in .bun .bun.json .bun.LICENSE.md; do
       cp "$WORKDIR/$_binary_asset$_binary_suffix" "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming"
       case "$_binary_suffix" in .bun) chmod 755 "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" ;; *) chmod 644 "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" ;; esac
+      assert_install_claims
       mv -f "$INSTALL_DIR/$_installed_binary$_binary_suffix.incoming" "$INSTALL_DIR/$_installed_binary$_binary_suffix"
     done
   fi
   cp "$WORKDIR/$_binary_asset" "$INSTALL_DIR/$_installed_binary.incoming"
   chmod 755 "$INSTALL_DIR/$_installed_binary.incoming"
+  assert_install_claims
   mv -f "$INSTALL_DIR/$_installed_binary.incoming" "$INSTALL_DIR/$_installed_binary"
   if [ "$_binary" = goodvibes-daemon ] && [ "$os_tag" = linux ]; then
     "${INSTALL_DIR}/${_installed_binary}.bun" -e '
@@ -1642,32 +1770,13 @@ migrate_one_launchd_plist() {
 }
 
 # --- the daemon: compiled binary from the same monorepo release ---
-# The daemon is its own product with its own repository and its own release
-# line, so its tag is resolved separately and its files are verified against ITS
-# manifest. Everything else about the placement is unchanged: an atomic rename
-# over the target so a running binary is replaced cleanly, and the same
-# $INSTALL_DIR every other product shares.
-#
-# This runs BEFORE the sqlite-vec addon (which comes from the same manifest) and
-# before the wake-model provision (which runs this binary), and its manifest is
-# left in $WORKDIR for both.
+# All products use the one release and staged assets from prepare_release.
+# This runs before the addon and optional wake-model provision. Each program
+# file is renamed atomically while the installer retains the suite claims.
 install_daemon() {
   say ""
   DAEMON_VERSION=$VERSION
-  DAEMON_BASE_URL="https://github.com/$DAEMON_REPO/releases/download/$DAEMON_VERSION"
-  artifact="goodvibes-daemon-$PLATFORM_SUFFIX"
-
   say "Installing goodvibes-daemon $DAEMON_VERSION ..."
-  fetch "$DAEMON_BASE_URL/SHA256SUMS.txt" "$WORKDIR/daemon-SHA256SUMS.txt"
-
-  say "  downloading $artifact ..."
-  fetch "$DAEMON_BASE_URL/$artifact" "$WORKDIR/$artifact"
-
-  expected=$(awk -v name="$artifact" '$2 == name || $2 == "*"name {print $1}' "$WORKDIR/daemon-SHA256SUMS.txt" | head -1)
-  [ -n "$expected" ] || fail "SHA256SUMS.txt has no entry for $artifact; refusing to install an unverified binary"
-  actual=$(sha256_of "$WORKDIR/$artifact")
-  [ "$expected" = "$actual" ] || fail "checksum mismatch for $artifact (expected $expected, got $actual)"
-  say "  verified   $artifact"
 
   install_release_binary goodvibes-daemon
   say "  installed  $INSTALL_DIR/goodvibes-daemon"
@@ -1683,7 +1792,7 @@ install_daemon() {
 # The SDK resolves the addon at <execDir>/lib/sqlite-vec-<os>-<arch>/vec0.<suffix>
 # next to the running binary, so one copy in $INSTALL_DIR/lib serves goodvibes,
 # goodvibes-daemon, and goodvibes-agent (they share $INSTALL_DIR). It is verified
-# against the DAEMON repository's SHA256SUMS.txt, alongside the daemon binary it
+# against the suite's SHA256SUMS.txt, alongside the daemon binary it
 # is built and released with — a missing manifest entry is a hard failure, never
 # a skip. Placed with an atomic rename so a running process never dlopen()s a
 # half-written file.
@@ -1691,33 +1800,11 @@ install_sqlite_vec() {
   [ "$WITH_VECTOR" = "1" ] || [ "$os_tag" = linux ] || return 0
   addon_asset="sqlite-vec-${VEC_OS}-${arch_tag}.${VEC_SUFFIX}"
 
-  # The addon is verified against the SAME SHA256SUMS.txt as the daemon binary,
-  # so the manifest entry decides whether that release even ships it. A release
-  # that predates the addon has no entry — that is an older build with nothing
-  # to install here, so note it and continue (the binaries still run; semantic
-  # vector search stays unavailable, exactly as before the addon shipped). This
-  # is the only non-fatal case. When the entry IS present the download and its
-  # checksum are mandatory: a 404 or a mismatch is fatal, never a silent
-  # unverified install.
-  expected=$(awk -v name="$addon_asset" '$2 == name || $2 == "*"name {print $1}' "$WORKDIR/daemon-SHA256SUMS.txt" | head -1)
-  if [ -z "$expected" ]; then
-    say ""
-    say "  note: daemon release $DAEMON_VERSION does not ship $addon_asset; semantic vector"
-    say "  search will be unavailable; upgrade to a release that includes it."
-    return 0
-  fi
-
+  # Selected addons were required and verified before any program changed.
   addon_dir="$INSTALL_DIR/lib/sqlite-vec-${VEC_OS}-${arch_tag}"
   addon_target="$addon_dir/vec0.${VEC_SUFFIX}"
 
-  say ""
-  say "  downloading $addon_asset ..."
-  fetch "$DAEMON_BASE_URL/$addon_asset" "$WORKDIR/$addon_asset"
-
-  actual=$(sha256_of "$WORKDIR/$addon_asset")
-  [ "$expected" = "$actual" ] || fail "checksum mismatch for $addon_asset (expected $expected, got $actual)"
-  say "  verified   $addon_asset"
-
+  assert_install_claims
   mkdir -p "$addon_dir"
   chmod 644 "$WORKDIR/$addon_asset"
   mv -f "$WORKDIR/$addon_asset" "$addon_target"
@@ -1773,20 +1860,7 @@ install_wake_word_model() {
 install_agent() {
   say ""
   AGENT_VERSION=$VERSION
-  agent_base_url="https://github.com/$AGENT_REPO/releases/download/$AGENT_VERSION"
-  artifact="goodvibes-agent-$PLATFORM_SUFFIX"
-
   say "Installing goodvibes-agent $AGENT_VERSION ..."
-  fetch "$agent_base_url/SHA256SUMS.txt" "$WORKDIR/agent-SHA256SUMS.txt"
-
-  say "  downloading $artifact ..."
-  fetch "$agent_base_url/$artifact" "$WORKDIR/$artifact"
-
-  expected=$(awk -v name="$artifact" '$2 == name || $2 == "*"name {print $1}' "$WORKDIR/agent-SHA256SUMS.txt" | head -1)
-  [ -n "$expected" ] || fail "SHA256SUMS.txt has no entry for $artifact; refusing to install an unverified binary"
-  actual=$(sha256_of "$WORKDIR/$artifact")
-  [ "$expected" = "$actual" ] || fail "checksum mismatch for $artifact (expected $expected, got $actual)"
-  say "  verified   $artifact"
 
   install_release_binary goodvibes-agent
   say "  installed  $INSTALL_DIR/goodvibes-agent"
@@ -1810,46 +1884,11 @@ install_agent() {
 #
 # One archive serves every platform (the driver is plain JavaScript; the browser
 # binaries it drives are downloaded separately into the agent's managed cache).
-# Verified against the SAME agent SHA256SUMS.txt as the binary, on the same terms
-# as the sqlite-vec addon: a missing manifest entry means the release predates
-# the asset and is a note, not a failure; a present entry makes the download and
-# its checksum mandatory. Extraction goes to a scratch directory and is moved
-# into place only once complete, so an interrupted install never leaves a
-# half-extracted directory that resolves as a driver and fails on first use.
+# The suite verification pass requires the asset and its checksum, extracts it
+# privately and checks the entrypoints before any installed program is changed.
 install_browser_driver() {
-  _base_url="$1"
-  _version="$2"
-  driver_asset="browser-driver.tar.gz"
-
-  expected=$(awk -v name="$driver_asset" '$2 == name || $2 == "*"name {print $1}' "$WORKDIR/agent-SHA256SUMS.txt" | head -1)
-  if [ -z "$expected" ]; then
-    say ""
-    say "  note: agent release $_version does not ship $driver_asset; the agent will"
-    say "  install a browser driver for itself the first time it is asked to use a browser."
-    return 0
-  fi
-
-  say ""
-  say "  downloading $driver_asset ..."
-  fetch "$_base_url/$driver_asset" "$WORKDIR/$driver_asset"
-
-  actual=$(sha256_of "$WORKDIR/$driver_asset")
-  [ "$expected" = "$actual" ] || fail "checksum mismatch for $driver_asset (expected $expected, got $actual)"
-  say "  verified   $driver_asset"
-
   driver_staging="$WORKDIR/browser-driver-staging"
-  rm -rf "$driver_staging"
-  mkdir -p "$driver_staging"
-  tar -xzf "$WORKDIR/$driver_asset" -C "$driver_staging" ||
-    fail "could not extract $driver_asset"
-
-  # cli.js is what the agent executes to install a browser; an archive without
-  # it is not a usable driver no matter what else extracted.
-  for required in package.json index.js cli.js; do
-    [ -f "$driver_staging/playwright-core/$required" ] ||
-      fail "$driver_asset is missing playwright-core/$required; refusing to install an unusable driver"
-  done
-
+  assert_install_claims
   driver_target="$INSTALL_DIR/playwright-core"
   rm -rf "$driver_target.incoming"
   mv -f "$driver_staging/playwright-core" "$driver_target.incoming"
@@ -1866,13 +1905,9 @@ install_browser_driver() {
 # same-origin policy a non-issue and means no CORS allowlist has to be widened
 # for the app to talk to the daemon it was served by.
 #
-# The bundle is downloaded and verified against the web UI monorepo
-# SHA256SUMS.txt on the same terms as everything else here: a missing manifest
-# entry means that release predates the asset and is a note, not a failure; a
-# present entry makes the download and its checksum mandatory. Extraction goes
-# to a scratch directory and is moved into place only once complete, so an
-# interrupted install never leaves a half-extracted directory that a daemon then
-# serves as if it were an app.
+# When selected, the bundle and checksum are required by the same suite
+# verification pass. Its index is checked in private staging before program
+# replacement, then the complete bundle is moved into its versioned directory.
 #
 # Each version unpacks into its OWN directory ($INSTALL_DIR/webui/<version>) and
 # the daemon is pointed at it afterwards. Unpacking over the directory a running
@@ -1897,41 +1932,10 @@ install_webui() {
 
   say ""
   WEBUI_VERSION=$VERSION
-  webui_base_url="https://github.com/$WEBUI_REPO/releases/download/$WEBUI_VERSION"
-  # The tag carries a leading v; the asset name carries the bare version, the
-  # same convention every packaged artifact in this platform uses.
   webui_plain_version="${WEBUI_VERSION#v}"
-  webui_asset="goodvibes-webui-bundle-${webui_plain_version}.tar.gz"
-
   say "Installing the web UI $WEBUI_VERSION ..."
-  fetch "$webui_base_url/SHA256SUMS.txt" "$WORKDIR/webui-SHA256SUMS.txt"
-
-  expected=$(awk -v name="$webui_asset" '$2 == name || $2 == "*"name {print $1}' "$WORKDIR/webui-SHA256SUMS.txt" | head -1)
-  if [ -z "$expected" ]; then
-    say "  note: web UI release $WEBUI_VERSION does not ship $webui_asset; the browser"
-    say "  surface is not installed. Upgrade to a release that includes it, or point the"
-    say "  daemon at a bundle you built: goodvibes-daemon webui enable --bundle-dir <dir>"
-    return 0
-  fi
-
-  say "  downloading $webui_asset ..."
-  fetch "$webui_base_url/$webui_asset" "$WORKDIR/$webui_asset"
-
-  actual=$(sha256_of "$WORKDIR/$webui_asset")
-  [ "$expected" = "$actual" ] || fail "checksum mismatch for $webui_asset (expected $expected, got $actual)"
-  say "  verified   $webui_asset"
-
   webui_staging="$WORKDIR/webui-staging"
-  rm -rf "$webui_staging"
-  mkdir -p "$webui_staging"
-  tar -xzf "$WORKDIR/$webui_asset" -C "$webui_staging" ||
-    fail "could not extract $webui_asset"
-
-  # index.html is what the daemon serves at / and falls back to for app routes;
-  # an archive without it is not a usable bundle no matter what else extracted.
-  [ -f "$webui_staging/goodvibes-webui/index.html" ] ||
-    fail "$webui_asset is missing goodvibes-webui/index.html; refusing to install an unusable bundle"
-
+  assert_install_claims
   webui_target="$WEBUI_ROOT/$webui_plain_version"
   mkdir -p "$WEBUI_ROOT"
   rm -rf "$webui_target.incoming"
@@ -2640,6 +2644,10 @@ run_uninstall() {
 
   uninstall_services_and_processes
 
+  if [ -e "$INSTALL_DIR/.goodvibes-reader-requirements.json" ] || [ -L "$INSTALL_DIR/.goodvibes-reader-requirements.json" ]; then
+    record_kept "$INSTALL_DIR/.goodvibes-reader-requirements.json (saved-data reader requirements)"
+  fi
+
   # Binaries the installer places, plus the updater's parked rollback copy
   # beside each one (<path>.previous — see self-update.ts's swapFileAtomically/
   # PREVIOUS_FILE_SUFFIX contract). Leaving these behind was the same class of
@@ -2794,30 +2802,23 @@ main() {
 
   BASE_URL="https://github.com/$REPO/releases/download/$VERSION"
   WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/goodvibes-install.XXXXXX")
-  trap 'rm -rf "$WORKDIR"' EXIT INT TERM
+  trap cleanup_release_install EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
 
   prepare_release
+  claim_release_install
+  check_release_reader
 
   say "Installing GoodVibes $VERSION for $PLATFORM_SUFFIX into $INSTALL_DIR"
   say ""
   say "Installing goodvibes $VERSION ..."
 
-  fetch "$BASE_URL/SHA256SUMS.txt" "$WORKDIR/SHA256SUMS.txt"
-
-  artifact="goodvibes-$PLATFORM_SUFFIX"
-  say "  downloading $artifact ..."
-  fetch "$BASE_URL/$artifact" "$WORKDIR/$artifact"
-
-  expected=$(awk -v name="$artifact" '$2 == name || $2 == "*"name {print $1}' "$WORKDIR/SHA256SUMS.txt" | head -1)
-  [ -n "$expected" ] || fail "SHA256SUMS.txt has no entry for $artifact; refusing to install an unverified binary"
-  actual=$(sha256_of "$WORKDIR/$artifact")
-  [ "$expected" = "$actual" ] || fail "checksum mismatch for $artifact (expected $expected, got $actual)"
-  say "  verified   $artifact"
-
   mkdir -p "$INSTALL_DIR"
   # Install atomically: write next to the target, then rename over it, so a
   # running binary is replaced cleanly (the old inode stays alive for
   # existing processes — this is also what /update relies on).
+  INSTALL_SWAP_BEGUN=1
   install_release_binary goodvibes
   say "  installed  $INSTALL_DIR/goodvibes"
 
@@ -2860,8 +2861,13 @@ main() {
   install_webui
 
   # The driver is shared platform support, including when Agent is skipped.
-  install_browser_driver "$BASE_URL" "$VERSION"
+  install_browser_driver
   if [ "$WITH_AGENT" = 1 ]; then install_agent; fi
+
+  # All program and companion writes are complete before a service may start
+  # the new cohort. Startup must not see our own in-flight update claims.
+  INSTALL_SWAP_FINISHED=1
+  release_install_claims || fail 'Suite files were installed, but changed transaction claims require inspection before starting services.'
 
   # Bring a platform-managed canonical unit up to the current (config-derived)
   # launch shape BEFORE the restart below, so the restart applies it.

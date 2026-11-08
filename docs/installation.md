@@ -48,6 +48,17 @@ user services and launchd agents. Existing custom services are distinguished fro
 installer-managed services; migration preserves settings and has rollback handling.
 PATH setup and checks for older commands remain part of installation.
 
+Saved data can require a newer reader than an earlier release provides. The
+installer checks an existing installation’s reader requirements with the staged,
+verified release before replacing programs. An incompatible or unreadable
+requirement keeps the installed programs in place. Do not delete compatibility
+evidence to force a downgrade. The evidence survives data-preserving uninstall.
+
+Installation holds transaction claims beside the three executables while suite
+files are replaced. A competing updater is refused. If replacement is interrupted
+after it begins, retained claims require inspection and recovery before another
+attempt; the installer does not report a complete install or blindly retry it.
+
 ## Uninstall
 
 ```sh

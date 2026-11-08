@@ -36,6 +36,7 @@ const EXPECTED_COMMANDS = [
   'cluster',
   'webui',
   'provision-wake-model',
+  'check-install-reader',
   'completion',
   'help',
   'version',
@@ -83,7 +84,7 @@ describe('the daemon command vocabulary', () => {
 
   test('the raw-intercept list is exactly the passthrough commands', () => {
     expect([...RAW_INTERCEPT_COMMANDS].sort())
-      .toEqual(['cluster', 'provision-wake-model', 'send', 'webui']);
+      .toEqual(['check-install-reader', 'cluster', 'provision-wake-model', 'send', 'webui']);
     for (const command of RAW_INTERCEPT_COMMANDS) {
       expect(isRawInterceptCommand(command)).toBe(true);
       expect(daemonCommandSpec(command).passthrough).toBe(true);

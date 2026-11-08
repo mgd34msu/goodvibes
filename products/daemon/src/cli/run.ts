@@ -71,6 +71,10 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     if (cli.flags.version || cli.command === 'version') return result({ exitCode: 0, lines: [renderGoodVibesVersion()] });
     if (cli.command === 'completion') return result(runCompletionCommand(cli.commandArgs));
     if (isRawInterceptCommand(cli.command) && argv[0] !== cli.command) return refuse(`\`${cli.command}\` has to be the first argument: goodvibes-daemon ${cli.command} …`);
+    if (cli.command === 'check-install-reader') {
+      const { runInstallReaderCheck } = await import('./check-install-reader.js');
+      return runInstallReaderCheck(cli.commandArgs, { stdout, stderr });
+    }
     if (cli.command === 'send') {
       const { prepareSendCommand, runPreparedSendCommand } = await import('../daemon/send/command.js');
       const prepared = prepareSendCommand(cli.commandArgs);

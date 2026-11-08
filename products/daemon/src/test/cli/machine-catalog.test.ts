@@ -7,6 +7,8 @@ import { WEBUI_BINDING_QUERY, WEBUI_BINDING_RESULT } from '../../cli/machine-con
 import { parseDaemonCli } from '../../cli/parser.ts';
 import { runDaemonCli } from '../../cli/run.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
+import { NATIVE_READER_REQUIREMENT_FILE } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { VERSION } from '../../version.js';
 
 async function invoke(args: string[], env: NodeJS.ProcessEnv = {}, cwd?: string) {
   const stdout: string[] = []; const stderr: string[] = [];
@@ -56,6 +58,44 @@ describe('machine help is the canonical CLI capability contract', () => {
       expect(result.code).toBe(0); expect(result.stdout[0]).toStartWith('Usage: goodvibes-daemon');
       expect(result.stderr).toEqual([]);
     }
+  });
+});
+
+describe('release reader inspection never initializes settings or a runtime', () => {
+  test('an installation without new data requirements permits its early reader without creating files', async () => {
+    const root = makeOwnedTempDir('daemon-reader-inspect-empty'); const before = files(root);
+    let constructions = 0; const stdout: string[] = []; const stderr: string[] = [];
+    const env = new Proxy({}, { ownKeys() { throw new Error('Reader inspection must not acquire configuration'); } });
+    const code = await runDaemonCli(['check-install-reader', join(root, 'goodvibes-daemon')], {
+      env, cwd: root, stdout: line => stdout.push(line), stderr: line => stderr.push(line),
+      async createRuntime() { constructions++; throw new Error('Reader inspection must not construct a runtime'); },
+    });
+    expect(code).toBe(0); expect(constructions).toBe(0); expect(stderr).toEqual([]);
+    expect(stdout).toEqual([JSON.stringify({ schema: 'goodvibes.install.reader-check', schemaVersion: 1, readerVersion: VERSION })]);
+    expect(files(root)).toEqual(before); expect(readdirSync(root)).toEqual([]);
+  });
+
+  test.each([['3.1.2', 0], ['3.2.0', 2]] as const)('the actual reader checks floor %s and emits no false success', async (minimumReader, code) => {
+    const root = makeOwnedTempDir('daemon-reader-inspect-floor');
+    writeFileSync(join(root, NATIVE_READER_REQUIREMENT_FILE), JSON.stringify({ schema: 1, minimumReader, formats: ['payment-retained-holds-v2'] }));
+    const before = files(root); const output = await invoke(['check-install-reader', join(root, 'goodvibes-daemon')], { HOME: root }, root);
+    expect(output.code).toBe(code); expect(files(root)).toEqual(before);
+    if (code === 0) expect(JSON.parse(output.stdout[0] ?? '{}')).toMatchObject({ readerVersion: VERSION });
+    else { expect(output.stdout).toEqual([]); expect(output.stderr.join('')).toContain('requires GoodVibes 3.2.0'); }
+  });
+
+  test('malformed stored content stays private and intact', async () => {
+    const root = makeOwnedTempDir('daemon-reader-inspect-damaged');
+    const original = 'private original data not valid JSON'; writeFileSync(join(root, NATIVE_READER_REQUIREMENT_FILE), original);
+    const before = files(root); const output = await invoke(['check-install-reader', join(root, 'goodvibes-daemon')], { HOME: root }, root);
+    expect(output.code).toBe(2); expect(output.stdout).toEqual([]); expect(output.stderr.join('')).not.toContain(original);
+    expect(files(root)).toEqual(before);
+  });
+
+  test.each([[], ['relative'], ['/tmp/target', 'extra'], ['--help']].map(args => ({ args })))('invalid reader arguments $args cannot fall through to runtime activation', async ({ args }) => {
+    const root = makeOwnedTempDir('daemon-reader-inspect-invalid');
+    const output = await invoke(['check-install-reader', ...args], { HOME: root }, root);
+    expect(output.code).toBe(2); expect(output.stdout).toEqual([]); expect(readdirSync(root)).toEqual([]);
   });
 });
 

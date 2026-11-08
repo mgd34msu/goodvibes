@@ -83,11 +83,16 @@ repository root to build the installed engine toolchain):
   and bubblewrap: a copied artifact set, isolated homes and a foreign cwd,
   no checkout or `node_modules`, real config persistence and synthetic loopback
   sends through argv and stdin. Missing artifacts or isolation fail the command.
+  Local relocation and post-execution checks compare payload bytes directly
+  against private baseline copies outside the executed namespace, using bounded
+  buffers. The version 2 proof report lists relative paths and byte counts;
+  independently pinned release-download checksums remain a separate check.
 
 The script launcher never silently selects a binary from `native/` or `vendor/`
 and never fetches a missing binary. Invoke a locally built native artifact by its
-explicit path when that is the artifact you intend to exercise. Its distribution,
-installation and updater activation remain separately unconfigured.
+explicit path when that is the artifact you intend to exercise. For released
+suite installation and updates, follow the [installation guide](../../docs/installation.md).
+A local artifact proof does not establish that a published installation works.
 
 Keep the binary together with its `lib/` addon directory and, on Linux, the
 adjacent `.bun`, `.bun.json` and `.bun.LICENSE.md` runtime files. Linux builds

@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Compare native-daemon smoke payloads directly against private baseline copies
+  instead of hashing each local file before and after execution. Keep comparison
+  memory bounded and report relative paths/byte counts in the version 2 local
+  proof. Independently pinned published-download checksum verification remains.
+
 - Retain the original Telegram ingress account before sending native payment
   notices and recheck its private session handle at window expiry. A missing,
   pending, retired or replaced source cannot become veto silence through a

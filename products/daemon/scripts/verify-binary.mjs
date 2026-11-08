@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { createReadStream, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { constants, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -11,6 +10,7 @@ import { readNativeAddonEvidence, proveNativeMemoryRoundTrip } from './boot-smok
 import { syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 import { runHostedSessionProof } from './hosted-session-proof.mjs';
 import { runPostBuildSmoke } from '@goodvibes-jev/engine/toolchain';
+import { assertLocalPayloadEqual } from './local-payload-comparison.mjs';
 
 // Explicit local Linux artifact proof. This consumes the production binary;
 // it never builds a fixture launcher or supplies an inbox composition module.
@@ -27,6 +27,9 @@ assert(args.length === 0 || (args.length === 2 && args[0] === '--binary'), 'Usag
 const original = resolve(product, args[1] ?? join(config.build.outDir, target.appArtifact));
 assert.equal(basename(original), target.appArtifact, 'Verify the configured host artifact.');
 const root = mkdtempSync(join(tmpdir(), 'goodvibes-daemon-native-'));
+// The executed process can write its fixture root. Keep the original payload
+// copies outside that namespace so it cannot replace both sides of the check.
+const baselineRoot = mkdtempSync(join(tmpdir(), 'goodvibes-daemon-payload-baseline-'));
 const artifacts = join(root, 'artifacts');
 const work = join(root, 'foreign-work');
 const home = join(root, 'home');
@@ -34,11 +37,6 @@ const tree = join(root, 'tree');
 const daemon = join(root, 'selected-daemon');
 const binary = join(artifacts, target.appArtifact);
 let server; let smokeJudgment;
-async function payloadDigest(path) {
-  const hash = createHash('sha256');
-  for await (const chunk of createReadStream(path)) hash.update(chunk);
-  return hash.digest('hex');
-}
 const writeJson = (path, value) => writeFileSync(path, JSON.stringify(value));
 
 try {
@@ -52,10 +50,17 @@ try {
   mkdirSync(dirname(join(artifacts, addon)), { recursive: true });
   copyFileSync(join(dirname(original), addon), join(artifacts, addon));
   // CI has already verified ci-artifact.json against the exact checkout/head.
-  // Bind this behavioral receipt to all unchanged relocated payload bytes too.
+  // Compare local relocation/execution bytes directly; download verification
+  // remains the independently pinned release/CI artifact reader's job.
   const payloadPaths = [target.appArtifact, ...['.bun', '.bun.json', '.bun.LICENSE.md'].map(suffix => target.appArtifact + suffix), addon];
-  const payloads = await Promise.all(payloadPaths.map(async path => ({ path, sha256: await payloadDigest(join(artifacts, path)) })));
-  for (const payload of payloads) assert.equal(await payloadDigest(join(dirname(original), payload.path)), payload.sha256, `Relocation changed ${payload.path}`);
+  const payloads = [];
+  for (const path of payloadPaths) {
+    const baseline = join(baselineRoot, path);
+    mkdirSync(dirname(baseline), { recursive: true });
+    copyFileSync(join(dirname(original), path), baseline, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE);
+    const bytes = await assertLocalPayloadEqual(baseline, join(artifacts, path), `Relocation of ${path}`);
+    payloads.push({ path, bytes, comparison: 'exact-local-bytes' });
+  }
   writeJson(join(work, 'package.json'), { name: '@fixture/foreign-package', version: '99.8.7', type: 'module' });
   // Only OS libraries and this owned fixture are mounted. The checkout and
   // its source/node_modules do not exist in the child filesystem namespace.
@@ -66,6 +71,8 @@ try {
     GOODVIBES_HOME: tree, GOODVIBES_DAEMON_HOME: daemon, GOODVIBES_WORKING_DIR: work, NO_COLOR: '1', GOODVIBES_SKIP_WAKE_MODEL_DOWNLOAD: '1' };
   const probe = spawnSync('bwrap', [...boundary, '/usr/bin/test', '!', '-e', product], { env, encoding: 'utf8', timeout: 10_000 });
   assert.ifError(probe.error); assert.equal(probe.status, 0, `Filesystem containment unavailable: ${probe.stderr}`);
+  const baselineProbe = spawnSync('bwrap', [...boundary, '/usr/bin/test', '!', '-e', baselineRoot], { env, encoding: 'utf8', timeout: 10_000 });
+  assert.ifError(baselineProbe.error); assert.equal(baselineProbe.status, 0, 'The executed namespace can access its private payload baseline.');
   const smoke = await runPostBuildSmoke({ binary, config: config.smoke, exec: (file, argv) => {
     const result = spawnSync('bwrap', [...boundary, file, ...argv], { env, encoding: 'utf8', timeout: 20_000, killSignal: 'SIGKILL' });
     assert.ifError(result.error);
@@ -285,11 +292,12 @@ try {
     await stopped; host.stdout.destroy(); host.stderr.destroy(); host.stdio[3].destroy();
   }
   const hosted = await runHostedSessionProof({ binary, boundary, env, root });
-  for (const payload of payloads) assert.equal(await payloadDigest(join(artifacts, payload.path)), payload.sha256, `Execution changed ${payload.path}`);
-  console.log(JSON.stringify({ proof: 'compiled-daemon-hosted-session', verificationElapsedMs: Date.now() - verificationStartedAt, payloads, ...hosted }));
+  for (const payload of payloads) await assertLocalPayloadEqual(join(baselineRoot, payload.path), join(artifacts, payload.path), `Execution of ${payload.path}`);
+  console.log(JSON.stringify({ proof: 'compiled-daemon-hosted-session', proofVersion: 2, verificationElapsedMs: Date.now() - verificationStartedAt, payloads, ...hosted }));
   console.log(`Native daemon ${manifest.version}: relocated shared smoke, exact identity, help, service refusal, config, argv/stdin send and production inbox and hosted streaming/lifecycle passed without checkout or node_modules.`);
 } finally {
   if (smokeJudgment?.listening) { smokeJudgment.closeAllConnections(); await new Promise(resolve => smokeJudgment.close(resolve)); }
   if (server?.listening) { server.closeAllConnections(); await new Promise((yes, no) => server.close(error => error ? no(error) : yes())); }
-  rmSync(root, { recursive: true, force: true });
+  try { rmSync(root, { recursive: true, force: true }); }
+  finally { rmSync(baselineRoot, { recursive: true, force: true }); }
 }

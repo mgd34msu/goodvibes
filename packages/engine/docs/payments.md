@@ -918,6 +918,14 @@ The saved facts do not authorize execution: restart continuation still needs
 the original paired authority and a valid browser/page continuation, and remains
 unfinished.
 
+Native admission now retains an operation-bound continuation actually issued by
+the original pairing owner. Its reference is encrypted with the request; its
+binding encodes the existing operation UUID without hashing the request. A known
+safe settlement retires that grant before removing the request. A stop also
+retires future continuation authority when the merchant outcome remains unknown,
+while retaining the facts needed for reconciliation. Recovery must check the
+original owner's issued record; parsing or copying the reference grants nothing.
+
 Each wait now carries its exact `purchaseId`, rendered notice, deadline and
 owning cancellation signal. The notifier does not keep a shared last notice;
 concurrent purchases cannot overwrite the text used to interpret another

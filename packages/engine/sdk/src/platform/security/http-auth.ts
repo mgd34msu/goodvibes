@@ -31,6 +31,8 @@ export interface NativePairedSnapshot extends AuthenticatedNativePairingToken {
 
 export interface NativeExecutionAuthority {
   issueContinuation?(binding: string, assertCurrent: () => void, sourceBinding?: string): NativeContinuationGrant;
+  /** Retires only a grant issued by this original private pairing owner. */
+  revokeContinuation?(grant: NativeContinuationGrant): void;
   current(): NativePairedSnapshot | null;
   withCurrent<T>(expected: NativePairedSnapshot,
     operation: (assertCurrent: () => NativePairedSnapshot) => T | Promise<T>): Promise<T>;
@@ -44,6 +46,7 @@ export interface NativeExecutionAuthority {
  */
 export interface PairingTokenAuthenticator {
   issueNativeContinuation?(token: string, expected: NativeContinuationAuthority, binding: string, assertCurrent: () => void, sourceBinding?: string): NativeContinuationGrant;
+  revokeNativeContinuation?(grant: NativeContinuationGrant): void;
   /** Additive strict SETTINGS path; never substituted with native authority. */
   captureSettingsAuthority?(input: { readonly kind: 'shared-token' }
     | { readonly kind: 'pairing-token'; readonly token: string }): SettingsPairingAuthority | null;

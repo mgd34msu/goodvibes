@@ -96,6 +96,9 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   expect(saved.input.item).toBe('Fixture item'); expect(saved.input.requestedMax).toBe('9.00');
   expect(saved.principalId).toBe(helper.describeAuthenticatedPrincipal(paired.token).principalId);
   expect(saved.host.authority.tokenId).toBe(paired.id);
+  if (!saved.host.continuation) throw new Error('Native admission did not retain its issued grant');
+  expect(pairing.readNativeContinuation(saved.host.continuation)).toEqual(saved.host.authority);
+  expect(pairing.readNativeContinuation({ ...saved.host.continuation, binding: '11'.repeat(32) })).toBeNull();
   expect(saved.evidence.complete).toBe(original !== 'incomplete');
   const privatePath = join(root, 'requests', `${Buffer.from(body.requestId).toString('base64url')}.json`);
   const encrypted = readFileSync(privatePath, 'utf8');
@@ -121,6 +124,7 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   const expectedState = original === 'clean' ? 'cancelled' : 'refused';
   await until(() => f.operations.get(body.requestId)?.state === expectedState);
   await until(() => !existsSync(privatePath));
+  expect(new PairingTokenManager(join(root, 'pairing.json')).readNativeContinuation(saved.host.continuation)).toBeNull();
   if (original !== 'clean') {
     expect(f.operations.get(body.requestId)?.outcome).toBe('refused:derived-from-untrusted-content');
     expect(f.replies.inspect()).toEqual([]);

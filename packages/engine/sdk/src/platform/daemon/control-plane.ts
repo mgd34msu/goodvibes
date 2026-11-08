@@ -370,6 +370,7 @@ export class DaemonControlPlaneHelper {
     };
     return Object.freeze({
       current,
+      ...(owner.revokeNativeContinuation ? { revokeContinuation: owner.revokeNativeContinuation.bind(owner) } : {}),
       ...(owner.issueNativeContinuation ? { issueContinuation: (binding: string, assertSource: () => void, sourceBinding?: string) => {
         const expected = current(); if (!expected) throw new Error('Native continuation pairing is unavailable');
         return owner.issueNativeContinuation!(token, expected, binding, () => {

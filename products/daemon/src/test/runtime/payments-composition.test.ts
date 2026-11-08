@@ -57,7 +57,7 @@ function fixture(catalog = new GatewayMethodCatalog()) {
     channelDeliveryRouter: { async deliver(request: unknown) { deliveries.push(request); return 'fixture-notice'; } },
   };
   const services = createPaymentsServices(options);
-  return { root, values, scopes, deliveries, browser, catalog, options, services, setLeader(value: boolean) { leader = value; } };
+  return { root, values, scopes, deliveries, browser, catalog, options, services, pairing, setLeader(value: boolean) { leader = value; } };
 }
 
 function invoke(catalog: GatewayMethodCatalog, id: string, body: unknown = {}) {
@@ -280,6 +280,8 @@ test.each(['preflight', 'submit'] as const)('actual product close retains an adm
     const saved = await new ProtectedPaymentRequests(requestRoot).read('product-owned-checkout', operation.operationId, () => {});
     expect(saved.input.item).toBe('Fixture item'); expect(saved.input.requestedMax).toBe('11.00');
     expect(saved.host.authority.kind).toBe('pairing-token');
+    if (!saved.host.continuation) throw new Error('Missing actual product continuation grant');
+    expect(f.pairing.readNativeContinuation(saved.host.continuation)).toEqual(saved.host.authority);
     const privatePath = join(requestRoot, `${Buffer.from('product-owned-checkout').toString('base64url')}.json`);
     expect(readFileSync(privatePath, 'utf8')).not.toContain('Fixture item');
     if (phase === 'submit') {
@@ -293,6 +295,7 @@ test.each(['preflight', 'submit'] as const)('actual product close retains an adm
     await Promise.resolve(); await Promise.resolve(); expect(drained).toBe(false);
     for (const id of ATTACHED_PAYMENTS_METHOD_IDS) expect(f.catalog.hasHandler(id)).toBe(false);
     gate.release(); await closing;
+    expect(f.pairing.readNativeContinuation(saved.host.continuation)).toBeNull();
     if (phase === 'preflight') {
       expect(effects).toEqual([]); expect(f.services.budget.state().reservations).toEqual([]);
       expect(existsSync(privatePath)).toBe(false);

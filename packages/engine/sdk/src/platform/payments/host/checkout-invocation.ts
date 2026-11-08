@@ -7,6 +7,7 @@ import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-com
 import { retainTaintEvidence } from '../../security/untrusted-content.js';
 import type { PaymentsServiceConfig } from '../payments-gateway-service.js';
 import type { NativePairedSnapshot } from '../../security/http-auth.js';
+import { paymentContinuationBinding } from './continuation-binding.js';
 
 function frame(context: HandlerContextEnvelope) {
   return { principalId: context.principalId, principalKind: context.principalKind, admin: context.admin,
@@ -50,7 +51,7 @@ export function retainCheckoutInvocation(deps: PaymentsHandlerDeps, seam: Browse
 export function retainDetachedCheckout(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam, context: HandlerContextEnvelope) {
   const native = context.nativeExecutionAuthority, authorized = context.isAuthorized;
   const paired = native?.current();
-  if (!native || !authorized || !paired || paired.kind !== 'pairing-token' || !context.admin || context.principalKind !== 'token'
+  if (!native || !native.issueContinuation || !native.revokeContinuation || !authorized || !paired || paired.kind !== 'pairing-token' || !context.admin || context.principalKind !== 'token'
     || !context.explicitUserRequest || context.principalId !== paired.principalId
     || !(context.scopes.includes('*') || context.scopes.includes('write:payments'))
     || !(paired.scopes.includes('*') || paired.scopes.includes('write:payments'))
@@ -64,6 +65,8 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
   native: NonNullable<HandlerContextEnvelope['nativeExecutionAuthority']>, authorized: NonNullable<HandlerContextEnvelope['isAuthorized']>,
   paired: NonNullable<ReturnType<NonNullable<HandlerContextEnvelope['nativeExecutionAuthority']>['current']>>) {
   const expected = captureOwnedJson(paired), config = captureOwnedJson(readPaymentsServiceConfig(deps.config));
+  const issue = native.issueContinuation?.bind(native), revoke = native.revokeContinuation?.bind(native);
+  if (!issue || !revoke) throw new HandlerError('The paired host cannot retain checkout continuation authority.', 'FAILED_PRECONDITION', 409);
   // The dispatcher starts the owner turn before this handler. Include the
   // immediately displaced window, then keep these exact facts across later
   // requests and async card/address preflight. Never recapture at execution.
@@ -78,5 +81,13 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
   };
   assertCurrent();
   return Object.freeze({ principalId, assertCurrent, taintEvidence,
+    issueContinuation(operationId: string, admissionCurrent: () => void) {
+      const binding = paymentContinuationBinding(operationId);
+      const current = () => { assertCurrent(); admissionCurrent(); };
+      current(); const grant = issue(binding, current, binding);
+      try { current(); return grant; }
+      catch (error) { revoke(grant); throw error; }
+    },
+    revokeContinuation: revoke,
     recoveryFacts: Object.freeze({ authority: expected as NativePairedSnapshot, configuration: config as PaymentsServiceConfig }) });
 }

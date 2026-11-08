@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Retain a real, original-owner-issued payment continuation with protected
+  checkout facts. Bind it losslessly to the existing operation ID, retire it
+  before known-safe cleanup, and drain delayed retirement through shutdown.
+  A stop retires future authority without deleting unknown-submit evidence.
+  Browser restart continuation and missed-reply recovery remain unfinished.
+
 - Issue native continuation custody IDs instead of hashing directory and token
   state for every check. Compare the recorded owner ancestry and credential
   incarnation directly. Existing v1 grants retain a cached read-only verifier;

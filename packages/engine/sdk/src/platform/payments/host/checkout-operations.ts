@@ -18,12 +18,16 @@ import { DurablePaymentOperations, PaymentOperationStoreError, checkoutRequestId
 import type { DaemonPurchaseLedger } from './purchase-ledger.js';
 import type { RetainedTaintEvidence } from '../../security/untrusted-content.js';
 import type { PaymentRequestHostFacts, PaymentRequestStore } from './protected-requests.js';
+import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
+import { capturePaymentContinuation } from './continuation-binding.js';
 
 export interface DetachedCheckoutSource {
   readonly principalId: string;
   readonly assertCurrent: () => void;
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
   readonly recoveryFacts?: PaymentRequestHostFacts | undefined;
+  readonly issueContinuation?: ((operationId: string, assertCurrent: () => void) => NativeContinuationGrant) | undefined;
+  readonly revokeContinuation?: ((grant: NativeContinuationGrant) => void | Promise<void>) | undefined;
 }
 export interface DetachedCheckoutOwner {
   readonly signal: AbortSignal;
@@ -35,6 +39,7 @@ interface ActiveOperation {
   readonly abort: AbortController;
   readonly source: DetachedCheckoutSource;
   protectedRequest: boolean;
+  continuation: NativeContinuationGrant | undefined;
 }
 export class CheckoutOperations {
   // Constructed with the registration, before request dispatch. Background
@@ -80,7 +85,9 @@ export class CheckoutOperations {
     // a later background tick. Native source factories already freeze theirs.
     source = Object.freeze({ principalId: source.principalId, assertCurrent: source.assertCurrent.bind(source),
       taintEvidence: source.taintEvidence === undefined ? undefined : captureOwnedJson(source.taintEvidence) as RetainedTaintEvidence,
-      recoveryFacts: source.recoveryFacts === undefined ? undefined : captureOwnedJson(source.recoveryFacts) as PaymentRequestHostFacts });
+      recoveryFacts: source.recoveryFacts === undefined ? undefined : captureOwnedJson(source.recoveryFacts) as PaymentRequestHostFacts,
+      issueContinuation: source.issueContinuation?.bind(source), revokeContinuation: source.revokeContinuation?.bind(source) });
+    if (source.issueContinuation && !source.revokeContinuation) throw new PaymentOperationStoreError('unavailable');
     const current = () => {
       if (this.closed) throw new CheckoutOwnershipError();
       source.assertCurrent(); admissionCurrent();
@@ -91,15 +98,18 @@ export class CheckoutOperations {
     const operation: PaymentOperationView = Object.freeze({ purchaseId: id, operationId: `payment-operation:${opaqueUuid()}`,
       state: 'accepted', phase: null, createdAtMs: now, updatedAtMs: now, outcome: null, totalMinorUnits: null, currency: null });
     const writer = this.store.create(operation, source.principalId, current);
-    const active: ActiveOperation = { writer, source, abort: new AbortController(), protectedRequest: false };
+    const active: ActiveOperation = { writer, source, abort: new AbortController(), protectedRequest: false, continuation: undefined };
     this.active.set(id, active);
     let launched = false;
     try {
       const preparing = () => { current(); active.abort.signal.throwIfAborted(); writer.assertCurrent(); };
+      if (source.issueContinuation) active.continuation = capturePaymentContinuation(source.issueContinuation(operation.operationId, preparing), operation.operationId);
+      preparing();
       if (this.requests) {
         if (!source.taintEvidence || !source.recoveryFacts) throw new PaymentOperationStoreError('unavailable');
         await this.requests.retain({ version: 1, purchaseId: id, operationId: operation.operationId, principalId: source.principalId,
-          input: captured, evidence: source.taintEvidence, host: source.recoveryFacts }, preparing);
+          input: captured, evidence: source.taintEvidence,
+          host: active.continuation ? { ...source.recoveryFacts, continuation: active.continuation } : source.recoveryFacts }, preparing);
         active.protectedRequest = true;
       }
       preparing();
@@ -142,11 +152,17 @@ export class CheckoutOperations {
   }
   private async releaseProtectedRequest(operation: ActiveOperation): Promise<void> {
     const { writer } = operation;
-    if (!this.requests || !operation.protectedRequest) return;
     const status = writer.read();
     const settled = ['refused', 'cancelled', 'failed'].includes(status.state)
       || status.state === 'completed' && (status.outcome === 'purchased' || status.outcome === 'refunded');
-    if (!settled) return;
+    // A stop can race an unknown merchant result. Retire future authority
+    // while retaining the original evidence needed to reconcile that result.
+    if (operation.continuation && (settled || operation.abort.signal.aborted)) {
+      if (!operation.source.revokeContinuation) throw new PaymentOperationStoreError('unavailable');
+      await operation.source.revokeContinuation(operation.continuation);
+      operation.continuation = undefined;
+    }
+    if (!settled || !this.requests || !operation.protectedRequest) return;
     await this.requests.remove(writer.purchaseId, status.operationId, () => writer.assertCurrent());
     operation.protectedRequest = false;
   }

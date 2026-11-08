@@ -15,10 +15,14 @@ import type { NativePairedSnapshot } from '../../security/http-auth.js';
 import { readCheckoutReadingInput } from '../checkout-reading-input.js';
 import type { BeginCheckoutInput, PaymentsServiceConfig } from '../payments-gateway-service.js';
 import { checkoutRequestId } from './operation-store.js';
+import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
+import { capturePaymentContinuation } from './continuation-binding.js';
 
 export interface PaymentRequestHostFacts {
   readonly authority: NativePairedSnapshot;
   readonly configuration: PaymentsServiceConfig;
+  /** A reference only; recovery must consult the original issuing owner. */
+  readonly continuation?: NativeContinuationGrant;
 }
 export interface ProtectedPaymentRequest {
   readonly version: 1;
@@ -63,7 +67,8 @@ function own(value: unknown): ProtectedPaymentRequest {
   if (!object(input) || !['sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item', 'cardId'].every(key => text(input[key]))
     || !Array.isArray(input['requestedLines']) || input['requestedLines'].length === 0
     || input['requestedLines'].some(line => !object(line) || !text(line['label']) || !Number.isSafeInteger(line['quantity']) || Number(line['quantity']) < 1)
-    || !object(input['reading']) || !object(input['controls']) || !object(host) || Object.keys(host).length !== 2
+    || !object(input['reading']) || !object(input['controls']) || !object(host)
+    || Object.keys(host).some(key => !['authority', 'configuration', 'continuation'].includes(key))
     || !object(host['authority']) || !object(host['configuration'])) throw new ProtectedPaymentRequestError();
   const reading = readCheckoutReadingInput(input['reading']);
   if (!reading.ok || !isDeepStrictEqual(captureOwnedJson(reading.reading), input['reading'])) throw new ProtectedPaymentRequestError();
@@ -100,7 +105,8 @@ function own(value: unknown): ProtectedPaymentRequest {
     ? { merchantPolicy: optionalFields(policy, ['additional', 'excluded', 'marketplaces', 'listingThresholds']) } : {}) }, ['merchantPolicy']);
   return Object.freeze({ ...row, evidence: captureRetainedTaintEvidence(row['evidence']),
     input: optionalFields({ ...input, controls: optionalFields(controls, ['addressFields', 'shippingTargets', 'expirySeparator', 'twoDigitYear']) }, ['preferredTier', 'requestedMax', 'merchantDiscovered']),
-    host: Object.freeze({ authority, configuration: savedConfig }) }) as unknown as ProtectedPaymentRequest;
+    host: Object.freeze({ authority, configuration: savedConfig,
+      ...(host['continuation'] === undefined ? {} : { continuation: capturePaymentContinuation(host['continuation'], row['operationId']) }) }) }) as unknown as ProtectedPaymentRequest;
 }
 
 /** One native cipher file per admitted identity. Same-key/record substitution,

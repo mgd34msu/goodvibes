@@ -13,6 +13,8 @@ import { configureDecisionModelPolicy } from '../sdk/src/platform/runtime/decisi
 import { ProtectedPaymentRequests, type PaymentRequestStore } from '../sdk/src/platform/payments/host/protected-requests.js';
 import { protectedPaymentRequest } from './helpers/protected-payment-request.ts';
 import { parseCurrencyCode, ownerSuppliedText } from '../sdk/src/platform/payments/types.js';
+import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
+import { paymentContinuationBinding } from '../sdk/src/platform/payments/host/continuation-binding.js';
 
 const roots: string[] = [], cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -121,7 +123,11 @@ test('restart status cannot downgrade known submit-pending evidence when its jou
 
 test('admission waits for durable original facts and binds original storage methods and request values', async () => {
   const path = directory(), store = new DurablePaymentOperations(join(path, 'operations'));
-  const requests = new ProtectedPaymentRequests(join(path, 'requests')), original = protectedPaymentRequest('durable-admission');
+  const requests = new ProtectedPaymentRequests(join(path, 'requests')), fixture = protectedPaymentRequest('durable-admission');
+  const pairing = new PairingTokenManager(join(path, 'pairing.json')), paired = pairing.mint({ name: 'Synthetic operation owner' });
+  const native = pairing.authenticateNative(paired.token); if (!native) throw new Error('Missing original paired owner');
+  const authority = { ...native, scopes: ['write:payments'] };
+  const original = { ...fixture, principalId: native.principalId, host: { ...fixture.host, authority } };
   const retained = barrier(), releaseStorage = barrier(), entered = barrier(), releaseExecutor = barrier();
   cleanup.push(releaseStorage.release, releaseExecutor.release, configureDecisionModelPolicy(() => 'Default - On'));
   let acknowledgements = 0, executions = 0, sourceChecks = 0, removals = 0;
@@ -137,7 +143,10 @@ test('admission waits for durable original facts and binds original storage meth
   cleanup.push(async () => { releaseStorage.release(); releaseExecutor.release(); await operations.close(); });
   await operations.recover();
   const body = structuredClone(original.input), source = { principalId: original.principalId, taintEvidence: structuredClone(original.evidence),
-    recoveryFacts: structuredClone(original.host), assertCurrent() { sourceChecks++; } };
+    recoveryFacts: structuredClone(original.host), assertCurrent() { sourceChecks++; },
+    issueContinuation(operationId: string, current: () => void) { const binding = paymentContinuationBinding(operationId);
+      return pairing.issueNativeContinuation(paired.token, authority, binding, current, binding); },
+    revokeContinuation: pairing.revokeNativeContinuation.bind(pairing) };
   const pending = operations.admit(original.purchaseId, body, source, () => {}, () => {}).then(value => { acknowledgements++; return value; });
   await retained.wait;
   expect(acknowledgements).toBe(0); expect(executions).toBe(0);
@@ -145,13 +154,53 @@ test('admission waits for durable original facts and binds original storage meth
   expect(new DurablePaymentOperations(join(path, 'operations')).recover(original.purchaseId)).toBeNull();
   const saved = await new ProtectedPaymentRequests(join(path, 'requests')).read(original.purchaseId, accepted.operationId, () => {});
   expect(saved.input.item).toBe(original.input.item); expect(saved.evidence).toEqual(original.evidence);
+  if (!saved.host.continuation) throw new Error('Original grant was not durably retained');
+  expect(pairing.readNativeContinuation(saved.host.continuation)).toEqual(authority);
   body.item = 'changed during persistence'; source.assertCurrent = () => { throw new Error('replacement callback'); };
+  source.issueContinuation = () => { throw new Error('replacement issuer'); };
+  source.revokeContinuation = () => { throw new Error('replacement revoker'); };
   wrapper.retain = async () => { throw new Error('replacement retain'); }; wrapper.remove = async () => { throw new Error('replacement remove'); };
   releaseStorage.release(); await pending; await entered.wait;
   expect(acknowledgements).toBe(1); expect(executions).toBe(1); expect(sourceChecks).toBeGreaterThan(0);
   releaseExecutor.release(); await operations.close();
   expect(removals).toBe(1);
+  expect(pairing.readNativeContinuation(saved.host.continuation)).toBeNull();
   expect(existsSync(join(path, 'requests', `${Buffer.from(original.purchaseId).toString('base64url')}.json`))).toBe(false);
+});
+
+test('closing during preparation owns delayed grant retirement before dropping protected facts or the execution lease', async () => {
+  const path = directory(), store = new DurablePaymentOperations(join(path, 'operations')), requests = new ProtectedPaymentRequests(join(path, 'requests'));
+  const fixture = protectedPaymentRequest('pending-private-grant'), pairing = new PairingTokenManager(join(path, 'pairing.json'));
+  const paired = pairing.mint({ name: 'Synthetic delayed-revocation owner' }), native = pairing.authenticateNative(paired.token);
+  if (!native) throw new Error('Missing original pairing');
+  const authority = { ...native, scopes: ['write:payments'] };
+  const retained = barrier(), releaseStore = barrier(), retiring = barrier(), releaseRevocation = barrier();
+  cleanup.push(releaseStore.release, releaseRevocation.release, configureDecisionModelPolicy(() => 'Default - On'));
+  let executions = 0;
+  const operations = new CheckoutOperations(store, new MemoryCheckoutJournal(), new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }), async (_owned, id) => { executions++; return refusal(id); }, Date.now, {
+    async retain(value, current) { await requests.retain(value, current); retained.release(); await releaseStore.wait; },
+    read: requests.read.bind(requests), remove: requests.remove.bind(requests),
+  });
+  cleanup.push(async () => { releaseStore.release(); releaseRevocation.release(); await operations.close(); }); await operations.recover();
+  const pending = operations.admit(fixture.purchaseId, fixture.input, {
+    principalId: native.principalId, assertCurrent() {}, taintEvidence: fixture.evidence, recoveryFacts: { ...fixture.host, authority },
+    issueContinuation(operationId, current) { const binding = paymentContinuationBinding(operationId);
+      return pairing.issueNativeContinuation(paired.token, authority, binding, current, binding); },
+    async revokeContinuation(grant) { retiring.release(); await releaseRevocation.wait; pairing.revokeNativeContinuation(grant); },
+  }, () => {}, () => {}).then(() => null, error => error as unknown);
+  await retained.wait;
+  const admitted = store.get(fixture.purchaseId); if (!admitted) throw new Error('Missing owned operation');
+  const saved = await new ProtectedPaymentRequests(join(path, 'requests')).read(fixture.purchaseId, admitted.operationId, () => {});
+  if (!saved.host.continuation) throw new Error('Missing actual issued grant');
+  let drained = false; const closing = operations.close().then(() => { drained = true; });
+  releaseStore.release(); await retiring.wait;
+  expect(drained).toBe(false); expect(executions).toBe(0);
+  expect(new DurablePaymentOperations(join(path, 'operations')).recover(fixture.purchaseId)).toBeNull();
+  expect(pairing.readNativeContinuation(saved.host.continuation)).toEqual(authority);
+  expect(existsSync(join(path, 'requests', `${Buffer.from(fixture.purchaseId).toString('base64url')}.json`))).toBe(true);
+  releaseRevocation.release(); expect(await pending).not.toBeNull(); await closing;
+  expect(pairing.readNativeContinuation(saved.host.continuation)).toBeNull();
+  expect(existsSync(join(path, 'requests', `${Buffer.from(fixture.purchaseId).toString('base64url')}.json`))).toBe(false);
 });
 
 test.each(['cancel', 'close', 'request-abort'] as const)('%s during durable preparation drains storage and never launches the checkout', async stop => {

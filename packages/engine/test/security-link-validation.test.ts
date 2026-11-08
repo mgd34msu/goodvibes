@@ -11,6 +11,9 @@
  */
 
 import { describe, expect, test } from 'bun:test';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { decisionModelPolicyState } from '@goodvibes-jev/engine/errors';
+import { withDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
 import { useSecurityReadings, withSecurityReadings } from './helpers/security-readings.ts';
 import {
   MAX_REDIRECT_HOPS,
@@ -103,11 +106,19 @@ describe('refusals: each defeats a check somebody would otherwise have written',
     }
   });
 
-  test('a shortener is refused by name, because the address cannot say where it goes', async () => {
+  test('an off-domain shortener refuses locally without needing its semantic classification', async () => {
     const result = await validateLinkTarget('https://bit.ly/3xYz', TARGET);
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error('unreachable');
+    expect(result.reason).toBe('domain-mismatch');
+    expect(readings.requests).toHaveLength(0);
+  });
+
+  test('matching an authorized shortening domain still refuses as a shortener', async () => {
+    const result = await validateLinkTarget('https://bit.ly/3xYz', 'bit.ly');
+    if (result.ok) throw new Error('The matching shortener must still refuse');
     expect(result.reason).toBe('known-redirector');
+    expect(readings.requests).toHaveLength(1);
   });
 
   test('a non-443 port is refused', async () => {
@@ -210,6 +221,10 @@ describe('what the code does with the link-host reading', () => {
     await validateLinkTarget('http://accounts.google.com/verify', TARGET);
     await validateLinkTarget('https://accounts.google.com@evil.example/verify', TARGET);
     await validateLinkTarget('https://192.0.2.10/verify', TARGET);
+    await validateLinkTarget('https://google.com.evil.example/verify', TARGET);
+    await validateLinkTarget('https://google-verify.example/verify', TARGET);
+    await validateLinkTarget('https://bit.ly/verify', TARGET);
+    await validateLinkTarget('https://bob.github.io/verify', 'alice.github.io');
     expect(readings.requests).toHaveLength(0);
   });
 
@@ -228,8 +243,51 @@ describe('what the code does with the link-host reading', () => {
   });
 
   test('a shortener the old list never named is refused by name when the reading says so', async () => {
-    const result = await withSecurityReadings({ shortener: (state) => state.registrableDomain === 't.ly' }, () => validateLinkTarget('https://t.ly/abc', TARGET));
+    const result = await withSecurityReadings({ shortener: (state) => state.registrableDomain === 't.ly' }, () => validateLinkTarget('https://t.ly/abc', 't.ly'));
     if (result.ok) throw new Error('unreachable');
     expect(result.reason).toBe('known-redirector');
+  });
+
+  test('an exact authorized host does not bypass a semantic lookalike finding', async () => {
+    const result = await withSecurityReadings({ lookalike: () => true }, () => validateLinkTarget('https://shop.example/pay', 'shop.example'));
+    expect(result).toMatchObject({ ok: false, reason: 'lookalike-host' });
+  });
+
+  test('a deterministic mismatch does not consult an unavailable model or downgrade Preferred', async () => {
+    let requests = 0;
+    await withDecisionModelPolicy(() => 'Preferred', async () => {
+      await withSecurityReadings({ lookalike: () => { requests++; throw new JudgmentError('unavailable', 'Synthetic unavailable endpoint'); } }, async () => {
+        expect(await validateLinkTarget('https://evil.example/verify', TARGET)).toMatchObject({ ok: false, reason: 'domain-mismatch' });
+        expect(requests).toBe(0);
+        expect(decisionModelPolicyState()).toMatchObject({ operation: 'decision', reason: null });
+        expect(await validateLinkTarget('https://accounts.google.com/verify', TARGET)).toMatchObject({ ok: true, provenance: 'classic' });
+        expect(requests).toBe(1);
+        expect(decisionModelPolicyState()).toMatchObject({ operation: 'classic', reason: 'unavailable' });
+      });
+    });
+  });
+});
+
+describe('Classic link guarantees', () => {
+  test('matching IDNs and subdomains carry Classic provenance without claiming model assurance', async () => {
+    await withDecisionModelPolicy(() => 'Classic - Off', async () => {
+      expect(await validateLinkTarget('https://xn--wgv71a119e.jp/help', 'xn--wgv71a119e.jp')).toMatchObject({ ok: true, provenance: 'classic' });
+      expect(await validateLinkTarget('https://аccounts.google.com/verify', TARGET)).toMatchObject({ ok: true, provenance: 'classic' });
+      expect(await validateLinkTarget('https://bit.ly/abc', 'bit.ly')).toMatchObject({ ok: true, provenance: 'classic' });
+      expect(await validateLinkTarget('https://bit.ly/abc', TARGET)).toMatchObject({ ok: false, reason: 'domain-mismatch' });
+      expect(await validateLinkTarget('https://bob.github.io/verify', 'alice.github.io')).toMatchObject({ ok: false, reason: 'domain-mismatch' });
+    });
+    expect(readings.requests).toHaveLength(0);
+  });
+
+  test('Classic redirect following checks every target and never probes a mismatched target', async () => {
+    const probes: string[] = [];
+    const result = await withDecisionModelPolicy(() => 'Classic - Off', () => followValidatedRedirects(
+      'https://accounts.google.com/verify', TARGET,
+      async url => { probes.push(url); return { status: 302, location: 'https://evil.example/steal' }; },
+    ));
+    expect(result).toMatchObject({ ok: false, finalUrl: null, refusal: { reason: 'redirect-left-domain' } });
+    expect(probes).toEqual(['https://accounts.google.com/verify']);
+    expect(readings.requests).toHaveLength(0);
   });
 });

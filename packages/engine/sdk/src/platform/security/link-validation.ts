@@ -28,12 +28,14 @@
  *  - **redirects**. A link that lands on the right host and then 302s away is
  *    the same attack one hop later, so EVERY hop is validated by these same
  *    rules and any hop leaving the authorized domain refuses the chain.
- *  - **shorteners**. By construction their host is not the service, so they can
- *    never satisfy an exact registrable-domain match. Named as a refusal reason
- *    rather than left to fail incidentally, because "why did this fail" matters
- *    when a person has to finish the job by hand. Whether a domain is a
- *    shortener is read by Jev (`shortener`, same request) in place of a fixed
- *    list of 21 shortener domains.
+ *  - **shorteners**. A different registrable domain refuses locally. A matching
+ *    domain can still be a shortening service, so decision mode reads that
+ *    meaning rather than treating domain equality as a non-shortener proof.
+ *    A matching domain's shortener refusal names that reason for the person
+ *    finishing the job by hand, without a fixed list of services.
+ *
+ * Classic applies the deterministic rules and marks accepted results as Classic.
+ * It does not claim semantic homograph/shortener assurance or ban all IDNs.
  *
  * Refusal is loud and carries both domains, because a refused verification link
  * is often something the owner must complete themselves.
@@ -105,8 +107,9 @@ function refuse(
  *
  * `authorizedDomain` is the domain the agent is actually transacting with,
  * the service it signed up at, or the service it is logging in to. Comparison
- * is on the registrable domain of both, so a subdomain of the authorized
- * domain passes and a lookalike does not.
+ * is on the registrable domain of both. A mismatch refuses before any model
+ * request; a matching domain still needs the semantic checks in decision mode.
+ * Classic accepts the deterministic match with explicit Classic provenance.
  */
 export async function validateLinkTarget(rawUrl: string, authorizedDomain: string): Promise<LinkValidation> {
   const expected = registrableDomain(normalizeHost(authorizedDomain));
@@ -165,36 +168,6 @@ export async function validateLinkTarget(rawUrl: string, authorizedDomain: strin
     return refuse('malformed-url', `Refused: "${host}" has no registrable domain to check.`, expected, null);
   }
 
-  // One request, two questions about the host's meaning; the domain
-  // comparison below stays code. Anything short of a confident no refuses.
-  return decisionOrClassic<LinkValidation>(async () => {
-  const run = await linkHost.run(judgmentPort(LINK_HOST_SITE), linkHostView(host, actual, expected), { site: LINK_HOST_SITE });
-  const refusesOn = (reading: (typeof run.readings)['lookalike']): boolean =>
-    !(reading.verdict === 'no' && reading.outcome === 'act');
-
-  if (refusesOn(run.readings.lookalike)) {
-    run.recordAction('refused as lookalike');
-    return refuse(
-      'lookalike-host',
-      `Refused: the link's host ("${renderedHost(host)}") uses characters chosen to look like a different name, which is how a `
-      + 'lookalike domain is built to render identically to a real one.',
-      expected,
-      null,
-    );
-  }
-
-  if (refusesOn(run.readings.shortener)) {
-    run.recordAction('refused as shortener');
-    return refuse(
-      'known-redirector',
-      `Refused: "${actual}" is a link shortener, so the address does not say where it goes. `
-      + `A link for "${expected}" must be on "${expected}".`,
-      expected,
-      actual,
-    );
-  }
-  run.recordAction(actual === expected ? 'accepted' : 'refused as domain mismatch');
-
   if (actual !== expected) {
     return refuse(
       'domain-mismatch',
@@ -205,9 +178,38 @@ export async function validateLinkTarget(rawUrl: string, authorizedDomain: strin
     );
   }
 
-  return { ok: true, url: parsed.toString(), host, registrableDomain: actual };
-  }, () => actual === expected ? { ok: true, url: parsed.toString(), host, registrableDomain: actual, provenance: 'classic' }
-    : refuse('domain-mismatch', `Refused: the link goes to "${actual}" but this action is authorized for "${expected}".`, expected, actual));
+  const accepted: LinkAccepted = { ok: true, url: parsed.toString(), host, registrableDomain: actual };
+  // Even an exact host match may be an owner/discovery-selected shortener or
+  // lookalike. Domain equality does not settle those separate semantic checks.
+  return decisionOrClassic<LinkValidation>(async () => {
+    const run = await linkHost.run(judgmentPort(LINK_HOST_SITE), linkHostView(host, actual, expected), { site: LINK_HOST_SITE });
+    const refusesOn = (reading: (typeof run.readings)['lookalike']): boolean =>
+      !(reading.verdict === 'no' && reading.outcome === 'act');
+
+    if (refusesOn(run.readings.lookalike)) {
+      run.recordAction('refused as lookalike');
+      return refuse(
+        'lookalike-host',
+        `Refused: the link's host ("${renderedHost(host)}") uses characters chosen to look like a different name, which is how a `
+        + 'lookalike domain is built to render identically to a real one.',
+        expected,
+        null,
+      );
+    }
+
+    if (refusesOn(run.readings.shortener)) {
+      run.recordAction('refused as shortener');
+      return refuse(
+        'known-redirector',
+        `Refused: "${actual}" is a link shortener, so the address does not say where it goes. `
+        + `Matching the authorized domain "${expected}" does not establish the final destination.`,
+        expected,
+        actual,
+      );
+    }
+    run.recordAction('accepted');
+    return accepted;
+  }, () => ({ ...accepted, provenance: 'classic' }));
 }
 
 /** A single HEAD/GET that reports only what redirect following needs. */

@@ -1141,6 +1141,14 @@ Any checkout URL that arrived from untrusted content passes
 (`public-suffix.ts`). Redirect chains go through `followValidatedRedirects`, so a
 link that lands correctly and then 302s away refuses the chain.
 
+A registrable-domain mismatch refuses locally before any decision-model call.
+Matching the domain does not establish that it is neither a lookalike nor a
+shortening service, especially when the merchant was discovered in page content;
+decision mode still checks those meanings. Classic link validation provides the
+deterministic URL/domain/redirect checks with Classic provenance, without semantic
+lookalike or shortener assurance. Merchant and checkout interpretation separately
+require decision models, as described in the [decision-model policy](../../../docs/decision-model-policy.md).
+
 **What `authorizedDomain` is depends on who chose the merchant**, and the two
 cases close the loop differently:
 

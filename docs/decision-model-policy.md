@@ -34,6 +34,14 @@ explicit YOLO keeps its meaning. Authentication, workspace boundaries, secret
 handling, spending limits, cancellation and duplicate-execution protection stay
 in force. Results identify Classic operation rather than claiming model verification.
 
+Link validation in every policy requires HTTPS, no embedded user credentials,
+a named host on the standard HTTPS port, and a matching authorized registrable
+domain. Redirect following applies these checks at every hop. Domain mismatches
+refuse locally without a decision-model request. Decision mode also checks
+matching hosts for lookalikes and shortening services. Classic marks accepted
+links as Classic and does not provide those semantic checks; internationalized
+domain names are not refused solely because they use punycode.
+
 Preferred preserves conversation history and completed work without replaying
 actions. A refusal, malformed response, privacy rejection, cancellation or stale
 authority does not trigger fallback. An action already refused stays refused.

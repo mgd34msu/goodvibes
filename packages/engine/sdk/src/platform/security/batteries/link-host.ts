@@ -2,7 +2,7 @@
  * `engine.security.link-host`: two questions about the host of a link the
  * runtime is about to open, asked in one request after the code checks pass
  * (https only, no userinfo, no IP literal, standard port, a registrable
- * domain). Read by Jev in place of:
+ * domain matching the authorized registrable domain). Read by Jev in place of:
  *
  * - `lookalike`: the mixed-script rule in link-validation.ts, which refused a
  *   host label containing characters of more than one Unicode script as a
@@ -11,8 +11,10 @@
  * - `shortener`: the fixed list of 21 link-shortener domains (bit.ly,
  *   tinyurl.com, t.co, ...), which could never name every shortener.
  *
- * Code composes them with the exact registrable-domain comparison, which
- * stays code (it compares two computed names for equality).
+ * A domain mismatch already refuses in code without asking these questions.
+ * Equality alone does not establish that an authorized/discovered domain is
+ * neither a lookalike nor a shortening service, so matching hosts still use
+ * both questions in decision mode.
  *
  * Band: high stakes. A wrong no opens a lookalike or an opaque redirector on
  * the owner's behalf; a wrong yes refuses one link, which the owner can open

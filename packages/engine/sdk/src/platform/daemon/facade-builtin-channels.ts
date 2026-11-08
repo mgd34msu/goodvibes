@@ -61,6 +61,8 @@ export function createBuiltinChannelRuntime(
   input: BuiltinChannelRuntimeCompositionInput,
 ): BuiltinChannelRuntime {
   const { runtime, options, providerRuntime, surfaceActionHelper, surfaceDeliveryHelper } = input;
+  const dataOwner = runtime.runtimeServices.nativeDataWriter;
+  const declareData = dataOwner?.declare.bind(dataOwner);
   const inboundMail = composeInboundMail({
     configManager: runtime.configManager,
     secretsManager: runtime.runtimeServices.secretsManager,
@@ -77,6 +79,7 @@ export function createBuiltinChannelRuntime(
     }),
   });
   const builtinChannels = new BuiltinChannelRuntime({
+    ...(declareData ? { beforeTelegramCursorWrite: () => declareData('telegram-account-cursors-v2') } : {}),
     telegramSourceAccounts: input.telegramSourceAccounts,
     ...(input.ingressAlarm ? { ingressAlarm: input.ingressAlarm } : {}),
     configManager: runtime.configManager,

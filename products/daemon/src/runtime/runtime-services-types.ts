@@ -119,6 +119,7 @@ export interface RuntimeServicesOptions {
 }
 
 export interface RuntimeServices {
+  readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly nativeMutationHost?: import('@goodvibes-jev/engine/sdk/platform/control-plane').NativeMutationHost | undefined;
   /** Absent when the host did not supply the pending product boot composition. */
   readonly bootTasks?: DaemonBootController | undefined;

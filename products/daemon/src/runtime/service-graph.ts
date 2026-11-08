@@ -833,6 +833,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       secretsManager,
       stepUpService,
       pairingTokens,
+      nativeDataWriter: options.nativeDataWriter,
       subscriptionManager,
       localUserAuthManager,
       profileManager,

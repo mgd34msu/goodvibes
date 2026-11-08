@@ -187,6 +187,8 @@ export interface RuntimeServicesOptions {
 }
 
 export interface RuntimeServices {
+  /** Trusted installed-data publisher; absent for non-native embedders. */
+  readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   /** The actual recorded autonomous host, borrowed by authenticated native HTTP writes. */
   readonly nativeMutationHost?: import('../permissions/external-request.js').ExternalPermissionHost | undefined;
   readonly workingDirectory: string;

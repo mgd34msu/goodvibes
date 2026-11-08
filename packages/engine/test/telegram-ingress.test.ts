@@ -593,7 +593,7 @@ describe('telegram ingress: errors are classified, not blindly retried', () => {
       await h.supervisor.start();
       await waitFor(() => h.spawned.length > 0, 'the following update being processed');
       await waitFor(() => {
-        try { return JSON.parse(readFileSync(h.offsetPath, 'utf-8')).offset === 303; } catch { return false; }
+        try { const cursor = new TelegramOffsetStore(h.offsetPath, '123456').load(); return cursor.mode === 'resume' && cursor.offset === 303; } catch { return false; }
       }, 'the cursor advancing past both updates');
     } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
@@ -609,7 +609,7 @@ describe('telegram offset store: the cursor survives restarts', () => {
       await first.supervisor.start();
       await waitFor(() => first.spawned.length > 0, 'the first batch');
       await waitFor(() => {
-        try { return JSON.parse(readFileSync(first.offsetPath, 'utf-8')).offset === 501; } catch { return false; }
+        try { const cursor = new TelegramOffsetStore(first.offsetPath, '123456').load(); return cursor.mode === 'resume' && cursor.offset === 501; } catch { return false; }
       }, 'the cursor being written');
     } finally { await first.supervisor.stop(); }
 
@@ -639,51 +639,74 @@ describe('telegram offset store: the cursor survives restarts', () => {
     } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
 
-  test('a torn cursor is swept and the poller skips ahead rather than replaying', async () => {
-    const h = makeHarness();
-    writeFileSync(h.offsetPath, '{"version":1,"offset":'); // truncated mid-write
-    h.telegram.queue('getUpdates', () => ok([textUpdate(900, 'newest message')]));
+  test('a torn cursor remains intact and blocks polling instead of confirming away missed replies', async () => {
+    const h = makeHarness(), bytes = '{"version":1,"offset":';
+    writeFileSync(h.offsetPath, bytes);
+    h.telegram.queue('getUpdates', () => ok([textUpdate(900, 'owner objection must remain queued')]));
     try {
-      await h.supervisor.start();
-      await waitFor(() => h.telegram.countOf('getUpdates') > 0, 'the skip-ahead probe');
-      const probe = h.telegram.calls.find((call) => call.method === 'getUpdates');
-      // A negative offset asks for the tail of the queue; the backlog is
-      // confirmed away instead of being re-dispatched as duplicate work.
-      expect(probe?.body.offset).toBe(-1);
-      expect(probe?.body.limit).toBe(1);
-      await waitFor(() => {
-        try { return JSON.parse(readFileSync(h.offsetPath, 'utf-8')).offset === 901; } catch { return false; }
-      }, 'the cursor being rebuilt');
+      const status = await h.supervisor.start();
+      expect(status.mode).toBe('inactive'); expect(status.running).toBe(false);
+      expect(status.reason).toContain('cursor');
+      expect(h.telegram.countOf('getUpdates')).toBe(0);
+      expect(readFileSync(h.offsetPath, 'utf-8')).toBe(bytes); expect(h.spawned).toEqual([]);
     } finally { await h.supervisor.stop(); h.cleanup(); }
   }, TEST_BUDGET_MS);
 
-  test('the store validates by content, not by the file merely existing', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'gv-tg-store-'));
-    const path = join(dir, 'offset.json');
+  test('a cursor write failure stops before a later poll can acknowledge the processed batch', async () => {
+    const h = makeHarness();
+    h.telegram.queue('getUpdates', () => {
+      writeFileSync(h.offsetPath, 'damaged original cursor');
+      return ok([textUpdate(900, 'one processed message')]);
+    });
     try {
-      const store = new TelegramOffsetStore(path);
+      await h.supervisor.start();
+      await waitFor(() => h.supervisor.status.mode === 'inactive', 'cursor failure stops confirmation');
+      expect(h.telegram.countOf('getUpdates')).toBe(1);
+      expect(h.telegram.calls.filter(call => call.method === 'getUpdates').every(call => call.body.offset === undefined)).toBe(true);
+      expect(readFileSync(h.offsetPath, 'utf-8')).toBe('damaged original cursor');
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, TEST_BUDGET_MS);
+
+  test('switching bots starts the other queue without overwriting the original bot cursor', async () => {
+    const h = makeHarness();
+    h.telegram.queue('getUpdates', () => ok([textUpdate(500, 'first bot')]));
+    try {
+      await h.supervisor.start();
+      await waitFor(() => new TelegramOffsetStore(h.offsetPath, '123456').load().mode === 'resume', 'first bot cursor');
+      await h.supervisor.stop();
+      h.config['surfaces.telegram.botToken'] = '654321:other-synthetic-token';
+      const before = h.telegram.calls.length;
+      h.telegram.queue('getUpdates', () => ok([textUpdate(4, 'second bot')]));
+      await h.supervisor.start();
+      await waitFor(() => new TelegramOffsetStore(h.offsetPath, '654321').load().mode === 'resume', 'second bot cursor');
+      expect(h.telegram.calls.slice(before).find(call => call.method === 'getUpdates')?.body.offset).toBeUndefined();
+      await h.supervisor.stop();
+      h.config['surfaces.telegram.botToken'] = '123456:test-token';
+      const returning = h.telegram.calls.length;
+      await h.supervisor.start();
+      await waitFor(() => h.telegram.calls.slice(returning).some(call => call.method === 'getUpdates'), 'original bot restart');
+      expect(h.telegram.calls.slice(returning).find(call => call.method === 'getUpdates')?.body.offset).toBe(501);
+      expect(new TelegramOffsetStore(h.offsetPath, '654321').load()).toEqual({ mode: 'resume', offset: 5 });
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, TEST_BUDGET_MS);
+
+  test('the store validates content, preserves unbound state, and never silently resets evidence', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'gv-tg-store-')), path = join(dir, 'offset.json');
+    try {
+      const store = new TelegramOffsetStore(path, '123456');
       expect(store.load()).toEqual({ mode: 'fresh' });
-
-      store.save(42);
-      expect(store.load()).toEqual({ mode: 'resume', offset: 42 });
-
-      // Right shape, impossible value.
-      writeFileSync(path, JSON.stringify({ version: 1, offset: -5 }));
-      expect(store.load().mode).toBe('skip-ahead');
-      // An unusable cursor is deleted, so it cannot fail every boot forever.
-      expect(store.load()).toEqual({ mode: 'fresh' });
-
-      writeFileSync(path, JSON.stringify({ version: 99, offset: 7 }));
-      expect(store.load().mode).toBe('skip-ahead');
-
-      writeFileSync(path, 'x'.repeat(9_000));
-      expect(store.load().mode).toBe('skip-ahead');
-
-      store.save(Number.NaN);
-      expect(store.load()).toEqual({ mode: 'fresh' });
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+      store.save(42); expect(store.load()).toEqual({ mode: 'resume', offset: 42 });
+      const bytes = JSON.stringify({ version: 1, offset: 42, updatedAt: new Date().toISOString() });
+      writeFileSync(path, bytes);
+      const unbound = new TelegramOffsetStore(path, '123456');
+      expect(unbound.load()).toMatchObject({ mode: 'blocked', kind: 'unbound' });
+      expect(() => unbound.save(99)).toThrow('no bot binding');
+      expect(readFileSync(path, 'utf8')).toBe(bytes);
+      writeFileSync(path, 'x'.repeat(20_000));
+      expect(new TelegramOffsetStore(path, '123456').load().mode).toBe('blocked');
+      expect(readFileSync(path, 'utf8')).toHaveLength(20_000);
+      expect(() => store.save(Number.NaN)).toThrow('invalid');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   }, TEST_BUDGET_MS);
 });
 

@@ -10,6 +10,7 @@ import { DurableBudgetLedger, PaymentBudgetUnavailableError } from '../sdk/src/p
 import { BudgetLedger, type BudgetLimits } from '../sdk/src/platform/payments/budget.js';
 import { tryAcquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
 import { nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.js';
+import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.js';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -28,6 +29,30 @@ function reserve(ledger: BudgetLedger, id: string, retained = true) {
     limits, nowMs: clock, timezone: 'UTC', ...(retained ? { retainUntilSettled: true as const } : {}) });
 }
 const requirement = () => JSON.stringify({ schema: 1, minimumReader: '3.1.2', formats: ['payment-retained-holds-v2'] });
+
+test('actual account cursor publication declares its reader format before writing and fences old same-version readers', () => {
+  const f = fixture(), cursor = join(f.prefix, 'telegram-offset.json');
+  let declared = false;
+  const store = new TelegramOffsetStore(cursor, '111', () => {
+    expect(existsSync(cursor)).toBe(false);
+    f.owner.declare('telegram-account-cursors-v2'); declared = true;
+    expect(() => assertNativeReaderCompatible(f.execPath, '3.1.1', realUpdateFileIo)).toThrow(NativeDataCompatibilityError);
+  });
+  expect(store.load()).toEqual({ mode: 'fresh' }); expect(existsSync(f.file)).toBe(false);
+  expect(store.save(8)).toBe(8); expect(declared).toBe(true);
+  expect(JSON.parse(readFileSync(f.file, 'utf8')).formats).toEqual(['telegram-account-cursors-v2']);
+  expect(new TelegramOffsetStore(cursor, '111').load()).toEqual({ mode: 'resume', offset: 8 });
+  expect(() => assertNativeReaderCompatible(f.execPath, '3.1.2', realUpdateFileIo,
+    { schema: 1, version: '3.1.2', formats: ['payment-retained-holds-v2'] })).toThrow(NativeDataCompatibilityError);
+  expect(() => assertNativeReaderCompatible(f.execPath, '3.1.2', realUpdateFileIo, nativeReaderCapabilities('3.1.2'))).not.toThrow();
+});
+
+test('an unavailable installed-data publisher cannot create an incompatible cursor', () => {
+  const f = fixture(), cursor = join(f.prefix, 'telegram-offset.json');
+  const store = new TelegramOffsetStore(cursor, '111', () => { throw new Error('Installation owner retired'); });
+  expect(() => store.save(8)).toThrow('could not be confirmed');
+  expect(existsSync(cursor)).toBe(false); expect(existsSync(f.file)).toBe(false);
+});
 
 test('starting a new owner and ordinary accounting preserve compatible early rollback', () => {
   let calls = 0; const f = fixture(() => { calls++; });

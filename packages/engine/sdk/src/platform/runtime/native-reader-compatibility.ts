@@ -14,8 +14,10 @@ import type { UpdateFileIo } from './self-update.js';
 export const NATIVE_READER_REQUIREMENT_FILE = '.goodvibes-reader-requirements.json';
 /** Installation metadata support, separate from application-data write floors. */
 export const NATIVE_PREVIOUS_READER_RECEIPT_FORMAT = 'daemon-previous-reader-receipt-v1';
-export type NativeDataFormat = 'payment-retained-holds-v2';
-const requirements: Readonly<Record<NativeDataFormat, string>> = { 'payment-retained-holds-v2': '3.1.2' };
+export type NativeDataFormat = 'payment-retained-holds-v2' | 'telegram-account-cursors-v2';
+const requirements: Readonly<Record<NativeDataFormat, string>> = {
+  'payment-retained-holds-v2': '3.1.2', 'telegram-account-cursors-v2': '3.1.2',
+};
 export interface NativeReaderCapabilities {
   readonly schema: 1;
   readonly version: string;

@@ -35,7 +35,7 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { IngressProcessingHealth, type ChannelIngressAlarm } from '../ingress-alarm.js';
 import { TelegramApiError, TelegramBotApi, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
-import { TelegramOffsetStore } from './offset-store.js';
+import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramOffsetStart } from './offset-store.js';
 import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './conflict-policy.js';
 import type { TelegramSourceAccountLease, TelegramSourceAccountOwner } from './source-account.js';
 
@@ -75,6 +75,8 @@ export interface TelegramIngressDeps {
   readonly buildSurfaceAdapterContext: () => SurfaceAdapterContext;
   /** Where the getUpdates cursor lives; surface-scoped by the composition root. */
   readonly offsetFilePath: string;
+  /** Native host publishes its reader floor before a new cursor format. */
+  readonly beforeCursorWrite?: (() => void) | undefined;
   /** Lazy provider identity proof for selected intake and pending payment replies. */
   readonly telegramSourceAccounts?: TelegramSourceAccountOwner | undefined;
   /** Test seam: swap in a client with an injected fetch. */
@@ -154,9 +156,11 @@ export class TelegramIngressSupervisor {
 
   /** Whether this node can PROCESS what it receives, see the class header. */
   private readonly processing: IngressProcessingHealth;
+  private readonly beforeCursorWrite: (() => void) | undefined;
 
   constructor(private readonly deps: TelegramIngressDeps) {
     this.processing = new IngressProcessingHealth('telegram', deps.ingressAlarm);
+    this.beforeCursorWrite = deps.beforeCursorWrite?.bind(deps);
   }
 
   /**
@@ -392,8 +396,21 @@ export class TelegramIngressSupervisor {
         return live() && currentToken === token;
       },
     });
-    const store = new TelegramOffsetStore(this.deps.offsetFilePath);
-    this.loop = this.runPollLoop(api, store, lifetime.signal, sourceAccount)
+    // Queue partition only, not proof of sender/payment authority. Actual
+    // replies still acquire the original verified native account capability.
+    let store: TelegramOffsetStore;
+    try { store = new TelegramOffsetStore(this.deps.offsetFilePath, api.botId, this.beforeCursorWrite); }
+    catch {
+      lifetime.abort();
+      return this.settle('inactive', 'The Telegram bot identity cannot select a saved cursor. Check its bot token before restarting ingress.');
+    }
+    const start = store.load();
+    if (start.mode === 'blocked') {
+      lifetime.abort();
+      logger.error('Telegram polling stopped because its saved cursor needs inspection', { kind: start.kind });
+      return this.settle('inactive', start.reason);
+    }
+    this.loop = this.runPollLoop(api, store, lifetime.signal, start, sourceAccount)
       .finally(() => { lifetime.abort(); });
     return this.settle('polling',
       `long-polling Telegram getUpdates for bot ${api.botId} (no public URL required)`, true);
@@ -405,16 +422,12 @@ export class TelegramIngressSupervisor {
     api: TelegramBotApi,
     store: TelegramOffsetStore,
     lifetime: AbortSignal,
+    start: Exclude<TelegramOffsetStart, { readonly mode: 'blocked' }>,
     sourceAccount?: TelegramSourceAccountLease,
   ): Promise<void> {
-    const start = store.load();
     let offset: number | undefined = start.mode === 'resume' ? start.offset : undefined;
     let backoffMs = BACKOFF_MIN_MS;
     let conflictRecoveries = 0;
-
-    if (start.mode === 'skip-ahead') {
-      offset = await this.skipAhead(api, store, sourceAccount);
-    }
 
     while (!this.stopped && !lifetime.aborted) {
       try {
@@ -442,10 +455,18 @@ export class TelegramIngressSupervisor {
         }
         if (updates.length > 0) {
           offset = await this.dispatchBatch(updates, api, offset, sourceAccount);
-          if (offset !== undefined) store.save(offset);
+          if (offset !== undefined) offset = store.save(offset, () => {
+            lifetime.throwIfAborted();
+            if (this.stopped || this.abort?.signal !== lifetime) throw new Error('Telegram polling owner retired');
+          });
         }
       } catch (error) {
-        if (this.stopped || (error instanceof Error && error.name === 'AbortError')) return;
+        if (this.stopped || lifetime.aborted || (error instanceof Error && error.name === 'AbortError')) return;
+        if (error instanceof TelegramOffsetStoreError) {
+          this.currentStatus = { mode: 'inactive', reason: error.message, running: false };
+          logger.error('Telegram polling stopped before confirming an unpersisted cursor', { kind: error.kind });
+          return;
+        }
 
         const terminal = await this.handlePollError(error, api, () => {
           conflictRecoveries += 1;
@@ -641,33 +662,6 @@ export class TelegramIngressSupervisor {
       });
     }
     this.currentStatus = { mode: 'polling', reason: full, running: true };
-  }
-
-  /**
-   * Recover from a torn cursor by jumping to the newest update. A negative
-   * offset asks Telegram for the tail of the queue; the newest update is still
-   * processed (it is most likely the message the user is waiting on), and
-   * everything older is confirmed away rather than replayed.
-   */
-  private async skipAhead(
-    api: TelegramBotApi,
-    store: TelegramOffsetStore,
-    sourceAccount?: TelegramSourceAccountLease,
-  ): Promise<number | undefined> {
-    try {
-      const latest = await api.getUpdates({ offset: -1, limit: 1, timeoutSeconds: 0 });
-      const next = await this.dispatchBatch(latest, api, undefined, sourceAccount);
-      if (next !== undefined) {
-        store.save(next);
-        logger.warn('Telegram ingress: skipped ahead past an unusable cursor', { offset: next });
-      }
-      return next;
-    } catch (error) {
-      logger.warn('Telegram ingress: skip-ahead failed; starting from the retained backlog', {
-        error: summarizeError(error),
-      });
-      return undefined;
-    }
   }
 
   /**

@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Preserve damaged/unbound Telegram cursors and stop polling rather than
+  discarding history with a negative offset. Retain separate cursors per bot,
+  serialize refreshed writes, and stop before confirming an unpersisted offset.
+  Native writes declare the account-cursor reader format before publication.
+  Explicit migration of old unbound cursors, durable reply history and payment
+  window restart continuation remain unfinished.
+
 - Add the private browser restoration path for the retained exact debugger,
   native target/context and document-loader graph, including the Node-host
   fallback. Reconstruct only selected control identities with a fresh snapshot

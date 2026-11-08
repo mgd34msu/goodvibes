@@ -69,6 +69,7 @@ export interface BuiltinChannelRuntimeDeps {
    * Telegram polling; the supervisor then reports why it cannot start.
    */
   readonly telegramOffsetPath?: string | undefined;
+  readonly beforeTelegramCursorWrite?: (() => void) | undefined;
   /** Lazy verified identity capabilities for original Telegram ingress sessions. */
   readonly telegramSourceAccounts?: TelegramSourceAccountOwner | undefined;
   /**

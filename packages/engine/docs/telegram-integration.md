@@ -306,10 +306,23 @@ Telegram does not even deliver ordinary group messages to the bot.
 Telegram retains undelivered updates for about 24 hours, and polling picks up
 that backlog on the next start. The read cursor is persisted at
 `.goodvibes/goodvibes/channels/telegram-offset.json`, so a restart resumes
-exactly where it stopped rather than replaying or skipping. If that file is ever
-found torn, a crash mid-write, the daemon logs the fact and skips ahead to the
-newest message instead of replaying the backlog, because re-running work that
-already ran is worse than missing a message you can resend.
+from each bot's own saved offset. Switching bots does not reuse or overwrite the
+other bot's cursor. The account ID partitions the queue; it does not authorize
+an incoming message or payment answer.
+
+An unreadable, unsupported or damaged cursor stops polling and stays intact.
+The daemon does not jump to the newest message or discard the backlog. A failed
+cursor save also stops polling before the next request can confirm that offset.
+The channel's status gives the recovery reason. Restore the original state and
+inspect missed messages before restarting ingress; do not delete the cursor to
+hide the failure. Version 1 cursors have no bot binding and require explicit
+migration after their original bot is established; automatic migration is not
+implemented yet. Native installs publish the new reader requirement before
+writing account-bound cursors, so an incompatible binary cannot be restored.
+
+A cursor is not a durable message archive or proof that replies are available
+for an entire outage. Payment-window backfill and restart continuation remain
+unfinished.
 
 **Switching from webhook to polling (or back).**
 Just change `surfaces.telegram.mode` and restart. The daemon reconciles the

@@ -52,6 +52,9 @@ export type { BrowserActionLifetime, BrowserEngineOptions, BrowserExtractField, 
  * refs. A later snapshot can never supply replacement controls to that driver. */
 export interface RestoredCheckoutPage extends RestoredBrowserPage {
   readonly snapshotId: string;
+  /** Selected controls must still belong to the exact restored snapshot.
+   * Separate from page lifetime, which must survive our own successful submit. */
+  assertControlsCurrent(): void;
 }
 
 
@@ -543,7 +546,8 @@ export class BrowserEngine {
       if (this.currentSnapshot(sessionId, pageId) !== snapshot) throw new BrowserControlSnapshotError();
       const original = snapshot;
       let closing: Promise<void> | undefined;
-      return Object.freeze({ sessionId, pageId, snapshotId: original.snapshotId, assertCurrent: page.assertCurrent, release: () => {
+      return Object.freeze({ sessionId, pageId, snapshotId: original.snapshotId, assertCurrent: page.assertCurrent,
+        assertControlsCurrent: () => { page.assertCurrent(); if (this.currentSnapshot(sessionId, pageId) !== original) throw new BrowserControlSnapshotError(); }, release: () => {
         if (closing) return closing;
         if (this.currentSnapshot(sessionId, pageId) === original) this.snapshots.clear(sessionId, pageId);
         closing = page.release(); return closing;

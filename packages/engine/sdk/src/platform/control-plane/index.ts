@@ -216,6 +216,6 @@ export type { NativeInboundDisposition, NativeInboundAcceptance, NativeInboundPr
 export type { DelegatedSessionInputBinding, DelegatedSessionTransferReceipt, DelegatedSessionSubmission } from './session-broker-delegated.js';
 export type { OwnerApprovalGuard, RaisedOwnerApproval, ResolveOwnerApprovalInput, ResolveSharedApprovalInput } from './approval-broker-owner.js';
 
-export { prepareGatewayScopePolicyOwner, completeGatewayScopePolicyBootstrap } from './scope-policy-bootstrap.js';
+export { prepareGatewayScopePolicyOwner, completeGatewayScopePolicyBootstrap, waitForGatewayScopePolicyBootstrap } from './scope-policy-bootstrap.js';
 export { composeOccasions } from './routes/occasions-composition.js';
 export type { OccasionsComposition, OccasionsCompositionDeps } from './routes/occasions-composition.js';

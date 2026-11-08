@@ -14,6 +14,18 @@ const method = (id = 'synthetic.write', scopes = ['write:synthetic']): GatewayMe
   access: 'admin', transport: ['http'], scopes, http: { method: 'POST', path: '/synthetic' },
 });
 const handler = () => ({ ok: true });
+
+test('scope-only membership reads remain owned, immutable and current across registration changes', () => {
+  const catalog = new GatewayMethodCatalog({ includeBuiltins: false }); catalog.register(method(), handler);
+  const owner = catalog.attachScopePolicyOwner(() => {}), original = owner.grantedScopes();
+  expect(original).toContain('write:synthetic'); expect(owner.grantedScopes()).toBe(original);
+  expect(() => (original as string[]).push('write:forged')).toThrow();
+  catalog.register(method('synthetic.second', ['write:second']), handler);
+  expect(owner.grantedScopes()).toContain('write:second'); expect(owner.grantedScopes()).not.toBe(original);
+  catalog.unregister('synthetic.write'); expect(owner.grantedScopes()).not.toContain('write:synthetic');
+  owner.close(); expect(() => owner.grantedScopes()).toThrow('unavailable');
+});
+
 function fixture() {
   const dir = mkdtempSync(join(tmpdir(), 'gv-catalog-owner-')); dirs.push(dir);
   const options = { configDir: dir, surfaceRoot: 'daemon' };

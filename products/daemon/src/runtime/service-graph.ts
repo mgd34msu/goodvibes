@@ -930,6 +930,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     continuationScopeOwner = prepareGatewayScopePolicyOwner(gatewayMethods, () => configManager.invalidateExternalPolicy(), options.createBootOperations !== undefined);
     disposalScope.registry.add('native CI gateway scope owner', retireContinuationScope);
     const handlerOptions = {
+      paymentContinuationOwner: { pairing: pairingTokens, scopes: continuationScopeOwner },
       nativeDataWriter: options.nativeDataWriter,
       gatewayMethods,
       secretsManager,

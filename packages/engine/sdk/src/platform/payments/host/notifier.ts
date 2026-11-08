@@ -37,7 +37,7 @@ function surfaceTarget(surfaceKind: string): ChannelDeliveryTarget {
 }
 
 /** Adapts the daemon's router to the notifier's narrow, opaque-`request` shape. */
-function daemonNoticeRouter(router: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>): PaymentNoticeRouter {
+export function daemonNoticeRouter(router: Pick<ChannelDeliveryRouter, 'deliver'> & Partial<Pick<ChannelDeliveryRouter, 'deliverWithReceipt'>>): PaymentNoticeRouter {
   const deliver = router.deliver.bind(router), deliverWithReceipt = router.deliverWithReceipt?.bind(router);
   const requestFor = (request: never): Parameters<ChannelDeliveryRouter['deliver']>[0] => {
     const merged = request as unknown as Record<string, unknown> & { readonly content: string };
@@ -48,6 +48,8 @@ function daemonNoticeRouter(router: Pick<ChannelDeliveryRouter, 'deliver'> & Par
       jobId: PAYMENTS_NOTICE_JOB_ID,
       runId: `${PAYMENTS_NOTICE_JOB_ID}-${String(Date.now())}`,
       includeLinks: false,
+      binding: merged['binding'] as Parameters<ChannelDeliveryRouter['deliver']>[0]['binding'],
+      allowDuplicate: merged['allowDuplicate'] === true,
       assertCurrent: merged['assertCurrent'] as (() => void) | undefined,
       signal: merged['signal'] as AbortSignal | undefined,
     };

@@ -24,6 +24,7 @@ export function isLivePaymentOperation(state: PaymentOperationState): boolean {
 }
 const REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   'disabled': 'Payments are disabled or this daemon is not the elected payment host.',
+  'recovery-unavailable': 'The original checkout could not be restored. Check its paired owner, payment settings, original browser and reply channel before starting a new checkout.',
   'no-card': 'No usable payment card is configured. Check the card in payment settings.',
   'no-shipping-address': 'The stored address is incomplete, unavailable or changed. Check payment address settings.',
   'not-owner-request': 'The checkout did not have a direct request from its owner.',

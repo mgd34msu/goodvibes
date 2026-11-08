@@ -1130,6 +1130,27 @@ cannot reach the page rather than claiming a cleanup it did not perform.
 
 ### 8.6.1 A window interrupted by downtime is keyed on DELIVERY, not on uptime
 
+The native daemon retains an eligible protected `awaiting-window` operation
+under its existing execution lease before the conservative sweep. It waits for
+host registration, verifies the original issued pairing grant and unchanged
+payment configuration, and attempts to restore the original native browser
+target, document and selected controls. A saved identifier alone cannot authorize
+this work. Pending restoration remains visible and stoppable through purchase
+status and the existing Payments controls.
+
+Current native recovery can reopen uncovered Telegram windows at their actual
+acknowledged bot account, numeric chat and topic. It verifies the new delivery
+before starting the new deadline. It does not substitute configured default
+recipients or treat a stored backfill flag as a history capability. A failed or
+cancelled restoration releases the original pre-submit hold only while the
+original journal and reservation still match; uncertain evidence remains held
+for inspection. Other interrupted records continue through the conservative
+sweep.
+
+**Durable reply history and account receive/downtime coverage are unfinished.**
+The complete backfill and expiry behavior described below remains a requirement;
+live source identity and a delivered-notice receipt do not establish it.
+
 **The rule that follows is `recoverInterruptedWindow()`'s design, verified
 against its own unit tests and applied by boot recovery to every interrupted
 window whose record carries a persisted delivery report. Records without one

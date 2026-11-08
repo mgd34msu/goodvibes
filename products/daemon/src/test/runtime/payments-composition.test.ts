@@ -3,7 +3,12 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { GatewayMethodCatalog, prepareGatewayScopePolicyOwner, completeGatewayScopePolicyBootstrap } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { DurablePaymentOperations } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { readPaymentsServiceConfig } from '../../../../../packages/engine/sdk/src/platform/payments/payments-config.js';
+import { paymentContinuationBinding } from '../../../../../packages/engine/sdk/src/platform/payments/host/continuation-binding.js';
+import { protectedPaymentRequest } from '../../../../../packages/engine/test/helpers/protected-payment-request.js';
+import { protectedPaymentWindow } from '../../../../../packages/engine/test/helpers/protected-payment-window.js';
 import { ATTACHED_PAYMENTS_METHOD_IDS, CardMaterialRedactor, DurableCheckoutJournal, ProtectedPaymentRequests, PaymentReplyInboxClosedError, parseCurrencyCode, ownerSuppliedText, type CheckoutPageDriver, type InFlightCheckout, type PurchaseRecord } from '@goodvibes-jev/engine/sdk/platform/payments';
 import { PairingTokenManager } from '@goodvibes-jev/engine/sdk/platform/pairing';
 import { readPaymentWindowStatus } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
@@ -220,6 +225,63 @@ test('real product boot recovery settles a durable pre-submit hold without a bro
     for (const id of ATTACHED_PAYMENTS_METHOD_IDS) expect(f.catalog.hasHandler(id)).toBe(true);
   } finally { await replacement.close(); }
 });
+
+test.each(['cancel-before-boot', 'original-page-unavailable'] as const)(
+  'native product recovery retains the actual lease and hold before readiness, then cleans up %s', async mode => {
+    const f = fixture(); await f.services.ready;
+    const original = protectedPaymentRequest('native-startup-window'), window = protectedPaymentWindow(original);
+    const configuration = readPaymentsServiceConfig({ get: key => f.values[key] });
+    const held = f.services.budget.reserve({ id: original.purchaseId, itemMinorUnits: 2_000, overageMinorUnits: 0, toleranceMinorUnits: 0,
+      limits: configuration.limits, nowMs: Date.now(), timezone: configuration.timezone, retainUntilSettled: true });
+    expect(held).not.toBeNull(); await f.services.close();
+    const paired = f.pairing.mint({ name: 'Original recovered checkout owner' }), native = f.pairing.authenticateNative(paired.token);
+    if (!native) throw new Error('Missing native pairing');
+    const authority = { ...native, scopes: ['write:payments'] }, binding = paymentContinuationBinding(original.operationId);
+    const continuation = f.pairing.issueNativeContinuation(paired.token, authority, binding, () => {}, binding);
+    const browser = { version: 1 as const, endpoint: 'ws://127.0.0.1:9222/devtools/browser/original', targetId: 'original-target',
+      browserContextId: 'original-context', frames: [{ id: 'original-frame', loaderId: 'original-document', parentId: null }] };
+    const controls = { version: 1 as const, snapshotId: 'original-local-snapshot', url: original.input.checkoutUrl,
+      controls: [original.input.controls.cardFields[0]?.ref, original.input.controls.placeOrderTarget].map((ref, index) => {
+        if (!ref) throw new Error('Missing fixture ref');
+        return { ref, role: index ? 'button' : 'textbox', name: 'Fixture control', tag: index ? 'button' : 'input', selector: index ? '#order' : '#card',
+          depth: 1, submits: !!index, frameChain: [], metadata: { name: 'Fixture control', documentUrl: original.input.checkoutUrl } };
+      }) };
+    const base = join(f.root, 'home', '.goodvibes', 'tui', 'control-plane');
+    const requests = new ProtectedPaymentRequests(join(base, 'payments-requests'));
+    await requests.retain({ ...original, principalId: native.principalId, window,
+      host: { authority, configuration, continuation, browser, browserControls: controls } }, () => {});
+    const operations = new DurablePaymentOperations(join(base, 'payments-operations'));
+    const oldWriter = operations.create({ purchaseId: original.purchaseId, operationId: original.operationId, state: 'running', phase: 'awaiting-window',
+      createdAtMs: 1, updatedAtMs: 2, outcome: null, currency: 'USD', totalMinorUnits: 2_000 }, native.principalId, () => {});
+    oldWriter.release(); await new DurableCheckoutJournal(journalPath(f)).put(window.record);
+    let pageReads = 0;
+    f.browser.set({ cardFieldGuard: new CardMaterialRedactor(), driverFor: () => { throw new Error('Do not create another browser'); },
+      async armSubmitApproval() {}, async capturePageConnection() { return browser; },
+      async restoreCheckoutRecovery(facts, owner) { owner.assertCurrent?.(); pageReads++; expect(facts.connection).toEqual(browser); throw new Error('Original native page disappeared'); } });
+    const scopes = prepareGatewayScopePolicyOwner(f.catalog, () => {}, true);
+    const replacement = createPaymentsServices({ ...f.options, paymentContinuationOwner: { pairing: f.pairing, scopes } });
+    try {
+      // This must resolve before facade/boot exists. The real execution lease
+      // prevents the conservative sweep or a second host from freeing the hold.
+      await replacement.ready;
+      expect(pageReads).toBe(0); expect(replacement.budget.state().reservations.map(row => row.id)).toEqual([original.purchaseId]);
+      expect(operations.recover(original.purchaseId)).toBeNull();
+      const status = await invoke(f.catalog, 'payments.purchase.status', {});
+      expect(readPaymentWindowStatus(status).operations[0]?.state).toBe('running');
+      if (mode === 'original-page-unavailable') {
+        completeGatewayScopePolicyBootstrap(f.catalog); completeGatewayScopePolicyBootstrap(f.catalog, 'boot');
+        await until(() => operations.get(original.purchaseId)?.state === 'refused'); expect(pageReads).toBe(1);
+      }
+      await replacement.close();
+      expect(replacement.budget.state().reservations).toEqual([]);
+      expect(await new DurableCheckoutJournal(journalPath(f)).list()).toEqual([]);
+      expect(f.pairing.readNativeContinuation(continuation)).toBeNull();
+      expect(existsSync(join(base, 'payments-requests', `${Buffer.from(original.purchaseId).toString('base64url')}.json`))).toBe(false);
+      expect(f.deliveries).toEqual([]);
+      const writer = operations.recover(original.purchaseId); if (!writer) throw new Error('Original executor lease did not drain'); writer.release();
+    } finally { await replacement.close(); scopes.close(); }
+  },
+);
 
 test('real product close drains boot recovery delivery and cannot stamp a retired recovery', async () => {
   const f = fixture(); await f.services.ready; await f.services.close();

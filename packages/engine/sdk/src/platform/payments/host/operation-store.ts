@@ -38,6 +38,7 @@ function flushDirectory(path: string): void { const fd = openSync(path, 'r'); tr
  * usable for final accounting after cancellation, until release() drains it. */
 export interface PaymentOperationWriter {
   readonly purchaseId: string;
+  readonly principalId: string | null;
   read(): PaymentOperationView;
   update(operation: PaymentOperationView): void;
   assertCurrent(): void;
@@ -218,7 +219,7 @@ export class DurablePaymentOperations {
         if (file.physical !== observed.physical || !file.bytes.equals(observed.bytes)) throw new Error();
       } catch { failed = true; throw new PaymentOperationStoreError('unavailable'); }
     };
-    return Object.freeze({ purchaseId: id, assertCurrent,
+    return Object.freeze({ purchaseId: id, principalId: initial.principalId, assertCurrent,
       read: () => { assertCurrent(); return row.operation; },
       update: (operation: PaymentOperationView) => {
         assertCurrent(); const next = readPaymentOperation(operation);

@@ -39,6 +39,18 @@ function refusal(purchaseId: string): PaymentBeginResult {
     currency: null, shippingTierUsed: null, steppedDown: false, challengeStep: null };
 }
 
+test('a stopped executor returning a pre-submit refusal still records cancellation', async () => {
+  const path = directory(), store = new DurablePaymentOperations(join(path, 'operations')), entered = barrier(), finish = barrier();
+  cleanup.push(configureDecisionModelPolicy(() => 'Default - On'));
+  const operations = new CheckoutOperations(store, new MemoryCheckoutJournal(), new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }),
+    async (_input, id) => { entered.release(); await finish.wait; return refusal(id); });
+  cleanup.push(async () => { finish.release(); await operations.close(); });
+  await operations.recover();
+  const admitted = await operations.admit('stop-before-refusal', input, { principalId: 'fixture-owner', assertCurrent() {} }, () => {}, () => {});
+  await entered.wait; operations.cancel(admitted.purchaseId, admitted.operationId); finish.release(); await operations.close();
+  expect(store.get(admitted.purchaseId)).toMatchObject({ state: 'cancelled', outcome: 'cancelled' });
+});
+
 test('the real detached owner checkpoints its current flushed quote through the original encrypted-store method', async () => {
   const path = directory(), store = new DurablePaymentOperations(join(path, 'operations')),
     requests = new ProtectedPaymentRequests(join(path, 'requests')), original = protectedPaymentRequest(), journal = new MemoryCheckoutJournal();

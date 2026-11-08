@@ -116,6 +116,18 @@ export class PaymentReplyInbox implements PaymentReplySource {
     this.#sources.bindTelegram(reader, lifetime);
   }
 
+  /** Construction-only recovery preflight. A stored receipt identifies the
+   * required account; the original native source owner supplies the capability.
+   * This neither opens a window nor establishes historical receive coverage. */
+  async retainTelegramReceipt(receipt: ChannelDeliveryReceipt, owner: { readonly signal: AbortSignal; readonly assertCurrent: () => void }): Promise<{ assertCurrent(): void }> {
+    const captured = capturePaymentNoticeReceipt(receipt, 'telegram');
+    owner.signal.throwIfAborted(); owner.assertCurrent();
+    if (!captured) throw new PaymentReplyWindowError('source-unavailable');
+    const source = this.#sources.reserveTelegram(owner.signal);
+    await source.ready; owner.signal.throwIfAborted(); owner.assertCurrent(); source.assertReceiptCurrent(captured);
+    return Object.freeze({ assertCurrent: () => { owner.signal.throwIfAborted(); owner.assertCurrent(); source.assertReceiptCurrent(captured); } });
+  }
+
   waitForAnswer(input: Parameters<PaymentReplySource['waitForAnswer']>[0]): ReturnType<PaymentReplySource['waitForAnswer']> {
     try {
       const deadlineMs = input.deadlineMs;

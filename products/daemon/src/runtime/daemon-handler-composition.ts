@@ -46,6 +46,7 @@ export type DaemonInboxFactory = (
 ) => OwnedHandlerSurface | Promise<OwnedHandlerSurface>;
 
 export interface DaemonHandlerCompositionOptions {
+  readonly paymentContinuationOwner?: import('./payments-composition.js').PaymentsCompositionOptions['paymentContinuationOwner'];
   readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly triagePermissionHost?: DaemonTriagePermissionHost;
   readonly nativeMutationHost?: NativeMutationHost | undefined;
@@ -94,6 +95,7 @@ export async function createDaemonHandlerComposition(
     }, { configManager: options.configManager, secretsManager: options.secretsManager }, options.triagePermissionHost),
     registerDrafts: registerDraftMethods,
     registerPayments: () => createPaymentsServices({
+      paymentContinuationOwner: options.paymentContinuationOwner,
       nativeDataWriter: options.nativeDataWriter,
       gatewayMethods: options.gatewayMethods,
       configManager: options.configManager,

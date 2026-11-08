@@ -215,6 +215,8 @@ export function grantedGatewayScopes(catalog: Pick<GatewayMethodCatalog, 'getAll
 export interface GatewayScopePolicyOwner {
   /** Exact immutable registered scope state. Requires this still-attached owner. */
   current(): Readonly<{ revision: string; scopes: readonly string[] }>;
+  /** Scope membership alone needs no serialized catalog revision or digest. */
+  grantedScopes(): readonly string[];
   close(): void;
 }
 
@@ -237,6 +239,7 @@ export class GatewayMethodCatalog {
   private scopePolicyRetired = false;
   private scopePolicyState: object = {};
   private scopePolicySnapshot: ReturnType<GatewayScopePolicyOwner['current']> | undefined;
+  private scopePolicyScopesSnapshot: readonly string[] | undefined;
 
   /**
    * Called after initial host construction. Startup registration is hydration,
@@ -247,7 +250,15 @@ export class GatewayMethodCatalog {
   attachScopePolicyOwner(beforeMutation: () => void): GatewayScopePolicyOwner {
     if (this.scopePolicyOwner || this.scopePolicyRetired) throw new Error('Gateway scope policy owner is already attached or retired');
     const owner = { beforeMutation }; this.scopePolicyOwner = owner;
+    const grantedScopes = () => {
+      if (this.scopePolicyOwner !== owner || this.scopePolicyChanging) throw new Error('Gateway scope policy owner is unavailable');
+      if (this.scopePolicyScopesSnapshot) return this.scopePolicyScopesSnapshot;
+      const state = this.scopePolicyState, scopes = Object.freeze(grantedGatewayScopes(this, true));
+      if (this.scopePolicyOwner !== owner || this.scopePolicyChanging || this.scopePolicyState !== state) throw new Error('Gateway scopes changed while reading');
+      this.scopePolicyScopesSnapshot = scopes; return scopes;
+    };
     return Object.freeze({
+      grantedScopes,
       current: () => {
         if (this.scopePolicyOwner !== owner || this.scopePolicyChanging) throw new Error('Gateway scope policy owner is unavailable');
         if (this.scopePolicySnapshot) return this.scopePolicySnapshot;
@@ -266,7 +277,7 @@ export class GatewayMethodCatalog {
         // format migration remains open; live guards must not repeatedly sort,
         // serialize and hash the same unchanged catalog on every await.
         const snapshot = Object.freeze({ revision: createHash('sha256').update(JSON.stringify({ methods, events })).digest('hex'),
-          scopes: Object.freeze(grantedGatewayScopes(this, true)) });
+          scopes: grantedScopes() });
         if (this.scopePolicyOwner !== owner || this.scopePolicyChanging || this.scopePolicyState !== state) {
           throw new Error('Gateway scope policy changed while reading its registered state');
         }
@@ -278,7 +289,7 @@ export class GatewayMethodCatalog {
         // Daemon retirement is not a policy withdrawal. Reconstructed startup
         // may recover unchanged durable grants. This instance cannot reattach
         // or mint durable custody after teardown starts.
-        this.scopePolicyRetired = true; this.scopePolicyOwner = undefined; this.scopePolicySnapshot = undefined;
+        this.scopePolicyRetired = true; this.scopePolicyOwner = undefined; this.scopePolicySnapshot = undefined; this.scopePolicyScopesSnapshot = undefined;
       },
     });
   }
@@ -287,6 +298,7 @@ export class GatewayMethodCatalog {
     if (!this.scopePolicyOwner) return;
     this.scopePolicyState = {};
     this.scopePolicySnapshot = undefined;
+    this.scopePolicyScopesSnapshot = undefined;
   }
 
   private beforeScopeMutation(): void {

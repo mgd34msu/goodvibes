@@ -168,6 +168,7 @@ export type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './pay
 import type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './payment-ports.js';
 import { isDeepStrictEqual } from 'node:util';
 import { retainResumedCheckoutHold } from './resumed-hold.js';
+import { PaymentReplyWindowError } from './reply-inbox.js';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowResumption } from './checkout-window-checkpoint.js';
 
 export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
@@ -740,7 +741,11 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         deliveries = await (reception?.deliveries ?? notifier.deliver({ kind: 'approval', message, assertCurrent: addressCurrent, signal }));
         addressCurrent();
       }
-      catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
+      catch (error) {
+        await release();
+        if (error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable') throw error;
+        return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.');
+      }
       const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.approvalMinutes);
       addressCurrent();
       if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < 0) throw new CheckoutOwnershipError();
@@ -841,7 +846,11 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
         deliveries = await (reception?.deliveries ?? notifier.deliver({ kind: 'veto', message, assertCurrent: addressCurrent, signal }));
         addressCurrent();
       }
-      catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
+      catch (error) {
+        await release();
+        if (error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable') throw error;
+        return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.');
+      }
       const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.vetoMinutes);
       addressCurrent();
       if (typeof deadlineMs !== 'number' || !Number.isSafeInteger(deadlineMs) || deadlineMs < 0) throw new CheckoutOwnershipError();

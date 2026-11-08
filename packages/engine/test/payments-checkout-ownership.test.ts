@@ -21,6 +21,7 @@ import { usePaymentsReadings } from './helpers/payments-readings.ts';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { withExecutionMode } from '../sdk/src/platform/gate/execution-context.js';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../sdk/src/platform/payments/checkout-window-checkpoint.js';
+import { PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
 
 const readings = usePaymentsReadings();
 const roots: string[] = [];
@@ -751,6 +752,15 @@ test.each(['approval', 'veto'] as const)('an undeliverable %s notice does not ca
   f.deps.notifier.deliver = async () => [{ channel: 'telegram', delivered: false, backfillable: false }];
   Reflect.set(f.deps, 'retainWindowCheckpoint', async () => { checkpoints++; });
   expect((await f.run()).kind).toBe(kind === 'approval' ? 'refused' : 'purchased'); expect(checkpoints).toBe(0);
+});
+
+test.each(['approval', 'veto'] as const)('an unavailable recovered %s source is not misreported as a shipping-address failure', async kind => {
+  const f = fixture(); if (kind === 'approval') Reflect.set(f.request, 'requestedMax', '10.00');
+  f.deps.notifier.prepareWindow = () => ({ deliveries: Promise.reject(new PaymentReplyWindowError('source-unavailable')),
+    cancel() {}, async awaitAnswer() { throw new Error('An unavailable source cannot answer'); } });
+  await expect(f.run()).rejects.toMatchObject({ kind: 'source-unavailable' });
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+  expect(f.effects).not.toContain('submit'); expect(f.effects).not.toContain('card');
 });
 
 /** Capture an actual running flow's published checkpoint/accounting, retire

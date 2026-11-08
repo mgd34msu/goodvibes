@@ -33,6 +33,7 @@ import {
   DurableCheckoutJournal,
   DurablePaymentOperations,
   ProtectedPaymentRequests,
+  createNativeCheckoutWindowRestorer,
   channelBackedPaymentNotifier,
   configBackedAddressStore,
   registerPaymentsMethods,
@@ -43,6 +44,7 @@ import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { BrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
 
 export interface PaymentsCompositionOptions {
+  readonly paymentContinuationOwner?: Pick<import('@goodvibes-jev/engine/sdk/platform/payments').NativeCheckoutWindowRestorationOptions, 'pairing' | 'scopes'> | undefined;
   readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'preparePostalAddress'>>;
   readonly shellPaths: ShellPathService;
@@ -137,6 +139,11 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     addresses: configBackedAddressStore(config, options.configManager.preparePostalAddress?.bind(options.configManager)),
     notifier: channelBackedPaymentNotifier(config, options.channelDeliveryRouter, paymentReplies),
     replies: paymentReplies,
+    ...(options.paymentContinuationOwner ? { restoreWindow: createNativeCheckoutWindowRestorer({
+      ...options.paymentContinuationOwner, catalog: options.gatewayMethods, config,
+      seam: options.checkoutSeam, replies: paymentReplies, router: options.channelDeliveryRouter,
+      isPaymentsLeader: options.isPaymentsLeader,
+    }), retireContinuation: options.paymentContinuationOwner.pairing.revokeNativeContinuation.bind(options.paymentContinuationOwner.pairing) } : {}),
     merchantJudge: createJevMerchantJudge(),
     untrusted: getProcessUntrustedContentLedger(),
     // The persisted owner approvals `payments.checkout.approve` mints and

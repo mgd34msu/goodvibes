@@ -8,7 +8,12 @@ import { OwnedWork } from '../../utils/owned-work.js';
 import { CheckoutOperations, type DetachedCheckoutOwner, type DetachedCheckoutSource } from './checkout-operations.js';
 import { PaymentOperationStoreError, checkoutRequestId, type DurablePaymentOperations } from './operation-store.js';
 import type { BeginCheckoutInput } from '../payments-gateway-service.js';
-import { ProtectedPaymentRequestError, type PaymentRequestStore } from './protected-requests.js';
+import { ProtectedPaymentRequestError, type PaymentRequestStore, type ProtectedPaymentRequest } from './protected-requests.js';
+import type { CheckoutWindowResumption } from '../checkout-window-checkpoint.js';
+import type { CheckoutPageDriver } from '../checkout-page.js';
+import { retainResumedCheckoutHold } from '../resumed-hold.js';
+import { isDeepStrictEqual } from 'node:util';
+import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import { BrowserPageConnectionError } from '../../browser/browser-page-connection-data.js';
 /**
  * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
@@ -95,6 +100,18 @@ export interface CheckoutComposition {
   readonly operations: DurablePaymentOperations;
   /** Native composition stores original facts before acknowledging admission. */
   readonly requests?: PaymentRequestStore | undefined;
+  /** Construction-only native restoration. Saved JSON cannot supply this
+   * callback or independently authorize its browser/paired-owner work. */
+  readonly restoreWindow?: ((request: ProtectedPaymentRequest, owner: DetachedCheckoutOwner) => Promise<RestoredCheckoutWindow>) | undefined;
+  readonly retireContinuation?: ((grant: NativeContinuationGrant) => void) | undefined;
+}
+
+export interface RestoredCheckoutWindow {
+  readonly source: DetachedCheckoutSource;
+  readonly input: BeginCheckoutInput;
+  readonly resumption: CheckoutWindowResumption;
+  readonly driver: CheckoutPageDriver;
+  release(): Promise<void>;
 }
 
 function invalid(field: string, requirement: string): HandlerError {
@@ -352,11 +369,16 @@ export class CheckoutServiceHolder {
   private readonly abort = new AbortController();
   private closed = false;
   private closing: Promise<void> | undefined;
+  private readonly restoreWindow: CheckoutComposition['restoreWindow'];
+  private windowsRetained = false;
+  private readonly retireContinuation: CheckoutComposition['retireContinuation'];
 
   constructor(
     private readonly deps: PaymentsHandlerDeps,
     private readonly journal: CheckoutJournal,
   ) {
+    this.restoreWindow = deps.checkout.restoreWindow?.bind(deps.checkout);
+    this.retireContinuation = deps.checkout.retireContinuation?.bind(deps.checkout);
     this.operations = new CheckoutOperations(deps.checkout.operations, journal, deps.purchases,
       (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now, deps.checkout.requests);
     this.registry = new CheckoutRegistry({ list: () => journal.list(), remove: id => journal.remove(id),
@@ -374,8 +396,41 @@ export class CheckoutServiceHolder {
   }
 
   async recoverInterruptedCheckouts() {
+    if (this.restoreWindow && !this.windowsRetained && this.deps.isPaymentsLeader()) {
+      await this.operations.retainInterruptedWindows((request, current) => {
+        if (!request.window) throw new CheckoutOwnershipError();
+        const checkpoint = request.window, hold = retainResumedCheckoutHold(this.deps.budget, checkpoint.record);
+        return async () => {
+          current(); const records = await this.journal.list(); current();
+          if (!isDeepStrictEqual(records.find(record => record.purchaseId === request.purchaseId), checkpoint.record)) return false;
+          // This is original pre-submit evidence cleanup, not permission to
+          // execute. It must remain possible after cancellation/revocation.
+          hold.assertCurrent(); hold.release(); current();
+          await this.journal.remove(request.purchaseId); current();
+          if (request.host.continuation) this.retireContinuation?.(request.host.continuation);
+          return true;
+        };
+      }); this.windowsRetained = true;
+    }
     const sweep = await this.recovery.recoverInterruptedCheckouts();
-    if (sweep.swept) await this.operations.recover();
+    if (sweep.swept) {
+      await this.operations.recover();
+      const restore = this.restoreWindow;
+      if (restore) this.operations.resumeInterruptedWindows(async (request, owner) => {
+        const restored = await restore(request, owner);
+        // All cleanup belongs to the executor even if restoration succeeded
+        // just as the registration retired. The executor releases on failure.
+        return Object.freeze({ source: restored.source, input: restored.input,
+          release: restored.release.bind(restored),
+          execute: async (input: BeginCheckoutInput, id: string, current: DetachedCheckoutOwner) => {
+            current.assertCurrent();
+            const seam = this.deps.checkout.seam(); if (!seam) throw new CheckoutOwnershipError();
+            const gates = await this.checkoutGates(input, current); current.assertCurrent();
+            return this.serviceFor(seam).resumeCheckoutWindow(input, restored.resumption, restored.driver,
+              { ...current, purchaseId: id, gates });
+          } });
+      });
+    }
     return sweep;
   }
 
@@ -388,15 +443,20 @@ export class CheckoutServiceHolder {
     owner.assertCurrent();
     const seam = this.deps.checkout.seam();
     if (!seam) throw new CheckoutOwnershipError();
+    const gates = await this.checkoutGates(input, owner); owner.assertCurrent();
+    return this.serviceFor(seam).beginCheckout(input, { ...owner, purchaseId: id, gates });
+  }
+
+  private async checkoutGates(input: BeginCheckoutInput, owner: DetachedCheckoutOwner) {
     const [usableCard, shippingAddress] = await mapLimit([
       () => hasUsableCard(this.deps.cards, input.cardId, owner),
       () => hasShippingAddress(this.deps.checkout.addresses, owner),
     ], 2, read => read());
     owner.assertCurrent();
-    return this.serviceFor(seam).beginCheckout(input, { ...owner, purchaseId: id, gates: {
+    return {
       enabled: readPaymentsEnabled(this.deps.config), isPaymentsLeader: this.deps.isPaymentsLeader(),
       hasUsableCard: usableCard, hasShippingAddress: shippingAddress, isOwnerDirectRequest: true,
-    } });
+    };
   }
 
   run<T>(callback: () => Promise<T>): Promise<T> {

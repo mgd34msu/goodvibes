@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Wire native startup into checkout-window resumption under the existing
+  operation lease, original issued pairing grant and restored native page.
+  Wait for host registration without blocking payment handler readiness.
+  Reopen uncovered Telegram windows at the acknowledged account/chat/topic,
+  and clean up matching pre-submit holds if restoration fails or is stopped.
+  Durable reply history and receive/downtime coverage remain unfinished.
+  Read scope membership without computing an unused catalog digest.
+
 - Let native payment reception wait for its first Telegram ingress attachment
   during startup, then verify that exact session. Cancellation, facade retirement
   and rebinding remove the pending wait; a replacement session cannot take it
@@ -12,7 +20,7 @@
 - Add the engine checkout-window resume path using the original journal and
   held funds. Preserve exact selected terms in v2 checkpoints, reject replaced
   holds and void earlier answers when the selected terms or window type change.
-  Native automatic startup and reply-history integration remain unfinished.
+  Reply-history integration and final release qualification remain unfinished.
 
 - Follow the repository rename to `mgd34msu/goodvibes` in install/uninstall
   downloads, native acquisition, updates, release tooling, workflow action
@@ -24,7 +32,7 @@
   after repricing. Refresh selected native browser controls, preserve original
   intent/authority/evidence, and declare the checkpoint reader format before
   publication. Missing or failed storage stops the waiting checkout before
-  submission. Automatic startup window continuation remains unfinished.
+  submission. Full reply-history recovery remains unfinished.
 
 - Compare native-daemon smoke payloads directly against private baseline copies
   instead of hashing each local file before and after execution. Keep comparison

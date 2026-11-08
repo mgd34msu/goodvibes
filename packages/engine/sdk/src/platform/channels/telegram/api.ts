@@ -164,12 +164,13 @@ export class TelegramBotApi {
   }
 
   /** Point Telegram at a public delivery URL, with the shared secret header. */
-  async setWebhook(url: string, secretToken?: string): Promise<void> {
-    await this.call('setWebhook', {
+  async setWebhook(url: string, secretToken?: string, signal?: AbortSignal): Promise<void> {
+    const result = await this.call('setWebhook', {
       url,
       ...(secretToken ? { secret_token: secretToken } : {}),
       allowed_updates: ['message', 'edited_message', 'channel_post', 'edited_channel_post'],
-    });
+    }, signal);
+    if (result !== true) throw new Error('Telegram did not confirm webhook registration');
   }
 
   /**

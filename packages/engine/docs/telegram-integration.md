@@ -169,7 +169,7 @@ Webhook mode needs an address **Telegram's servers** can reach. That means:
   looks configured and silently receives nothing.
 - A valid certificate.
 
-Configure it with the daemon's public base URL and a secret token:
+Configure it with the daemon's public base URL and bot token:
 
 ```json
 {
@@ -178,21 +178,27 @@ Configure it with the daemon's public base URL and a secret token:
     "telegram": {
       "enabled": true,
       "mode": "webhook",
-      "botToken": "goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN",
-      "webhookSecret": "goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_TELEGRAM_WEBHOOK_SECRET"
+      "botToken": "goodvibes://secrets/goodvibes/GOODVIBES_SURFACES_TELEGRAM_BOT_TOKEN"
     }
   }
 }
 ```
 
-On start the daemon calls `setWebhook` with
-`{publicBaseUrl}/webhook/telegram` and the secret token.
+On start the native daemon calls `setWebhook` with
+`{publicBaseUrl}/webhook/telegram` and a fresh private registration credential.
+Telegram returns it in the `x-telegram-bot-api-secret-token` header. Registration
+must be acknowledged before the credential is accepted; stopping or replacing
+the original session retires it. It is not stored in product settings or logs.
+Payment replies additionally verify the original bot through `getMe` and match
+the actual notification receipt; the header alone does not establish its account.
+See the [Bot API webhook contract](https://core.telegram.org/bots/api#setwebhook).
 
-**The secret token matters.** Telegram sends it back on every delivery in the
-`x-telegram-bot-api-secret-token` header, and the daemon rejects any inbound
-call whose header does not match. Without it, the webhook endpoint accepts
-anything that finds the URL. The daemon logs a warning if you register a webhook
-without one.
+Embedders without the native account owner, and external credential resolvers
+without a local currentness fence, retain configured-secret ingress. For those
+set `surfaces.telegram.webhookSecret` to a secret reference (or use
+`TELEGRAM_WEBHOOK_SECRET`). An unresolved or absent credential refuses requests.
+This compatibility path supports ordinary channel traffic; it does not establish
+native payment account proof. Use paired Payments controls to answer purchases.
 
 If you need webhook mode but have no public address, put a tunnel in front of the
 daemon (Cloudflare Tunnel, Tailscale Funnel, ngrok, or a reverse proxy on a VPS)
@@ -206,7 +212,7 @@ and set `web.publicBaseUrl` to the tunnel's public HTTPS URL. Or just use
 | `surfaces.telegram.enabled` | `false` | Enables the Telegram surface. Nothing runs until this is true. |
 | `surfaces.telegram.mode` | `"webhook"` | Ingress mode: `polling` or `webhook`. See the note above about the default. |
 | `surfaces.telegram.botToken` | `""` | BotFather token, or a `goodvibes://` secret reference. |
-| `surfaces.telegram.webhookSecret` | `""` | Shared secret verified on inbound webhook calls. Webhook mode only. |
+| `surfaces.telegram.webhookSecret` | `""` | Configured-secret ingress for embedders/external resolvers. Native registration manages its own credential. Webhook mode only. |
 | `surfaces.telegram.botUsername` | `""` | The bot's `@name`, used for mention matching and `/command@bot` handling in groups. |
 | `surfaces.telegram.defaultChatId` | `""` | Chat, group, or channel id used for outbound delivery when no route binding applies. |
 | `web.publicBaseUrl` | `"http://127.0.0.1:3423"` | The daemon's public base URL. Webhook mode builds the delivery URL from it. |

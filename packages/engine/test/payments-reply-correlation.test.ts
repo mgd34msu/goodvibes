@@ -4,7 +4,9 @@ import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/
 import { tryResolvePaymentReplyFromChannel } from '../sdk/src/platform/daemon/payment-reply.js';
 import { createTelegramSourceAccountOwner } from '../sdk/src/platform/channels/telegram/source-account.js';
 import { TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.js';
-import { processTelegramUpdate } from '../sdk/src/platform/adapters/telegram/index.js';
+import { handleTelegramSurfaceWebhook, processTelegramUpdate } from '../sdk/src/platform/adapters/telegram/index.js';
+import { BuiltinChannelRuntime } from '../sdk/src/platform/channels/builtin-runtime.js';
+import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
 import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.js';
 import type { ChannelPolicyDecision, ChannelIngressPolicyInput } from '../sdk/src/platform/channels/types.js';
 import { usePaymentsReadings, withPaymentsReadings } from './helpers/payments-readings.ts';
@@ -14,17 +16,92 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 const decision = { allowed: true, reason: 'owner', policy: { allowlistUserIds: ['42'] } } as unknown as ChannelPolicyDecision;
 const receipt = { surfaceKind: 'telegram' as const, conversationId: '-100123', messageId: '51', threadId: '7', accountId: '123' };
 
-function source(id = '123') {
+function source(id = '123', webhook = false) {
   const owner = createTelegramSourceAccountOwner(), lifetime = new AbortController();
   let verifies = 0;
   const api = new TelegramBotApi(`${id}:synthetic-fixture-only`, async () => {
     verifies++; return Response.json({ ok: true, result: { id: Number(id), username: 'fixture_bot', is_bot: true, first_name: 'Fixture' } });
   });
-  const lease = owner.attach({ lifetime: lifetime.signal, isCurrent: async () => !lifetime.signal.aborted,
-    isCurrentSync: () => !lifetime.signal.aborted, readIdentity: signal => api.getVerifiedIdentity(signal) });
+  const session = { lifetime: lifetime.signal, isCurrent: async () => !lifetime.signal.aborted,
+    isCurrentSync: () => !lifetime.signal.aborted, readIdentity: (signal: AbortSignal) => api.getVerifiedIdentity(signal) };
+  const registrationSecret = 'synthetic-original-webhook-registration';
+  const lease = webhook ? owner.attachWebhook!({ ...session, secret: registrationSecret }) : owner.attach(session);
   cleanup.push(() => lifetime.abort());
-  return { owner, lifetime, lease, verifies: () => verifies };
+  return { owner, lifetime, lease, registrationSecret, verifies: () => verifies };
 }
+
+function webhookRequest(secret: string, body: BodyInit = JSON.stringify({ update_id: 81, message: { message_id: 52, message_thread_id: 7,
+  from: { id: 42 }, chat: { id: -100123, type: 'supergroup' }, reply_to_message: { message_id: 51 }, text: 'yes' } })) {
+  return new Request('https://daemon.example/webhook/telegram', { method: 'POST',
+    headers: { 'x-telegram-bot-api-secret-token': secret }, body,
+    ...(body instanceof ReadableStream ? { duplex: 'half' } : {}),
+  });
+}
+
+function paymentWebhookContext(f: Awaited<ReturnType<typeof window>>, account: ReturnType<typeof source>) {
+  const normalized: ChannelIngressPolicyInput[] = [];
+  const context = {
+    configManager: { get: (key: string) => key === 'surfaces.telegram.webhookSecret' ? 'configured-compatibility-secret' : 'fixture_bot' },
+    serviceRegistry: { resolveSecret: async () => null },
+    hasPaymentReplyWindow: () => f.inbox.pending > 0,
+    async authorizeSurfaceIngress(input: ChannelIngressPolicyInput) {
+      normalized.push(input);
+      const result = await tryResolvePaymentReplyFromChannel(input, decision, f.inbox, account.owner.reader);
+      return { ...decision, allowed: false, reason: result.consumed ? `payment-reply-${result.answer}` : 'no-payment-reply' };
+    },
+  } as unknown as SurfaceAdapterContext;
+  return { context, normalized };
+}
+
+test('the actual builtin webhook route supplies registered account proof to the native payment inbox', async () => {
+  const account = source('123', true), f = await window(), { context, normalized } = paymentWebhookContext(f, account);
+  const plugins = new ChannelPluginRegistry();
+  const runtime = new BuiltinChannelRuntime({ configManager: context.configManager, telegramSourceAccounts: account.owner,
+    channelPlugins: plugins, buildSurfaceAdapterContext: () => context } as never);
+  runtime.registerPlugins();
+  expect(plugins.getByPath('/webhook/telegram')).toBeTruthy();
+  const response = await plugins.handleInbound('/webhook/telegram', webhookRequest(account.registrationSecret));
+  expect(response?.status).toBe(200);
+  expect(await response?.json()).toMatchObject({ consumed: true, outcome: 'payment-reply', answer: 'approve' });
+  expect(await f.waiting).toEqual({ answer: 'approve', channel: 'telegram' });
+  expect(normalized[0]?.metadata).toMatchObject({ messageId: '52', replyToMessageId: '51' });
+  expect(account.verifies()).toBe(1); expect(readings.requests).toHaveLength(1);
+});
+
+test('configured-secret HTTP cannot borrow a polling or payment capability passed alongside it', async () => {
+  const account = source('123', true), f = await window(), { context } = paymentWebhookContext(f, account);
+  const response = handleTelegramSurfaceWebhook(webhookRequest('configured-compatibility-secret'), context, {
+    authorizeWebhook: account.owner.authorizeWebhook?.bind(account.owner),
+    acquireSourceAccount: account.lease.acquire, acquirePaymentSourceAccount: account.lease.acquire,
+  });
+  await expect(response).rejects.toMatchObject({ kind: 'source-unavailable' });
+  await expect(f.waiting).rejects.toMatchObject({ kind: 'source-unavailable' });
+  expect(account.verifies()).toBe(0); expect(readings.requests).toEqual([]);
+});
+
+test('retirement while a registered webhook body is pending prevents ingress and model work', async () => {
+  const account = source('123', true), f = await window(), { context, normalized } = paymentWebhookContext(f, account);
+  let finish!: () => void;
+  const body = new ReadableStream<Uint8Array>({ start(controller) {
+    finish = () => { controller.enqueue(new TextEncoder().encode('{}')); controller.close(); };
+  } });
+  const response = handleTelegramSurfaceWebhook(webhookRequest(account.registrationSecret, body), context, {
+    authorizeWebhook: account.owner.authorizeWebhook?.bind(account.owner),
+  });
+  account.lifetime.abort(); finish();
+  expect((await response).status).toBe(503);
+  expect(normalized).toEqual([]); expect(account.verifies()).toBe(0); expect(readings.requests).toEqual([]);
+  f.prepared.cancel(); await expect(f.waiting).rejects.toBeInstanceOf(PaymentReplyWindowError);
+});
+
+test('a registered webhook still refuses a different verified sending bot', async () => {
+  const account = source('456', true), f = await window(), { context } = paymentWebhookContext(f, account);
+  const response = await handleTelegramSurfaceWebhook(webhookRequest(account.registrationSecret), context, {
+    authorizeWebhook: account.owner.authorizeWebhook?.bind(account.owner),
+  });
+  expect(response.status).toBe(403); expect(account.verifies()).toBe(1); expect(readings.requests).toEqual([]);
+  expect(f.inbox.pending).toBe(1); f.prepared.cancel(); await expect(f.waiting).rejects.toBeInstanceOf(PaymentReplyWindowError);
+});
 async function window(purchaseId = 'original', noticeReceipt: typeof receipt | null = receipt, deadlineMs = Date.now() + 60_000,
   kind: 'approval' | 'veto' = 'approval', inbox = new PaymentReplyInbox()) {
   cleanup.push(() => inbox.close());

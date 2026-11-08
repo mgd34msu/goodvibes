@@ -9,7 +9,10 @@
   sources do no model work. Account verification stays inside reply drainage,
   and missing source evidence cannot expire as approval by silence. A consumed
   Telegram reply receives an acknowledgement rather than a policy error.
-  Actual restart backfill and webhook account provenance remain unfinished.
+  Native webhook registration now supplies its own private, retired-on-stop
+  credential and verified original bot session through the actual HTTP route.
+  Failed or late registration cannot mint proof; ordinary shared-secret ingress
+  cannot borrow a polling capability. Actual restart backfill remains unfinished.
 
 - Retain a real, original-owner-issued payment continuation with protected
   checkout facts. Bind it losslessly to the existing operation ID, retire it

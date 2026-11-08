@@ -256,7 +256,10 @@ export function registerBuiltinChannelPlugins(context: BuiltinPluginRegistration
     lookupDirectory: async (query, options) => context.lookupRouteDirectory('webhook', query, options),
   });
 
-  registerRouterBackedPlugin(context, 'telegram', 'Telegram', ['ingress', 'egress', 'threaded_reply', 'interactive_actions', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/telegram', handleTelegramSurfaceWebhook);
+  const telegramSourceAccounts = context.deps.telegramSourceAccounts;
+  const authorizeTelegramWebhook = telegramSourceAccounts?.authorizeWebhook?.bind(telegramSourceAccounts);
+  registerRouterBackedPlugin(context, 'telegram', 'Telegram', ['ingress', 'egress', 'threaded_reply', 'interactive_actions', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/telegram',
+    (req, adapterContext) => handleTelegramSurfaceWebhook(req, adapterContext, { authorizeWebhook: authorizeTelegramWebhook }));
   registerRouterBackedPlugin(context, 'homeassistant', 'Home Assistant', ['ingress', 'egress', 'threaded_reply', 'interactive_actions', 'session_binding', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/homeassistant', handleHomeAssistantSurfaceWebhook);
   registerRouterBackedPlugin(context, 'google-chat', 'Google Chat', ['ingress', 'egress', 'threaded_reply', 'interactive_actions', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/google-chat', handleGoogleChatSurfaceWebhook);
   registerRouterBackedPlugin(context, 'signal', 'Signal', ['ingress', 'egress', 'account_lifecycle', 'target_resolution', 'agent_tools'], '/webhook/signal', handleSignalSurfaceWebhook);

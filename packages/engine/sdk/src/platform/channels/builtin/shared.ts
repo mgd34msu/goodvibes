@@ -69,7 +69,7 @@ export interface BuiltinChannelRuntimeDeps {
    * Telegram polling; the supervisor then reports why it cannot start.
    */
   readonly telegramOffsetPath?: string | undefined;
-  /** Lazy verified identity capabilities for selected Telegram polling intake. */
+  /** Lazy verified identity capabilities for original Telegram ingress sessions. */
   readonly telegramSourceAccounts?: TelegramSourceAccountOwner | undefined;
   /**
    * Telegram answered getUpdates with a 409 naming another consumer. Reported

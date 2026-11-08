@@ -1,4 +1,4 @@
-import type { TelegramSourceAccountHandle } from '../../channels/telegram/source-account.js';
+import type { TelegramSourceAccountHandle, TelegramWebhookAccountLease } from '../../channels/telegram/source-account.js';
 import type { SurfaceAdapterContext } from '../types.js';
 import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
@@ -16,6 +16,9 @@ import { parseTelegramBotCommand, telegramBotCommandReply } from './commands.js'
 export interface TelegramUpdateDeps {
   readonly signal?: AbortSignal | undefined;
   readonly acquireSourceAccount?: (() => Promise<TelegramSourceAccountHandle | null>) | undefined;
+  /** Payment-only ingress proof; does not opt HTTP into delegated work intake. */
+  readonly acquirePaymentSourceAccount?: (() => Promise<TelegramSourceAccountHandle | null>) | undefined;
+  readonly authorizeWebhook?: ((secret: string) => TelegramWebhookAccountLease | null) | undefined;
   readonly sendMessage?: ((input: {
     readonly chatId: string;
     readonly text: string;
@@ -75,33 +78,45 @@ export async function handleTelegramSurfaceWebhook(
   context: SurfaceAdapterContext,
   deps: TelegramUpdateDeps = {},
 ): Promise<Response> {
+  const providedSecret = req.headers.get('x-telegram-bot-api-secret-token') ?? '';
+  const registration = deps.authorizeWebhook?.(providedSecret) ?? null;
+  const registrationCurrent = (): boolean => {
+    if (req.signal.aborted) return false;
+    try { registration?.assertCurrent(); return true; } catch { return false; }
+  };
+  if (!registrationCurrent()) return Response.json({ error: 'Webhook registration is unavailable' }, { status: 503 });
   // The registration side (channels/telegram/ingress.ts) hands Telegram the
   // RESOLVED secret, so an unresolved reference here is not a mismatch anyone
   // can debug from the outside: Telegram sends exactly the right value and
   // every update is rejected.
-  const credential = await resolveSurfaceCredential(
-    context,
-    { kind: 'config', key: 'surfaces.telegram.webhookSecret' },
-    { kind: 'registry', service: 'telegram', field: 'signingSecret' },
-    { kind: 'env', name: 'TELEGRAM_WEBHOOK_SECRET' },
-  );
-  if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('telegram', credential);
-  if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
-  if (credential.state === 'resolved') {
-    const providedSecret = req.headers.get('x-telegram-bot-api-secret-token') ?? '';
-    if (!constantTimeEquals(credential.value, providedSecret)) {
-      return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  if (!registration) {
+    const credential = await resolveSurfaceCredential(
+      context,
+      { kind: 'config', key: 'surfaces.telegram.webhookSecret' },
+      { kind: 'registry', service: 'telegram', field: 'signingSecret' },
+      { kind: 'env', name: 'TELEGRAM_WEBHOOK_SECRET' },
+    );
+    if (credential.state === 'unresolvable') return surfaceCredentialUnavailable('telegram', credential);
+    if (credential.state === 'absent') return Response.json({ error: 'Webhook credential is not configured' }, { status: 503 });
+    if (credential.state === 'resolved') {
+      if (!constantTimeEquals(credential.value, providedSecret)) {
+        return Response.json({ error: 'Unauthorized' }, { status: 401 });
+      }
     }
   }
   const rawBody = await readTextBodyWithinLimit(req);
   if (rawBody instanceof Response) return rawBody;
+  if (!registrationCurrent()) return Response.json({ error: 'Webhook registration is unavailable' }, { status: 503 });
   const body = parseJsonRecord(rawBody);
   if (body instanceof Response) return body;
   const payload = readRecord(body);
   if (!payload) return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
-  // A webhook's shared URL/secret does not prove the recipient bot incarnation.
-  // Never promote an accidentally supplied polling capability through HTTP.
-  return processTelegramUpdate(payload, context, { sendMessage: deps.sendMessage, signal: req.signal });
+  // Only the acknowledged original registration lends payment proof. Neither
+  // the configured shared secret nor an accidental polling capability does so.
+  return processTelegramUpdate(payload, context, {
+    sendMessage: deps.sendMessage, signal: req.signal,
+    ...(registration ? { acquirePaymentSourceAccount: registration.acquire.bind(registration) } : {}),
+  });
 }
 
 /**
@@ -165,7 +180,8 @@ export async function processTelegramUpdate(
     || /^\/goodvibes\b/i.test(text)
     || (botHandle && new RegExp(`@${escapeRegExp(botHandle)}\\b`, 'i').test(text)),
   );
-  const acquireTelegramAccount = !delegated && context.hasPaymentReplyWindow?.() ? deps.acquireSourceAccount?.bind(deps) : undefined;
+  const paymentSource = deps.acquirePaymentSourceAccount ?? deps.acquireSourceAccount;
+  const acquireTelegramAccount = !delegated && context.hasPaymentReplyWindow?.() ? paymentSource?.bind(deps) : undefined;
   const replied = readRecord(message.reply_to_message);
   const policy = await context.authorizeSurfaceIngress({
     surface: 'telegram',

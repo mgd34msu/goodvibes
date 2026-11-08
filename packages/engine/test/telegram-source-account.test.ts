@@ -5,6 +5,13 @@ import { join } from 'node:path';
 import { TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.js';
 import { TelegramIngressSupervisor } from '../sdk/src/platform/channels/telegram/ingress.js';
 import { BuiltinChannelRuntime } from '../sdk/src/platform/channels/builtin-runtime.js';
+import { ChannelPluginRegistry } from '../sdk/src/platform/channels/plugin-registry.js';
+import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
+import { channelBackedPaymentNotifier } from '../sdk/src/platform/payments/host/notifier.js';
+import { tryResolvePaymentReplyFromChannel } from '../sdk/src/platform/daemon/payment-reply.js';
+import type { SurfaceAdapterContext } from '../sdk/src/platform/adapters/types.js';
+import type { ChannelIngressPolicyInput, ChannelPolicyDecision } from '../sdk/src/platform/channels/types.js';
+import { withPaymentsReadings } from './helpers/payments-readings.ts';
 import { SecretsManager } from '../sdk/src/platform/config/secrets.js';
 import { ServiceRegistry } from '../sdk/src/platform/config/service-registry.js';
 import {
@@ -159,6 +166,10 @@ function pollingHarness(options: { readonly secrets?: SecretsManager; readonly r
   const secretListeners = new Set<(key: string) => void>();
   let result: Record<string, unknown> = bot();
   let pendingIdentity: Promise<Record<string, unknown>> | null = null;
+  let registrationResult: unknown = true;
+  let pendingRegistration: Promise<unknown> | null = null;
+  const registrationStarted = deferred<void>();
+  const registrations: Array<{ readonly secret: string; readonly signal: RequestInit['signal'] }> = [];
   const calls: string[] = [];
   const supervisor = new TelegramIngressSupervisor({
     configManager: { get: (key: string) => config[key], set: (key: string, value: unknown) => { config[key] = value; } } as never,
@@ -174,6 +185,12 @@ function pollingHarness(options: { readonly secrets?: SecretsManager; readonly r
     createApi: (token) => new TelegramBotApi(token, async (url, init) => {
       const method = url.split('/').pop()!; calls.push(method);
       if (method === 'getMe') return ok(pendingIdentity ? await pendingIdentity : result);
+      if (method === 'setWebhook') {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        registrations.push({ secret: String(body['secret_token'] ?? ''), signal: init.signal });
+        registrationStarted.resolve();
+        return ok(pendingRegistration ? await pendingRegistration : registrationResult);
+      }
       if (method === 'getUpdates') return new Promise<Response>((_resolve, reject) => {
         const abort = () => reject(new DOMException('aborted', 'AbortError'));
         if (init.signal?.aborted) abort(); else init.signal?.addEventListener('abort', abort, { once: true });
@@ -182,7 +199,10 @@ function pollingHarness(options: { readonly secrets?: SecretsManager; readonly r
     }),
   });
   cleanups.push(async () => { await supervisor.stop(); rmSync(directory, { recursive: true, force: true }); });
-  return { owner, supervisor, config, calls, setIdentity: (value: Record<string, unknown>) => { result = value; },
+  return { owner, supervisor, config, calls, registrations, registrationStarted: registrationStarted.promise,
+    setRegistrationResult: (value: unknown) => { registrationResult = value; },
+    setPendingRegistration: (value: Promise<unknown> | null) => { pendingRegistration = value; },
+    setIdentity: (value: Record<string, unknown>) => { result = value; },
     setPendingIdentity: (value: Promise<Record<string, unknown>> | null) => { pendingIdentity = value; },
     setRegistryToken: (value: string | null) => { registryToken = value; for (const listener of secretListeners) listener('SYNTHETIC_TELEGRAM_TOKEN'); } };
 }
@@ -196,6 +216,143 @@ function localCredentials() {
   const registry = new ServiceRegistry(registryPath, { secretsManager: secrets, subscriptionManager: {} as never });
   return { secrets, registry, registryPath };
 }
+
+describe('acknowledged webhook source ownership', () => {
+  const webhookConfig = { 'surfaces.telegram.mode': 'webhook', 'web.publicBaseUrl': 'https://synthetic.example',
+    'surfaces.telegram.webhookSecret': 'configured-compatibility-secret' };
+
+  test('actual registration acknowledgement gates the built-in HTTP route through native receipt correlation', async () => {
+    await withPaymentsReadings({}, async requests => {
+      const f = pollingHarness({ config: webhookConfig }), gate = deferred<unknown>();
+      cleanups.push(() => gate.resolve(true)); f.setPendingRegistration(gate.promise);
+      const inbox = new PaymentReplyInbox(); cleanups.push(() => inbox.close());
+      const notifier = channelBackedPaymentNotifier({ get: () => 'telegram' }, {
+        async deliver() { throw new Error('No duplicate notice'); },
+        async deliverWithReceipt() { return { receipt: { surfaceKind: 'telegram', conversationId: '-100123',
+          threadId: '7', messageId: '51', accountId: '123' } }; },
+      }, inbox);
+      if (!notifier.prepareWindow) throw new Error('Missing native reply preparation');
+      const prepared = notifier.prepareWindow({ purchaseId: 'registered-purchase', kind: 'approval', notice: 'Approve the original purchase?' });
+      await prepared.deliveries; const waiting = prepared.awaitAnswer(Date.now() + 60_000);
+      const decision = { allowed: true, reason: 'owner', policy: { allowlistUserIds: ['42'] } } as unknown as ChannelPolicyDecision;
+      let admissions = 0;
+      const context = {
+        configManager: { get: (key: string) => f.config[key] }, serviceRegistry: { resolveSecret: async () => null },
+        hasPaymentReplyWindow: () => inbox.pending > 0,
+        async authorizeSurfaceIngress(input: ChannelIngressPolicyInput) {
+          admissions++;
+          const result = await tryResolvePaymentReplyFromChannel(input, decision, inbox, f.owner.reader);
+          return { ...decision, allowed: false, reason: result.consumed ? `payment-reply-${result.answer}` : 'no-payment-reply' };
+        },
+      } as unknown as SurfaceAdapterContext;
+      const plugins = new ChannelPluginRegistry();
+      new BuiltinChannelRuntime({ configManager: context.configManager, channelPlugins: plugins, telegramSourceAccounts: f.owner,
+        buildSurfaceAdapterContext: () => context } as never).registerPlugins();
+      const starting = f.supervisor.start(); await f.registrationStarted;
+      const registration = f.registrations[0]; if (!registration) throw new Error('Missing provider registration');
+      const reply = () => new Request('https://synthetic.example/webhook/telegram', { method: 'POST',
+        headers: { 'x-telegram-bot-api-secret-token': registration.secret },
+        body: JSON.stringify({ update_id: 81, message: { message_id: 52, message_thread_id: 7, from: { id: 42 },
+          chat: { id: -100123, type: 'supergroup' }, reply_to_message: { message_id: 51 }, text: 'yes' } }),
+      });
+      expect((await plugins.handleInbound('/webhook/telegram', reply()))?.status).toBe(401);
+      expect(admissions).toBe(0); expect(requests).toEqual([]);
+      gate.resolve(true); expect((await starting).mode).toBe('webhook');
+      const response = await plugins.handleInbound('/webhook/telegram', reply());
+      expect(response?.status).toBe(200); expect(await response?.json()).toMatchObject({ consumed: true, outcome: 'payment-reply' });
+      expect(await waiting).toEqual({ answer: 'approve', channel: 'telegram' });
+      expect(admissions).toBe(1); expect(requests).toHaveLength(1);
+      expect(f.calls.filter(method => method === 'getMe')).toHaveLength(1);
+    });
+  });
+
+  test('only the original registration credential authorizes a lazy verified bot session', async () => {
+    const f = pollingHarness({ config: webhookConfig });
+    expect((await f.supervisor.start()).mode).toBe('webhook');
+    const registration = f.registrations[0]; if (!registration) throw new Error('Missing provider registration');
+    expect(registration.secret).toMatch(/^[A-Za-z0-9_-]{1,256}$/);
+    expect(registration.secret).not.toBe(webhookConfig['surfaces.telegram.webhookSecret']);
+    expect(f.config['surfaces.telegram.webhookSecret']).toBe(webhookConfig['surfaces.telegram.webhookSecret']);
+    expect(f.owner.authorizeWebhook?.('configured-compatibility-secret')).toBeNull();
+    expect(f.owner.authorizeWebhook?.('123:synthetic-one')).toBeNull();
+    expect(f.owner.authorizeWebhook?.('123')).toBeNull();
+    expect(f.calls).toEqual(['setWebhook']);
+    const lease = f.owner.authorizeWebhook?.(registration.secret); expect(lease).toBeTruthy();
+    const handle = await lease?.acquire(); expect(handle).toBeTruthy();
+    expect(await f.owner.reader.read(handle!)).toMatchObject({ id: '123', username: 'verified_bot' });
+    expect(f.calls).toEqual(['setWebhook', 'getMe']);
+    expect(JSON.stringify(f.owner.reader.current())).not.toContain(registration.secret);
+    await f.supervisor.stop();
+    expect(registration.signal?.aborted).toBe(true);
+    expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
+    expect(() => lease?.assertCurrent()).toThrow('unavailable');
+    expect(await lease?.acquire()).toBeNull();
+    await f.supervisor.start();
+    const next = f.registrations[1]; if (!next) throw new Error('Missing replacement registration');
+    expect(next.secret).not.toBe(registration.secret);
+    expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
+    expect(f.owner.authorizeWebhook?.(next.secret)).toBeTruthy();
+    expect(await f.owner.reader.read(handle!)).toBeNull();
+  });
+
+  test.each([false, null, 'true', {}])('unconfirmed setWebhook result %j never publishes proof', async result => {
+    const f = pollingHarness({ config: webhookConfig }); f.setRegistrationResult(result);
+    expect((await f.supervisor.start()).mode).toBe('inactive');
+    const registration = f.registrations[0]; if (!registration) throw new Error('Missing attempted registration');
+    expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
+    expect(await f.owner.reader.acquire()).toBeNull();
+    expect(f.supervisor.status.reason).not.toContain(registration.secret);
+    expect(registration.signal?.aborted).toBe(true);
+  });
+
+  test('an embedder without a local credential owner keeps configured-secret ingress without native proof', async () => {
+    const f = pollingHarness({ config: webhookConfig, secrets: { get: () => null, getGlobalHome: () => undefined } as never });
+    expect((await f.supervisor.start()).mode).toBe('webhook');
+    expect(f.registrations[0]?.secret).toBe('configured-compatibility-secret');
+    expect(f.owner.authorizeWebhook?.('configured-compatibility-secret')).toBeNull();
+    expect(await f.owner.reader.acquire()).toBeNull(); expect(f.calls).toEqual(['setWebhook']);
+  });
+
+  test('stop owns an uncooperative registration request until it settles; its late acknowledgement cannot publish', async () => {
+    const f = pollingHarness({ config: webhookConfig }), gate = deferred<unknown>();
+    cleanups.push(() => gate.resolve(true));
+    f.setPendingRegistration(gate.promise);
+    const starting = f.supervisor.start(); await f.registrationStarted;
+    const registration = f.registrations[0]; if (!registration) throw new Error('Missing attempted registration');
+    expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
+    let drained = false; const stopping = f.supervisor.stop().then(() => { drained = true; });
+    await Promise.resolve(); expect(drained).toBe(false); expect(registration.signal?.aborted).toBe(true);
+    gate.resolve(true); await starting; await stopping;
+    expect(drained).toBe(true); expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
+    expect(await f.owner.reader.acquire()).toBeNull(); expect(f.supervisor.status.mode).not.toBe('webhook');
+  });
+
+  test('credential rotation before registration acknowledgement cannot attach the old account', async () => {
+    const f = pollingHarness({ config: webhookConfig }), gate = deferred<unknown>();
+    cleanups.push(() => gate.resolve(true)); f.setPendingRegistration(gate.promise);
+    const starting = f.supervisor.start(); await f.registrationStarted;
+    f.setRegistryToken('456:synthetic-replacement'); gate.resolve(true);
+    expect((await starting).mode).toBe('inactive');
+    const registration = f.registrations[0]; if (!registration) throw new Error('Missing attempted registration');
+    expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
+    expect(await f.owner.reader.acquire()).toBeNull();
+    expect(registration.signal?.aborted).toBe(true); expect(f.calls).toEqual(['setWebhook']);
+  });
+
+  test.each(['url', 'mode', 'token', 'disabled'] as const)('a changed original %s permanently retires the webhook lease', async change => {
+    const f = pollingHarness({ config: webhookConfig }); await f.supervisor.start();
+    const registration = f.registrations[0]; if (!registration) throw new Error('Missing registration');
+    const lease = f.owner.authorizeWebhook?.(registration.secret); expect(lease).toBeTruthy();
+    const handle = await lease?.acquire(); expect(handle).toBeTruthy();
+    if (change === 'url') f.config['web.publicBaseUrl'] = 'https://different.example';
+    else if (change === 'mode') f.config['surfaces.telegram.mode'] = 'polling';
+    else if (change === 'token') f.config['surfaces.telegram.botToken'] = '456:synthetic-two';
+    else f.config['surfaces.telegram.enabled'] = false;
+    expect(() => lease?.assertCurrent()).toThrow('unavailable');
+    expect(f.owner.authorizeWebhook?.(registration.secret)).toBeNull();
+    expect(await f.owner.reader.read(handle!)).toBeNull();
+  });
+});
 
 describe('real polling supervisor provenance wiring', () => {
   test('unrelated local secret edits preserve proof; real same-bot rotation re-verifies after ordinary restart', async () => {
@@ -342,13 +499,22 @@ describe('real polling supervisor provenance wiring', () => {
     expect(replacement.id).toBe('456');
   });
 
-  test('stop immediately revokes handles and webhook mode never attaches a qualifying session', async () => {
+  test('stop immediately revokes polling handles; acknowledged webhook registers a distinct lazy session', async () => {
     const f = pollingHarness(); await f.supervisor.start(); const handle = (await f.owner.reader.acquire())!;
     const stopping = f.supervisor.stop(); expect(f.owner.reader.current()).toBeNull();
     expect(await f.owner.reader.read(handle)).toBeNull(); await stopping;
     f.config['surfaces.telegram.mode'] = 'webhook'; f.config['web.publicBaseUrl'] = 'https://synthetic.example';
-    await f.supervisor.start(); expect(await f.owner.reader.acquire()).toBeNull();
+    await f.supervisor.start();
+    expect(f.owner.reader.current()).toBeNull();
     expect(f.calls.filter(x => x === 'getMe')).toHaveLength(1);
+    const registered = f.registrations[0]; if (!registered) throw new Error('Missing provider registration');
+    const lease = f.owner.authorizeWebhook?.(registered.secret);
+    expect(lease).toBeTruthy();
+    const webhookHandle = await lease?.acquire();
+    expect(webhookHandle).toBeTruthy();
+    expect(await f.owner.reader.read(webhookHandle!)).toMatchObject({ id: '123' });
+    expect(await f.owner.reader.read(handle)).toBeNull();
+    expect(f.calls.filter(x => x === 'getMe')).toHaveLength(2);
   });
 
   test.each(['disabled', 'mode', 'identity unavailable'] as const)('%s refuses new source admission', async (change) => {

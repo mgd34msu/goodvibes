@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 /** Public provider identity only. No token, token hash, or source text belongs here. */
 export interface TelegramSourceAccountSnapshot {
@@ -24,8 +24,13 @@ export interface TelegramSourceAccountReader {
 }
 
 export interface TelegramSourceAccountLease {
-  /** Bound to one transport; an obsolete poller cannot borrow its replacement. */
+  /** Bound to one transport; a retired session cannot borrow its replacement. */
   acquire(): Promise<TelegramSourceAccountHandle | null>;
+}
+
+export interface TelegramWebhookAccountLease extends TelegramSourceAccountLease {
+  /** Fence body reads against retirement of the original registration. */
+  assertCurrent(): void;
 }
 
 export interface TelegramSourceAccountSession {
@@ -40,6 +45,10 @@ export interface TelegramSourceAccountSession {
 export interface TelegramSourceAccountOwner {
   readonly reader: TelegramSourceAccountReader;
   attach(session: TelegramSourceAccountSession): TelegramSourceAccountLease;
+  /** Called only after the original Bot API acknowledges this registration. */
+  attachWebhook?(session: TelegramSourceAccountSession & { readonly secret: string }): TelegramWebhookAccountLease;
+  /** A configured shared secret or serialized account ID cannot mint this lease. */
+  authorizeWebhook?(secret: string): TelegramWebhookAccountLease | null;
   invalidate(): void;
 }
 
@@ -59,11 +68,12 @@ function validIdentity(value: Pick<TelegramSourceAccountSnapshot, 'id' | 'userna
 }
 
 /**
- * A lazy provenance seam for the actual polling API session. Installing it does
+ * A lazy provenance seam for the actual ingress API session. Installing it does
  * no provider I/O. It owns identity capabilities only, never retained messages.
  */
 export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
   let active: Session | null = null;
+  let webhook: { readonly secret: string; readonly session: Session; readonly lease: TelegramWebhookAccountLease } | null = null;
   let lastAccount: Pick<TelegramSourceAccountSnapshot, 'id' | 'revision'> | null = null;
   const identityListeners = new Set<(account: TelegramSourceAccountSnapshot) => void>();
   const handles = new WeakMap<TelegramSourceAccountHandle, {
@@ -82,6 +92,7 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
   const invalidate = (): void => {
     const previous = active;
     active = null;
+    webhook = null;
     if (!previous) return;
     previous.options.lifetime.removeEventListener('abort', previous.onAbort);
     previous.controller.abort();
@@ -127,6 +138,21 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
     return handle;
   };
 
+  const attachSession = (options: TelegramSourceAccountSession): Session => {
+    invalidate();
+    const session: Session = {
+      options,
+      controller: new AbortController(),
+      onAbort: () => { if (active === session) invalidate(); },
+      snapshot: null,
+      pending: null,
+    };
+    active = session;
+    options.lifetime.addEventListener('abort', session.onAbort, { once: true });
+    if (options.lifetime.aborted) invalidate();
+    return session;
+  };
+
   return Object.freeze({
     reader: Object.freeze({
       subscribeIdentityChange(listener: (account: TelegramSourceAccountSnapshot) => void): () => void { identityListeners.add(listener); return () => { identityListeners.delete(listener); }; },
@@ -143,18 +169,27 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
       current: () => active && live(active) ? active.snapshot : null,
     }),
     attach(options: TelegramSourceAccountSession): TelegramSourceAccountLease {
-      invalidate();
-      const session: Session = {
-        options,
-        controller: new AbortController(),
-        onAbort: () => { if (active === session) invalidate(); },
-        snapshot: null,
-        pending: null,
-      };
-      active = session;
-      options.lifetime.addEventListener('abort', session.onAbort, { once: true });
-      if (options.lifetime.aborted) invalidate();
+      const session = attachSession(options);
       return Object.freeze({ acquire: () => acquire(session) });
+    },
+    attachWebhook(options: TelegramSourceAccountSession & { readonly secret: string }): TelegramWebhookAccountLease {
+      if (!/^[A-Za-z0-9_-]{1,256}$/.test(options.secret)) throw new Error('Telegram webhook registration is invalid');
+      const session = attachSession(options);
+      const lease = Object.freeze({
+        acquire: () => acquire(session),
+        assertCurrent() {
+          if (!live(session)) throw new Error('Telegram webhook registration is unavailable');
+        },
+      });
+      if (live(session)) webhook = { secret: options.secret, session, lease };
+      return lease;
+    },
+    authorizeWebhook(secret: string): TelegramWebhookAccountLease | null {
+      const registered = webhook;
+      if (!registered || !live(registered.session)) return null;
+      // Registration credentials are ASCII and bounded; no digest or raw-token cache.
+      if (!/^[A-Za-z0-9_-]{1,256}$/.test(secret) || secret.length !== registered.secret.length) return null;
+      return timingSafeEqual(Buffer.from(secret), Buffer.from(registered.secret)) ? registered.lease : null;
     },
     invalidate,
   });

@@ -790,10 +790,15 @@ An explicit reply must name this notice; an ordinary answer must be newer than
 the notice and identify only one waiting purchase. Unrelated chats, topics,
 accounts and old messages do not trigger a payment reading.
 
-The current native account proof comes from the original verified polling
-session. Use Telegram polling for channel answers, or the paired terminal/browser
-Payments controls. A webhook secret or JSON account ID alone is not promoted to
-that account proof. Missing receipt evidence or interrupted account verification
+Native account proof comes from the original verified polling session or an
+acknowledged native webhook registration. The daemon gives each native webhook
+registration a private credential and retires it on shutdown or source changes.
+Its registered Bot API session must independently verify the original account
+before a payment reply is interpreted. A configured shared secret or JSON account
+ID alone is not that proof. External credential resolvers without a local
+currentness fence retain ordinary configured-secret ingress; use polling with
+locally owned credentials or the paired terminal/browser Payments controls for
+native answers. Missing receipt evidence or interrupted account verification
 fails the wait instead of allowing a veto purchase as silence. Successfully
 consumed Telegram answers are acknowledged without creating a chat turn.
 

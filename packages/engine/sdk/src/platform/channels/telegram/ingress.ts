@@ -23,6 +23,7 @@
  * mode never starts a loop. Exactly one path is armed per start(), and which
  * one, with the reason, is logged.
  */
+import { randomBytes } from 'node:crypto';
 import type { ConfigManager } from '../../config/manager.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
@@ -74,7 +75,7 @@ export interface TelegramIngressDeps {
   readonly buildSurfaceAdapterContext: () => SurfaceAdapterContext;
   /** Where the getUpdates cursor lives; surface-scoped by the composition root. */
   readonly offsetFilePath: string;
-  /** No provider I/O until selected intake explicitly asks for provenance. */
+  /** Lazy provider identity proof for selected intake and pending payment replies. */
   readonly telegramSourceAccounts?: TelegramSourceAccountOwner | undefined;
   /** Test seam: swap in a client with an injected fetch. */
   readonly createApi?: ((token: string) => TelegramBotApi) | undefined;
@@ -142,6 +143,7 @@ export class TelegramIngressSupervisor {
   private credentialUnsubscribe: (() => void) | null = null;
   private abort: AbortController | null = null;
   private loop: Promise<void> | null = null;
+  private webhookSetup: Promise<TelegramIngressStatus> | null = null;
   /** Who this bot is, per getMe, see resolveBotIdentity. */
   private botIdentity: TelegramBotIdentity | null = null;
   private currentStatus: TelegramIngressStatus = {
@@ -230,7 +232,7 @@ export class TelegramIngressSupervisor {
     if (generation !== this.generation) return this.status;
 
     if (mode === 'polling') return this.startPolling(api, token, generation, credentialRevision, credentialSnapshot);
-    if (mode === 'webhook') return this.startWebhook(api);
+    if (mode === 'webhook') return this.startWebhook(api, token, generation, credentialRevision, credentialSnapshot);
     return this.settle('inactive', `surfaces.telegram.mode is "${mode}", which is not a supported ingress mode`);
   }
 
@@ -252,7 +254,9 @@ export class TelegramIngressSupervisor {
     abort?.abort();
     const loop = this.loop;
     this.loop = null;
+    const webhookSetup = this.webhookSetup;
     if (loop) await loop.catch(() => { /* loop reports its own failures */ });
+    if (webhookSetup) await webhookSetup.catch(() => { /* setup reports its own failures */ });
     if (this.abort === abort) this.abort = null;
     if (generation === this.generation && this.currentStatus.running) {
       this.currentStatus = { ...this.currentStatus, running: false };
@@ -261,7 +265,13 @@ export class TelegramIngressSupervisor {
 
   // ── mode setup ────────────────────────────────────────────────────────────
 
-  private async startWebhook(api: TelegramBotApi): Promise<TelegramIngressStatus> {
+  private async startWebhook(
+    api: TelegramBotApi,
+    token: string,
+    generation: number,
+    credentialRevision: number,
+    credentialSnapshot: string | null,
+  ): Promise<TelegramIngressStatus> {
     const base = String(this.deps.configManager.get('web.publicBaseUrl') ?? '');
     const problem = describeWebhookUrlProblem(base);
     if (problem) {
@@ -271,20 +281,76 @@ export class TelegramIngressSupervisor {
         + 'to receive messages without one.');
     }
 
-    const secret = await this.resolveWebhookSecret();
+    if (generation !== this.generation) return this.status;
+    this.stopped = false;
+    const lifetime = new AbortController();
+    this.abort = lifetime;
+    const sourceOwner = this.deps.telegramSourceAccounts;
+    const attachWebhook = sourceOwner?.attachWebhook?.bind(sourceOwner);
+    const live = (): boolean => generation === this.generation && !this.stopped
+      && this.abort === lifetime && !lifetime.signal.aborted
+      && Boolean(this.deps.configManager.get('surfaces.telegram.enabled'))
+      && this.deps.configManager.get('surfaces.telegram.mode') === 'webhook'
+      && String(this.deps.configManager.get('web.publicBaseUrl') ?? '') === base;
+    const currentCredentials = (): boolean => live() && this.credentialUnsubscribe !== null
+      && this.credentialRevision === credentialRevision && credentialSnapshot !== null
+      && this.sourceCredentialSnapshot() === credentialSnapshot
+      && this.resolveSourceTokenSync() === token;
+    // External credential resolvers without a local currentness fence retain
+    // configured-secret ingress, but cannot lend native payment authority.
+    const managed = attachWebhook !== undefined && typeof sourceOwner?.authorizeWebhook === 'function'
+      && currentCredentials();
     const url = `${base.replace(/\/+$/, '')}${TELEGRAM_WEBHOOK_PATH}`;
+    const register = async (): Promise<TelegramIngressStatus> => {
+      // Each acknowledged native registration gets its own private credential.
+      // Keep configured shared-secret ingress for embedders, without native proof.
+      let secret: string;
+      try {
+        secret = managed ? `gvtw_${randomBytes(24).toString('base64url')}` : await this.resolveWebhookSecret();
+        if (!live()) { lifetime.abort(); return this.status; }
+        if (managed && !currentCredentials()) {
+          lifetime.abort();
+          return this.settle('inactive', 'Telegram credentials changed during webhook setup; restart the Telegram surface');
+        }
+        await api.setWebhook(url, secret || undefined, lifetime.signal);
+        if (!live()) { lifetime.abort(); return this.status; }
+        if (managed && !currentCredentials()) {
+          lifetime.abort();
+          return this.settle('inactive', 'Telegram credentials changed during webhook setup; restart the Telegram surface');
+        }
+        if (managed && attachWebhook) attachWebhook({
+          secret,
+          lifetime: lifetime.signal,
+          readIdentity: signal => api.getVerifiedIdentity(signal),
+          isCurrentSync: currentCredentials,
+          isCurrent: async () => {
+            if (!currentCredentials()) return false;
+            const currentToken = await this.resolveBotToken();
+            return currentCredentials() && currentToken === token;
+          },
+        });
+      } catch {
+        const wasLive = live();
+        lifetime.abort();
+        if (!wasLive) return this.status;
+        // Provider text may echo the private registration credential.
+        return this.settle('inactive', 'Telegram webhook registration failed; check bot credentials and public HTTPS connectivity');
+      }
+      if (!secret) {
+        logger.warn('Telegram ingress: webhook registered without a secret token', {
+          detail: 'set surfaces.telegram.webhookSecret so inbound callbacks can be verified',
+        });
+      }
+      return this.settle('webhook', `Telegram updates will be delivered to ${url}`, false);
+    };
+    // Publish setup ownership before injected provider/resolver code can run.
+    const setup = Promise.resolve().then(register);
+    this.webhookSetup = setup;
     try {
-      await api.setWebhook(url, secret || undefined);
-    } catch (error) {
-      return this.settle('inactive', `Telegram setWebhook failed: ${summarizeError(error)}`);
+      return await setup;
+    } finally {
+      if (this.webhookSetup === setup) this.webhookSetup = null;
     }
-    if (!secret) {
-      logger.warn('Telegram ingress: webhook registered without a secret token', {
-        detail: 'set surfaces.telegram.webhookSecret so inbound callbacks can be verified',
-      });
-    }
-    // Webhook mode runs no loop at all, so polling cannot coexist with it.
-    return this.settle('webhook', `Telegram updates will be delivered to ${url}`, false);
   }
 
   private async startPolling(

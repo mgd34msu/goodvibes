@@ -15,7 +15,7 @@ import type { KnowledgeNodeUpsertInput } from '../sdk/src/platform/knowledge/typ
 import { KnowledgeNodeActivationHeldError as Held } from '../sdk/src/platform/knowledge/activation/types.js';
 import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.js';
 import { reviewKnowledgeNodeRecord } from '../sdk/src/platform/knowledge/service-node-admin.js';
-import { upsertObservedKnowledgeNode } from '../sdk/src/platform/knowledge/store-node-observation.js';
+import { upsertObservedKnowledgeNode, prepareObservedKnowledgeNodeInput, resolveKnowledgeNodeObservation } from '../sdk/src/platform/knowledge/store-node-observation.js';
 import { filterFactsForQuery } from '../sdk/src/platform/knowledge/semantic/answer-fact-selection.js';
 import { isKnowledgePageFactCandidate } from '../sdk/src/platform/knowledge/semantic/fact-quality.js';
 import { readHomeGraphSearchState } from '../sdk/src/platform/knowledge/home-graph/search.js';
@@ -45,6 +45,22 @@ async function held(promise: Promise<unknown>, reason?: Held['reason']) {
 }
 
 describe('synthesized knowledge serving authority', () => {
+  test('native observation binds the frozen producer input and exact previous node without reusable digest fields', async () => {
+    const { store } = await fixture();
+    try {
+      const source = store.getSource('manual');
+      const original = await upsertObservedKnowledgeNode(store, { id: 'observed-input', kind: 'topic', slug: 'observed-input', title: 'Declared topic' },
+        'catalog-structure', source, () => store.getSource('manual'));
+      const candidate = prepareObservedKnowledgeNodeInput(store, { ...original, title: 'Updated declaration', metadata: { declared: 'one' } },
+        'catalog-structure', source, () => store.getSource('manual'));
+      expect(Object.isFrozen(candidate)).toBe(true);
+      expect(Object.isFrozen(candidate.metadata)).toBe(true);
+      expect(resolveKnowledgeNodeObservation(candidate, original)).toBeDefined();
+      expect(resolveKnowledgeNodeObservation({ ...candidate }, original)).toBeUndefined();
+      await store.upsertNode({ ...original, status: 'stale' });
+      expect(() => resolveKnowledgeNodeObservation(candidate, store.getNode(original.id) ?? undefined)).toThrow(Held);
+    } finally { await store.close(); }
+  });
   test('registered high-stakes battery contains labelled positive and adversarial cases', () => {
     expect(registry.list().map(({ name }) => name)).toEqual([nodeServingWithoutReview.name]);
     expect(nodeServingWithoutReview.items.serve.band.yes.actAt).toBe(0.85);

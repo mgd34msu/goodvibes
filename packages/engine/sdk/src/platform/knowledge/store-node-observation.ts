@@ -2,11 +2,12 @@ import type { KnowledgeNodeRecord, KnowledgeNodeUpsertInput } from './types.js';
 import type { KnowledgeStore } from './store.js';
 import { snapshotNodeInput } from './activation/projection.js';
 import { getKnowledgeSpaceId } from './spaces.js';
+import { isDeepStrictEqual } from 'node:util';
 import { supportHash } from './semantic/verification/projection.js';
 import { KnowledgeNodeActivationHeldError } from './activation/types.js';
 
 export type KnowledgeObservationOrigin = 'catalog-structure' | 'source-declaration' | 'link-declaration' | 'memory-mirror' | 'home-assistant-snapshot' | 'browser-profile' | 'generated-page-index' | 'research-task';
-interface Observation { readonly inputHash: string; readonly existingHash: string; readonly origin: KnowledgeObservationOrigin; readonly check: () => void; readonly checkEvidence: () => void; }
+interface Observation { readonly existing: KnowledgeNodeRecord | null; readonly origin: KnowledgeObservationOrigin; readonly check: () => void; readonly checkEvidence: () => void; }
 export interface ObservedEvidence { readonly record: KnowledgeNodeRecord; readonly origin: KnowledgeObservationOrigin; readonly assertCurrent: () => void; }
 const observedRecords = new WeakMap<KnowledgeNodeRecord, ObservedEvidence>();
 export function getKnowledgeNodeObservation(existing: KnowledgeNodeRecord | undefined, candidate: KnowledgeNodeRecord): ObservedEvidence | undefined {
@@ -43,7 +44,7 @@ export function prepareObservedKnowledgeNodeInput(store: KnowledgeStore, input: 
   const expected = supportHash(evidence ?? null);
   const existing = input.id ? store.getNode(input.id) : store.getNodeByKindAndSlug(input.kind, input.slug);
   const checkEvidence = () => { if (supportHash(readEvidence() ?? null) !== expected) throw new KnowledgeNodeActivationHeldError('stale'); };
-  const observation = Object.freeze({ inputHash: supportHash(frozen), existingHash: supportHash(existing), origin,
+  const observation = Object.freeze({ existing: existing ?? null, origin,
     check: checkEvidence, checkEvidence });
   observations.set(frozen, observation);
   return frozen;
@@ -56,7 +57,10 @@ export function resolveKnowledgeNodeObservation(input: KnowledgeNodeUpsertInput,
   const observation = observations.get(input);
   if (!observation) return undefined;
   const assertCurrent = () => {
-    if (supportHash(input) !== observation.inputHash || supportHash(existing ?? null) !== observation.existingHash) throw new KnowledgeNodeActivationHeldError('stale');
+    // The WeakMap key is the actual deeply frozen producer input; a copy never
+    // inherits it. Native stored nodes are immutable, so retain their exact
+    // previous value rather than hashing it at each assertion.
+    if (!isDeepStrictEqual(snapshotNodeInput(existing ?? null), observation.existing)) throw new KnowledgeNodeActivationHeldError('stale');
     observation.check();
   };
   assertCurrent(); return { origin: observation.origin, input, assertCurrent, checkEvidence: observation.checkEvidence };

@@ -168,6 +168,9 @@ export type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './pay
 import type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './payment-ports.js';
 
 export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
+  /** Host-only durable quote/control checkpoint after the journal flush and
+   * before arming reception. Never supplied by checkout wire arguments. */
+  readonly retainWindowCheckpoint?: ((checkpoint: import('./checkout-window-checkpoint.js').CheckoutWindowCheckpoint) => Promise<void>) | undefined;
   readonly registry: CheckoutRegistry;
   readonly cards: CardMaterialStore;
   /**
@@ -685,10 +688,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
       const deadlineMs = windowDeadlineMs(now(), deps.approvalMinutes);
       // Persisted so a restart can apply the delivery-keyed recovery rules.
-      await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
+      const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
       addressCurrent();
       state = advanceApproval('pending-dispatch', { kind: 'dispatched', deliveries });
       if (state === 'awaiting-approval') {
+        await deps.retainWindowCheckpoint?.({ record: checkpoint, reading });
+        addressCurrent();
         let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
         try {
           answer = await (reception ? reception.awaitAnswer(deadlineMs)
@@ -777,10 +782,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       catch { await release(); return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.'); }
       const deadlineMs = windowDeadlineMs(now(), deps.vetoMinutes);
       // Persisted so a restart can apply the delivery-keyed recovery rules.
-      await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
+      const checkpoint = await registry.advance(request.purchaseId, 'awaiting-window', { windowDeliveries: deliveries, windowDeadlineMs: deadlineMs, windowKind, windowNotice: message }, now());
       addressCurrent();
       state = advanceVeto('pending-dispatch', { kind: 'dispatched', deliveries });
       if (state === 'open') {
+        await deps.retainWindowCheckpoint?.({ record: checkpoint, reading });
+        addressCurrent();
         let answer: Awaited<ReturnType<PaymentNotifier['awaitAnswer']>>;
         try {
           answer = await (reception ? reception.awaitAnswer(deadlineMs)

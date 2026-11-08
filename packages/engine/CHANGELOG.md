@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Retain the actual delivered payment-window quote and journal record inside
+  the original encrypted request before arming its answer reception, including
+  after repricing. Refresh selected native browser controls, preserve original
+  intent/authority/evidence, and declare the checkpoint reader format before
+  publication. Missing or failed storage stops the waiting checkout before
+  submission. Automatic startup window continuation remains unfinished.
+
 - Compare native-daemon smoke payloads directly against private baseline copies
   instead of hashing each local file before and after execution. Keep comparison
   memory bounded and report relative paths/byte counts in the version 2 local

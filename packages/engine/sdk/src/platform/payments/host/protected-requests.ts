@@ -19,6 +19,9 @@ import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.
 import { capturePaymentContinuation } from './continuation-binding.js';
 import { captureBrowserPageConnection, type BrowserPageConnection } from '../../browser/browser-page-connection-data.js';
 import { captureBrowserControlSnapshot, type BrowserControlSnapshot } from '../../browser/browser-control-snapshot-data.js';
+import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from '../../browser/browser-checkout-recovery-data.js';
+import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../checkout-window-checkpoint.js';
+import { atomicWriteFileSync } from '../../config/atomic-write.js';
 
 export interface PaymentRequestHostFacts {
   readonly authority: NativePairedSnapshot;
@@ -37,11 +40,15 @@ export interface ProtectedPaymentRequest {
   readonly input: BeginCheckoutInput;
   readonly evidence: RetainedTaintEvidence;
   readonly host: PaymentRequestHostFacts;
+  /** Actual latest window facts; admission-only records omit this field. */
+  readonly window?: CheckoutWindowCheckpoint;
 }
 export interface PaymentRequestStore {
   retain(request: ProtectedPaymentRequest, assertCurrent: () => void): Promise<void>;
   read(purchaseId: string, operationId: string, assertCurrent: () => void): Promise<ProtectedPaymentRequest>;
   remove(purchaseId: string, operationId: string, assertCurrent: () => void): Promise<void>;
+  checkpointWindow?(purchaseId: string, operationId: string, window: CheckoutWindowCheckpoint,
+    browser: BrowserCheckoutRecovery | null, assertCurrent: () => void): Promise<void>;
 }
 export class ProtectedPaymentRequestError extends Error {
   override readonly name = 'ProtectedPaymentRequestError';
@@ -65,7 +72,7 @@ function current(check: () => void): void {
 }
 function own(value: unknown): ProtectedPaymentRequest {
   const row = captureOwnedJson(value);
-  if (!object(row) || Object.keys(row).length !== 7 || row['version'] !== 1
+  if (!object(row) || Object.keys(row).length !== 7 + (Object.hasOwn(row, 'window') ? 1 : 0) || row['version'] !== 1
     || !text(row['principalId']) || !text(row['operationId']) || !/^payment-operation:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/.test(row['operationId'])) throw new ProtectedPaymentRequestError();
   checkoutRequestId(row['purchaseId']);
   const input = row['input'], host = row['host'];
@@ -76,6 +83,10 @@ function own(value: unknown): ProtectedPaymentRequest {
     || Object.keys(host).some(key => !['authority', 'configuration', 'continuation', 'browser', 'browserControls'].includes(key))
     || host['browserControls'] !== undefined && host['browser'] === undefined
     || !object(host['authority']) || !object(host['configuration'])) throw new ProtectedPaymentRequestError();
+  const window = row['window'] === undefined ? undefined : captureCheckoutWindowCheckpoint(row['window']);
+  if (window && (window.record.purchaseId !== row['purchaseId'] || window.record.sessionId !== input['sessionId']
+    || window.record.pageId !== input['pageId'] || window.record.cardId !== input['cardId'] || window.record.item !== input['item']
+    || window.record.reservationId !== row['purchaseId'])) throw new ProtectedPaymentRequestError();
   const reading = readCheckoutReadingInput(input['reading']);
   if (!reading.ok || !isDeepStrictEqual(captureOwnedJson(reading.reading), input['reading'])) throw new ProtectedPaymentRequestError();
   const controls = input['controls'];
@@ -118,7 +129,7 @@ function own(value: unknown): ProtectedPaymentRequest {
     ]);
     if (browserControls.controls.length !== refs.size || browserControls.controls.some(control => !refs.has(control.ref))) throw new ProtectedPaymentRequestError();
   }
-  return Object.freeze({ ...row, evidence: captureRetainedTaintEvidence(row['evidence']),
+  return Object.freeze({ ...row, ...(window ? { window } : {}), evidence: captureRetainedTaintEvidence(row['evidence']),
     input: optionalFields({ ...input, controls: optionalFields(controls, ['addressFields', 'shippingTargets', 'expirySeparator', 'twoDigitYear']) }, ['preferredTier', 'requestedMax', 'merchantDiscovered']),
     host: Object.freeze({ authority, configuration: savedConfig,
       ...(host['browser'] === undefined ? {} : { browser: captureBrowserPageConnection(host['browser']) }),
@@ -133,7 +144,7 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   private key: { bytes: Buffer; file: FileObservation; owner: ImportFileObservation } | undefined;
   private failed = false;
   private readonly records = new Map<string, { operationId: string; physical: string }>();
-  constructor(private readonly directory: string) {}
+  constructor(private readonly directory: string, private readonly beforeCheckpoint?: () => void) {}
   private path(id: string): string { return join(this.directory, `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.json`); }
   private safeDirectory(): void {
     const entry = lstatSync(this.directory);
@@ -214,6 +225,38 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   async read(id: string, operationId: string, check: () => void): Promise<ProtectedPaymentRequest> {
     try { return this.readOwned(id, operationId, check); }
     catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+  }
+  /** Refresh the same encrypted request under its execution lease. Original
+   * identity, intent, paired grant, configuration and source evidence survive;
+   * only the window's actual quote and native control observations advance. */
+  async checkpointWindow(id: string, operationId: string, window: CheckoutWindowCheckpoint,
+    browser: BrowserCheckoutRecovery | null, check: () => void): Promise<void> {
+    try {
+      current(check);
+      const original = this.readOwned(id, operationId, check), path = this.path(id), file = readFileObservation(path);
+      const selected = captureCheckoutWindowCheckpoint(window);
+      if (original.window && selected.record.updatedAtMs < original.window.record.updatedAtMs) throw new ProtectedPaymentRequestError();
+      const recovery = browser === null ? null : captureBrowserCheckoutRecovery(browser);
+      const { browser: _oldBrowser, browserControls: _oldControls, ...authority } = original.host;
+      const next = own({ ...original, window: selected,
+        host: { ...authority, ...(recovery ? { browser: recovery.connection, browserControls: recovery.controls } : {}) } });
+      const plaintext = JSON.stringify(next);
+      if (Buffer.byteLength(plaintext) > MAX_REQUEST_BYTES) throw new ProtectedPaymentRequestError();
+      const key = this.keyBytes(false, check);
+      const before = () => {
+        current(check); this.keyBytes(false, check);
+        const observed = readFileObservation(path);
+        if (observed.physical !== file.physical || !observed.bytes.equals(file.bytes)) throw new ProtectedPaymentRequestError();
+      };
+      before();
+      const declared: unknown = this.beforeCheckpoint?.();
+      if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
+      before();
+      atomicWriteFileSync(path, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, assertCurrent: before });
+      current(check); this.keyBytes(false, check);
+      this.records.set(id, { operationId, physical: fileObservationIdentity(path) });
+      if (!isDeepStrictEqual(this.readOwned(id, operationId, check), next)) throw new ProtectedPaymentRequestError();
+    } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
   }
   async remove(id: string, operationId: string, check: () => void): Promise<void> {
     try {

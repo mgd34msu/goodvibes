@@ -20,6 +20,7 @@ import { retainTaintEvidence, UntrustedContentLedger } from '../sdk/src/platform
 import { usePaymentsReadings } from './helpers/payments-readings.ts';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { withExecutionMode } from '../sdk/src/platform/gate/execution-context.js';
+import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../sdk/src/platform/payments/checkout-window-checkpoint.js';
 
 const readings = usePaymentsReadings();
 const roots: string[] = [];
@@ -622,6 +623,8 @@ test('repricing retains the original page even after releasing the earlier quote
 
 test('actual operator window IDs change on repricing and an old approval cannot settle the new price', async () => {
   const f = fixture(), first = barrier(), second = barrier(), windows: ReturnType<PaymentReplyInbox['inspect']>[number][] = [];
+  const retained: CheckoutWindowCheckpoint[] = [];
+  Reflect.set(f.deps, 'retainWindowCheckpoint', async (value: CheckoutWindowCheckpoint) => { retained.push(captureCheckoutWindowCheckpoint(value)); });
   Reflect.set(f.request, 'requestedMax', '15.00');
   const replies = new PaymentReplyInbox({ now: () => f.deps.now() });
   const replacement: RawCheckoutReading = { ...f.reading,
@@ -657,6 +660,9 @@ test('actual operator window IDs change on repricing and an old approval cannot 
     replies.answer({ purchaseId: fresh.purchaseId, windowId: fresh.windowId, action: 'approve' });
     expect((await purchase).kind).toBe('purchased'); expect(f.records).toMatchObject([{ totalMinorUnits: 2_200, requestedMaximumMinorUnits: 1_500 }]);
     expect(deliveries).toBe(2); expect(replies.pending).toBe(0);
+    expect(retained.map(window => window.record.totalMinorUnits)).toEqual([1_100, 2_200]);
+    expect(retained.map(window => window.reading.lines[0]?.unitPrice)).toEqual(['$10.00', '$20.00']);
+    expect(retained.map(window => window.record.purchaseId)).toEqual([f.request.purchaseId, f.request.purchaseId]);
   } finally { await replies.close(); await handled; }
 });
 
@@ -709,4 +715,40 @@ test('a replacement quote cannot adopt a later stored address after the original
   await expect(f.run()).rejects.toBeInstanceOf(CheckoutOwnershipError);
   expect(preparations).toBe(1); expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
   expect(f.records).toEqual([]); expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test.each(['approval', 'veto'] as const)('the actual %s flow checkpoints its flushed window before hearing an answer or typing a card', async kind => {
+  const f = fixture(), entered = barrier(), persisted = barrier();
+  if (kind === 'approval') Reflect.set(f.request, 'requestedMax', '10.00');
+  let answers = 0;
+  const answer = f.deps.notifier.awaitAnswer.bind(f.deps.notifier);
+  f.deps.notifier.awaitAnswer = async input => { answers++; return answer(input); };
+  Reflect.set(f.deps, 'retainWindowCheckpoint', async (value: CheckoutWindowCheckpoint) => {
+    const selected = captureCheckoutWindowCheckpoint(value);
+    expect(selected.record.windowKind).toBe(kind); expect(selected.reading).toEqual(f.reading);
+    expect((await f.journal.list())[0]).toEqual(selected.record);
+    entered.release(); await persisted.wait;
+  });
+  const purchase = f.run();
+  await entered.wait;
+  expect(answers).toBe(0); expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+  expect(f.ledger.state().reservations).toHaveLength(1);
+  persisted.release(); expect((await purchase).kind).toBe('purchased'); expect(answers).toBe(1);
+});
+
+test('a failed native window checkpoint cannot hear an answer or execute a submit', async () => {
+  const f = fixture(); let answers = 0;
+  f.deps.notifier.awaitAnswer = async () => { answers++; return { answer: 'acknowledge', channel: 'operator' }; };
+  Reflect.set(f.deps, 'retainWindowCheckpoint', async () => { throw new Error('Original encrypted window could not be retained'); });
+  await expect(f.run()).rejects.toThrow('Original encrypted window could not be retained');
+  expect(answers).toBe(0); expect(f.effects).not.toContain('card-read'); expect(f.records).toEqual([]);
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test.each(['approval', 'veto'] as const)('an undeliverable %s notice does not capture or write a window checkpoint', async kind => {
+  const f = fixture(); let checkpoints = 0;
+  if (kind === 'approval') Reflect.set(f.request, 'requestedMax', '10.00');
+  f.deps.notifier.deliver = async () => [{ channel: 'telegram', delivered: false, backfillable: false }];
+  Reflect.set(f.deps, 'retainWindowCheckpoint', async () => { checkpoints++; });
+  expect((await f.run()).kind).toBe(kind === 'approval' ? 'refused' : 'purchased'); expect(checkpoints).toBe(0);
 });

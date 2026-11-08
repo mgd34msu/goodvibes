@@ -17,6 +17,7 @@ import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-s
 import { paymentContinuationBinding } from '../sdk/src/platform/payments/host/continuation-binding.js';
 import { PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
 import { readPaymentOperation, paymentOperationDescription } from '../sdk/src/platform/payments/operation-view.js';
+import { protectedPaymentWindow } from './helpers/protected-payment-window.js';
 
 const roots: string[] = [], cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -37,6 +38,37 @@ function refusal(purchaseId: string): PaymentBeginResult {
   return { outcome: 'refused:no-card', purchaseId, reason: 'No usable card', merchantOrderId: null, totalMinorUnits: null,
     currency: null, shippingTierUsed: null, steppedDown: false, challengeStep: null };
 }
+
+test('the real detached owner checkpoints its current flushed quote through the original encrypted-store method', async () => {
+  const path = directory(), store = new DurablePaymentOperations(join(path, 'operations')),
+    requests = new ProtectedPaymentRequests(join(path, 'requests')), original = protectedPaymentRequest(), journal = new MemoryCheckoutJournal();
+  const capture = barrier(), resume = barrier(), published = barrier(), finish = barrier();
+  cleanup.push(resume.release, finish.release, configureDecisionModelPolicy(() => 'Default - On'));
+  let captures = 0, windows = 0;
+  const wrapper: PaymentRequestStore = { retain: requests.retain.bind(requests), read: requests.read.bind(requests), remove: requests.remove.bind(requests),
+    async checkpointWindow(...args) { windows++; await requests.checkpointWindow(...args); } };
+  const operations = new CheckoutOperations(store, journal, new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }), async (owned, id, owner) => {
+    const checkpoint = protectedPaymentWindow({ ...original, purchaseId: id, input: owned });
+    await journal.put(checkpoint.record);
+    if (!owner.retainWindowCheckpoint) throw new Error('Native executor did not receive its window writer');
+    await owner.retainWindowCheckpoint(checkpoint);
+    published.release(); await finish.wait; return refusal(id);
+  }, Date.now, wrapper);
+  cleanup.push(async () => { resume.release(); finish.release(); await operations.close(); });
+  await operations.recover();
+  const source = { principalId: original.principalId, assertCurrent: () => {}, taintEvidence: original.evidence, recoveryFacts: original.host,
+    async captureBrowserRecovery() { if (++captures === 2) { capture.release(); await resume.wait; } return null; } };
+  const accepted = await operations.admit(original.purchaseId, original.input, source, () => {}, () => {});
+  await capture.wait;
+  expect((await requests.read(original.purchaseId, accepted.operationId, () => {})).window).toBeUndefined();
+  source.captureBrowserRecovery = async () => { throw new Error('Replacement browser reader'); };
+  wrapper.checkpointWindow = async () => { throw new Error('Replacement window writer'); };
+  resume.release(); await published.wait;
+  const saved = await requests.read(original.purchaseId, accepted.operationId, () => {});
+  expect(saved.window?.reading.lines[0]?.unitPrice).toBe('20.00'); expect(saved.input.reading.lines[0]?.unitPrice).toBe('10.00');
+  expect(saved.window?.record).toEqual((await journal.list())[0]); expect(captures).toBe(2); expect(windows).toBe(1);
+  finish.release(); await operations.close();
+});
 
 test('populated admission is exclusive, immutable by retry and readable after a store restart', () => {
   const path = directory(), store = new DurablePaymentOperations(path), operation = view();

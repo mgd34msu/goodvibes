@@ -977,6 +977,25 @@ page ownership for accounting. Parsing stored identities alone does not create
 native snapshot provenance. This browser path is not yet wired into automatic
 startup payment-window continuation; that integration remains unfinished.
 
+For a delivered native approval or veto window, checkout now updates the
+encrypted request after its window journal record is durable and before
+reception is armed. The checkpoint contains the actual raw quote used to
+render that notice and its exact journal record. When the original browser
+host supplies reconnectable native connection/control identities, those are
+captured again for this quote; missing identities are not filled from an older
+snapshot. Repricing replaces these window facts while
+preserving the original requested item, maximum, source evidence and paired
+grant. A failed checkpoint stops before any payment answer can authorize a
+submit. Undeliverable notices do not incur a window checkpoint.
+
+Admission-only encrypted records remain readable and carry no window
+checkpoint. They cannot establish what a later repriced window displayed.
+Publishing the new checkpoint declares `payment-window-checkpoints-v1` before
+the incompatible write; a candidate reader must support that format, including
+when its version number also says 3.1.2. A checkpoint remains evidence, not
+authority to resume: original issued-grant validation, held-reservation adoption,
+reply coverage and the startup continuation consumer remain unfinished.
+
 Each wait now carries its exact `purchaseId`, rendered notice, deadline and
 owning cancellation signal. The notifier does not keep a shared last notice;
 concurrent purchases cannot overwrite the text used to interpret another

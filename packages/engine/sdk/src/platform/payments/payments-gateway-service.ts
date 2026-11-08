@@ -38,7 +38,7 @@ import { OwnedWork } from '../utils/owned-work.js';
 import { CheckoutRegistry, type CheckoutJournal } from './checkout-registry.js';
 import { CardMaterialRedactor } from './card-redaction.js';
 import { fillCard, FillCardRefusal, type CardFieldTarget } from './fill-card.js';
-import { runCheckout, type CheckoutControls, type CheckoutOutcome, type PurchaseLedger, type PurchaseRequest } from './checkout-flow.js';
+import { runCheckout, type CheckoutFlowDeps, type CheckoutControls, type CheckoutOutcome, type PurchaseLedger, type PurchaseRequest } from './checkout-flow.js';
 import { extractCheckout, type RawCheckoutReading } from './checkout-extraction.js';
 import { parseRequestedMaximum } from './money-parsing.js';
 import { isCardFieldName } from './card-material.js';
@@ -177,6 +177,7 @@ export interface BeginCheckoutInput {
 
 /** Host-only invocation facts; never read from the checkout's wire input. */
 export interface CheckoutBeginOptions extends CheckoutOperationOwnership {
+  readonly retainWindowCheckpoint?: CheckoutFlowDeps['retainWindowCheckpoint'];
   /** Original request's host-captured sources, retained before async preflight. */
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
   readonly gates?: GateInput | undefined;
@@ -250,15 +251,17 @@ export class PaymentsGatewayServiceImpl {
   async beginCheckout(input: BeginCheckoutInput, options: CheckoutBeginOptions = {}): Promise<PaymentBeginResult> {
     if (this.closed) throw new CheckoutOwnershipError();
     const purchaseId = options.purchaseId;
+    const retainWindowCheckpoint = options.retainWindowCheckpoint?.bind(options);
     const gates = { ...(options.gates ?? this.deps.gates()) };
     const owner = this.ownership(options);
     owner.assertCurrent?.();
     const taintEvidence = options.taintEvidence === undefined ? retainTaintEvidence(this.deps.untrusted)
       : captureOwnedJson(options.taintEvidence) as RetainedTaintEvidence;
-    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence));
+    return this.work.run(() => this.runBeginCheckout(input, owner, gates, purchaseId, taintEvidence, retainWindowCheckpoint));
   }
 
-  private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId: string | undefined, taintEvidence: RetainedTaintEvidence): Promise<PaymentBeginResult> {
+  private async runBeginCheckout(input: BeginCheckoutInput, options: CheckoutOperationOwnership, gates: GateInput, purchaseId: string | undefined, taintEvidence: RetainedTaintEvidence,
+    retainWindowCheckpoint?: CheckoutFlowDeps['retainWindowCheckpoint']): Promise<PaymentBeginResult> {
     requireDecisionFeature('automated checkout cart and merchant interpretation');
     const config = this.deps.config();
     const now = this.deps.now ?? Date.now;
@@ -323,6 +326,7 @@ export class PaymentsGatewayServiceImpl {
     };
 
     const outcome = await runCheckout(request, input.reading, controls, {
+      retainWindowCheckpoint,
       signal: options.signal,
       assertCurrent: options.assertCurrent,
       registry: this.registry,

@@ -23,6 +23,7 @@ import { capturePaymentContinuation } from './continuation-binding.js';
 import { PaymentReplyWindowError } from '../reply-inbox.js';
 import { captureBrowserPageConnection, type BrowserPageConnection } from '../../browser/browser-page-connection-data.js';
 import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from '../../browser/browser-checkout-recovery-data.js';
+import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../checkout-window-checkpoint.js';
 
 export interface DetachedCheckoutSource {
   readonly principalId: string;
@@ -38,6 +39,7 @@ export interface DetachedCheckoutOwner {
   readonly signal: AbortSignal;
   readonly assertCurrent: () => void;
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
+  readonly retainWindowCheckpoint?: ((checkpoint: CheckoutWindowCheckpoint) => Promise<void>) | undefined;
 }
 interface ActiveOperation {
   readonly writer: PaymentOperationWriter;
@@ -56,7 +58,7 @@ export class CheckoutOperations {
   private closed = false;
   private recovered = false;
   private readonly reserved = new Set<string>();
-  private readonly requests: Pick<PaymentRequestStore, 'retain' | 'remove'> | undefined;
+  private readonly requests: Pick<PaymentRequestStore, 'retain' | 'remove' | 'checkpointWindow'> | undefined;
   private closing: Promise<void> | undefined;
   constructor(private readonly store: DurablePaymentOperations, private readonly journal: CheckoutJournal,
     private readonly purchases: DaemonPurchaseLedger,
@@ -65,7 +67,8 @@ export class CheckoutOperations {
     requests?: PaymentRequestStore) {
     // Retain the original host methods, rather than consulting a mutable
     // embed wrapper again after admission or during asynchronous cleanup.
-    this.requests = requests ? Object.freeze({ retain: requests.retain.bind(requests), remove: requests.remove.bind(requests) }) : undefined;
+    this.requests = requests ? Object.freeze({ retain: requests.retain.bind(requests), remove: requests.remove.bind(requests),
+      ...(requests.checkpointWindow ? { checkpointWindow: requests.checkpointWindow.bind(requests) } : {}) }) : undefined;
   }
 
   admit(id: string, input: BeginCheckoutInput, source: DetachedCheckoutSource, admissionCurrent: () => void,
@@ -194,7 +197,8 @@ export class CheckoutOperations {
       this.current(operation);
       writer.update({ ...writer.read(), state: 'running', updatedAtMs: this.now() });
       const result = await this.execute(input, writer.purchaseId, { signal: operation.abort.signal,
-        assertCurrent: () => this.current(operation), taintEvidence: operation.source.taintEvidence });
+        assertCurrent: () => this.current(operation), taintEvidence: operation.source.taintEvidence,
+        ...(this.requests ? { retainWindowCheckpoint: checkpoint => this.checkpointWindow(input, operation, checkpoint) } : {}) });
       // Completion records facts even after owner cancellation; it grants no
       // further act. Actual journal phase wins over a generic refusal string.
       const entries = await this.journal.list(), retained = entries.find(row => row.purchaseId === writer.purchaseId);
@@ -208,6 +212,27 @@ export class CheckoutOperations {
         currency: recorded?.currency ?? result.currency ?? previous.currency });
     } catch (error) { await this.settleFailure(operation, error); }
   }
+  /** Part of the same owned executor, not a detached publication. Only the
+   * actual latest flushed journal record can advance this request's window. */
+  private async checkpointWindow(input: BeginCheckoutInput, operation: ActiveOperation, value: CheckoutWindowCheckpoint): Promise<void> {
+    const checkpoint = captureCheckoutWindowCheckpoint(value), { writer } = operation;
+    const current = () => this.current(operation);
+    current();
+    const save = this.requests?.checkpointWindow;
+    if (!save || !operation.protectedRequest || checkpoint.record.purchaseId !== writer.purchaseId) throw new PaymentOperationStoreError('unavailable');
+    const records = await this.journal.list(); current();
+    if (!isDeepStrictEqual(records.find(record => record.purchaseId === writer.purchaseId), checkpoint.record)) throw new PaymentOperationStoreError('unavailable');
+    const browser = operation.source.captureBrowserRecovery
+      ? await operation.source.captureBrowserRecovery(input, { signal: operation.abort.signal, assertCurrent: current }) : null;
+    current();
+    const latest = await this.journal.list(); current();
+    if (!isDeepStrictEqual(latest.find(record => record.purchaseId === writer.purchaseId), checkpoint.record)) throw new PaymentOperationStoreError('unavailable');
+    // Recapture the exact selected native controls for this quote, rather than
+    // keep the admission snapshot after a reprice or intervening native read.
+    await save(writer.purchaseId, writer.read().operationId, checkpoint, browser, current);
+    current();
+  }
+
   private async settleFailure(operation: ActiveOperation, error: unknown): Promise<void> {
     const { writer } = operation, previous = writer.read();
     let state: PaymentOperationView['state'] = 'uncertain';

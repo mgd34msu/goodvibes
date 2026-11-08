@@ -44,6 +44,8 @@ export class BrowserControlIdentityWork {
   private readonly signal: AbortSignal | undefined;
   private readonly callerCurrent: (() => void) | undefined;
   private readonly drainReads: boolean;
+  private pageCurrent: (() => void) | undefined;
+  private pageSignal: AbortSignal | undefined;
   constructor(options: JudgmentReadingOptions = {}, lifetime: { readonly drainReads?: boolean } = {}) {
     this.drainReads = lifetime.drainReads === true;
     this.signal = options.signal; this.callerCurrent = options.assertCurrent;
@@ -53,12 +55,28 @@ export class BrowserControlIdentityWork {
     this.assertCurrent();
   }
   readonly assertCurrent = (): void => {
+    this.pageCurrent?.();
     currentExecutionMode();
     this.signal?.throwIfAborted();
     const result: unknown = this.callerCurrent?.();
     if (result !== undefined) { drainOwned(result); throw new Error('Browser action owner must be synchronous.'); }
     if (!isClassicOperation()) this.owner?.assertCurrent();
+    this.pageCurrent?.();
   };
+
+  /** Add the original native page restriction once; this never grants an action. */
+  bindPage(current: () => void, signal: AbortSignal): void {
+    this.assertCurrent();
+    if (this.pageCurrent) throw new Error('The browser work already belongs to a page.');
+    this.pageCurrent = current;
+    this.pageSignal = signal;
+    this.assertCurrent();
+  }
+
+  private currentSignal(): AbortSignal | undefined {
+    const original = this.owner?.signal ?? this.signal;
+    return original && this.pageSignal ? AbortSignal.any([original, this.pageSignal]) : original ?? this.pageSignal;
+  }
   async wait<T>(work: () => Promise<T>): Promise<T> {
     this.assertCurrent();
     if (this.drainReads) {
@@ -67,14 +85,14 @@ export class BrowserControlIdentityWork {
       try { const value = await work(); this.assertCurrent(); return value; }
       catch (error) { this.assertCurrent(); throw error; }
     }
-    const value = await awaitPermission(work, this.owner?.signal ?? this.signal);
+    const value = await awaitPermission(work, this.currentSignal());
     this.assertCurrent(); return value;
   }
 
   /** Native actions cooperate with cancellation; their actual completion is drained. */
   async action<T>(perform: (signal: AbortSignal) => Promise<T>): Promise<T> {
     this.assertCurrent();
-    const original = this.owner?.signal ?? this.signal;
+    const original = this.currentSignal();
     const controller = new AbortController();
     const cancel = (): void => { controller.abort(new Error('Browser action was cancelled.')); };
     original?.addEventListener('abort', cancel, { once: true });
@@ -121,7 +139,7 @@ export class BrowserControlIdentityWork {
       },
     };
     const result = await this.wait(() => browserCredentialPage.run(port, stateJson, {
-      site: 'browser.page.credential-entry', signal: owner.signal, beforeAttempt: current,
+      site: 'browser.page.credential-entry', signal: this.currentSignal(), beforeAttempt: current,
     }));
     await currentPage(); current();
     const reading = result.readings.credentialPage;
@@ -145,11 +163,16 @@ export class BrowserControlIdentityWork {
     const input = snapshotJudgmentInput(state) as typeof state;
     const owner = this.owner;
     if (!owner) return false;
+    const current = this.assertCurrent;
     const port: JudgmentPort = { ...owner.port, async ask(request) {
-      const result = await owner.port.ask(request);
-      owner.assertCurrent(); checkAnswers(request.questions, result.answers); return result;
+      current();
+      const result = await owner.port.ask({ ...request,
+        beforeAttempt: () => { current(); request.beforeAttempt?.(); current(); },
+        assertLogCurrent: () => { current(); request.assertLogCurrent?.(); current(); },
+      });
+      current(); checkAnswers(request.questions, result.answers); return result;
     } };
-    const result = await this.wait(() => browserControlIdentity.run(port, toJson(input) as EntryType, { signal: owner.signal, beforeAttempt: this.assertCurrent }));
+    const result = await this.wait(() => browserControlIdentity.run(port, toJson(input) as EntryType, { signal: this.currentSignal(), beforeAttempt: this.assertCurrent }));
     this.assertCurrent();
     const reading = result.readings.sameControl;
     return reading.outcome === 'act' && reading.verdict === 'yes' && Number.isFinite(reading.probability)

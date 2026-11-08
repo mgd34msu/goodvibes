@@ -4,7 +4,7 @@ import { isYoloExecution } from '../gate/execution-context.js';
 import type { ToolExecuteOptions } from '../types/tools.js';
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
 import type { BrowserProvisionLifetime } from './browser-failure-reading.js';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { Locator, Page } from 'playwright-core';
 import { BrowserSessionError, BrowserSessionManager, hasDisplay } from './browser-sessions.js';
@@ -302,13 +302,14 @@ export class BrowserEngine {
    * browser, so a late native result cannot outlive successful shutdown. */
   private async withTarget<T>(target: BrowserTarget, perform: (selected: {
     readonly sessionId: string; readonly pageId: string; readonly page: Page; readonly current: () => void;
-  }) => Promise<T>): Promise<T> {
-    const selected = await this.target({ ...target });
-    return this.sessions.withPage(selected.sessionId, selected.pageId, async (page, current) => {
+  }) => Promise<T>, work?: BrowserControlIdentityWork): Promise<T> {
+    target = { ...target };
+    const selected = work ? await work.wait(() => this.target(target)) : await this.target(target);
+    return this.sessions.withPage(selected.sessionId, selected.pageId, async (page, current, signal) => {
       if (page !== selected.page) throw new BrowserSessionError('The original browser page was replaced.', 'Select a live page before retrying.');
-      current();
+      current(); work?.bindPage(current, signal);
       const result = await perform({ ...selected, current });
-      current(); return result;
+      current(); work?.assertCurrent(); return result;
     });
   }
 
@@ -418,7 +419,7 @@ export class BrowserEngine {
 
   /** Complete checkout evidence without replacing snapshot refs or exporting field secrets. */
   async observeCheckoutTerms(target: BrowserTarget, ownership: BrowserActionLifetime, submitTarget?: string): Promise<{
-    readonly state: object; readonly assertCurrent: () => Promise<void>;
+    readonly state: object; readonly assertCurrent: () => Promise<void>; readonly signal: AbortSignal;
   }> {
     const sessionId = target.sessionId, pageId = target.pageId;
     if (!sessionId || !pageId) throw new BrowserSessionError('Checkout terms require an explicit session and page.');
@@ -442,7 +443,8 @@ export class BrowserEngine {
       // Native evaluation failures may contain page-authored text or values.
       throw new BrowserSessionError('The complete current checkout could not be safely read.', 'Read the live checkout again before starting another purchase.');
     };
-    try { return await this.sessions.withPage(sessionId, pageId, async (page, currentPage) => {
+    try { return await this.sessions.withPage(sessionId, pageId, async (page, currentPage, signal) => {
+      work.bindPage(currentPage, signal);
       const scope = submitTarget ? this.refScope(sessionId, pageId, page, work, ownership, undefined, undefined, true) : undefined;
       const current = (): void => {
         currentPage(); work.assertCurrent(); methods.assertCurrent();
@@ -466,7 +468,7 @@ export class BrowserEngine {
       } } : {}) });
       if (!state || typeof state !== 'object' || Array.isArray(state)) throw new BrowserSessionError('Checkout evidence is incomplete.');
       this.recordPageIngest(observation.url, JSON.stringify(state)); current();
-      return { state, assertCurrent: async () => {
+      return { state, signal, assertCurrent: async () => {
         try { await this.sessions.withPage(sessionId, pageId, async (original, assertPage) => {
           if (original !== page) throw new BrowserSessionError('The original checkout page was replaced.');
           assertPage(); await observation.assertCurrent(); assertPage();
@@ -547,58 +549,62 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership);
-    const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership, 'click', args);
-    const current = scope.current;
-    current();
-    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'click', ownership, args); current();
-    const { locator, element, revalidate } = await scope.resolve(args.ref);
-    current();
-    if (element.submits) {
-      // Submitting sends data to whoever runs the site. Whether this element
-      // submits was recorded when the page was snapshotted, so this is a fact
-      // about the control rather than a guess about the click.
-      //
-      // The form's current values are what will actually be posted, so they are
-      // the fields the derivation check should see. Read live; undefined when
-      // the element is outside a form or the page will not answer, which drops
-      // this call to the coarse rule rather than to a false clean bill.
-      const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
-      await revalidate(); scope.current();
-      await work.wait(() => this.requireOutwardEffectAllowed(
-        'browser.submit',
-        `submit the form on ${this.untrusted.originOf(page.url())} by activating ${element.role} "${element.name}"`,
-        formFields,
-      ));
-    }
-    current();
-    await revalidate(); current();
-    await credentialCurrent(); current();
-    const urlBefore = page.url();
+    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
     let attempted = false;
-    try {
-      await work.action(async signal => {
-        if (ownership?.beforeDispatch) { await ownership.beforeDispatch(); current(); }
-        attempted = true;
-        return locator.click({ signal, button: args.button ?? 'left', clickCount: args.clickCount ?? 1,
-          timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS });
-      });
-      await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_ACTION_TIMEOUT_MS }).catch(() => undefined));
-      this.snapshots.clear(sessionId, pageId);
-      const navigated = page.url() !== urlBefore;
-      // URL changes also include pushState and fragments with the same filled
-      // DOM. Navigation is not proof that live payment material disappeared.
-      return {
-        sessionId,
-        pageId,
-        clicked: { ref: args.ref, role: element.role, name: element.name },
-        urlBefore,
-        url: page.url(),
-        navigated,
-        next: 'Refs are cleared after a click. Call action:"snapshot" for current refs.',
-      };
-    } catch (error) {
+    try { return await this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      const scope = this.refScope(sessionId, pageId, page, work, ownership, 'click', args);
+      const current = scope.current;
+      current();
+      const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'click', ownership, args); current();
+      const { locator, element, revalidate } = await scope.resolve(args.ref);
+      current();
+      if (element.submits) {
+        // Submitting sends data to whoever runs the site. Whether this element
+        // submits was recorded when the page was snapshotted, so this is a fact
+        // about the control rather than a guess about the click.
+        //
+        // The form's current values are what will actually be posted, so they are
+        // the fields the derivation check should see. Read live; undefined when
+        // the element is outside a form or the page will not answer, which drops
+        // this call to the coarse rule rather than to a false clean bill.
+        const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
+        await revalidate(); scope.current();
+        await work.wait(() => this.requireOutwardEffectAllowed(
+          'browser.submit',
+          `submit the form on ${this.untrusted.originOf(page.url())} by activating ${element.role} "${element.name}"`,
+          formFields,
+        ));
+      }
+      current();
+      await revalidate(); current();
+      await credentialCurrent(); current();
+      const urlBefore = page.url();
+      try {
+        await work.action(async signal => {
+          if (ownership?.beforeDispatch) { await ownership.beforeDispatch(); current(); }
+          attempted = true;
+          return locator.click({ signal, button: args.button ?? 'left', clickCount: args.clickCount ?? 1,
+            timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS });
+        });
+        await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout: DEFAULT_ACTION_TIMEOUT_MS }).catch(() => undefined));
+        this.snapshots.clear(sessionId, pageId);
+        const navigated = page.url() !== urlBefore;
+        // URL changes also include pushState and fragments with the same filled
+        // DOM. Navigation is not proof that live payment material disappeared.
+        return {
+          sessionId,
+          pageId,
+          clicked: { ref: args.ref, role: element.role, name: element.name },
+          urlBefore,
+          url: page.url(),
+          navigated,
+          next: 'Refs are cleared after a click. Call action:"snapshot" for current refs.',
+        };
+      } catch (error) {
+        if (attempted) throw new BrowserClickOutcomeUnknownError();
+        throw error;
+      }
+    }, work); } catch (error) {
       if (attempted) throw new BrowserClickOutcomeUnknownError();
       throw error;
     }
@@ -621,58 +627,59 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership);
-    const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership, 'type', args);
-    const current = scope.current;
-    current();
-    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'type', ownership, args); current();
-    const { locator, element, revalidate } = await scope.resolve(args.ref);
-    current();
-    const timeout = args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
-    if (args.submit === true) {
-      // The text about to be typed is named explicitly as well as read back off
-      // the form, because the fill has not happened yet at this point: the
-      // guard runs BEFORE anything is entered, so a body lifted from a page
-      // cannot be typed into a field and then submitted while the check looks
-      // at the pre-fill state.
-      const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
-      await revalidate(); scope.current();
-      await work.wait(() => this.requireOutwardEffectAllowed(
-        'browser.submit',
-        `submit the form on ${this.untrusted.originOf(page.url())} after typing into ${element.role} "${element.name}"`,
-        { ...(formFields ?? {}), [element.name || 'typed text']: args.text },
-      ));
-    }
-    current();
-    await revalidate(); current();
-    await credentialCurrent(); current();
-    if (args.replace === false) {
-      await work.action(signal => locator.click({ timeout, signal }));
+    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    return this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      const scope = this.refScope(sessionId, pageId, page, work, ownership, 'type', args);
+      const current = scope.current;
+      current();
+      const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, current, 'type', ownership, args); current();
+      const { locator, element, revalidate } = await scope.resolve(args.ref);
+      current();
+      const timeout = args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
+      if (args.submit === true) {
+        // The text about to be typed is named explicitly as well as read back off
+        // the form, because the fill has not happened yet at this point: the
+        // guard runs BEFORE anything is entered, so a body lifted from a page
+        // cannot be typed into a field and then submitted while the check looks
+        // at the pre-fill state.
+        const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
+        await revalidate(); scope.current();
+        await work.wait(() => this.requireOutwardEffectAllowed(
+          'browser.submit',
+          `submit the form on ${this.untrusted.originOf(page.url())} after typing into ${element.role} "${element.name}"`,
+          { ...(formFields ?? {}), [element.name || 'typed text']: args.text },
+        ));
+      }
       current();
       await revalidate(); current();
       await credentialCurrent(); current();
-      await work.action(signal => locator.pressSequentially(args.text, { timeout, signal }));
-    } else {
-      await work.action(signal => locator.fill(args.text, { timeout, signal }));
-    }
-    let submitted = false;
-    if (args.submit === true) {
-      current();
-      await revalidate(); current();
-      await credentialCurrent(); current();
-      await work.action(signal => locator.press('Enter', { timeout, signal }));
-      await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout }).catch(() => undefined));
-      submitted = true;
-    }
-    if (submitted) this.snapshots.clear(sessionId, pageId);
-    return {
-      sessionId,
-      pageId,
-      typedInto: { ref: args.ref, role: element.role, name: element.name },
-      submitted,
-      url: page.url(),
-    };
+      if (args.replace === false) {
+        await work.action(signal => locator.click({ timeout, signal }));
+        current();
+        await revalidate(); current();
+        await credentialCurrent(); current();
+        await work.action(signal => locator.pressSequentially(args.text, { timeout, signal }));
+      } else {
+        await work.action(signal => locator.fill(args.text, { timeout, signal }));
+      }
+      let submitted = false;
+      if (args.submit === true) {
+        current();
+        await revalidate(); current();
+        await credentialCurrent(); current();
+        await work.action(signal => locator.press('Enter', { timeout, signal }));
+        await work.wait(() => page.waitForLoadState('domcontentloaded', { timeout }).catch(() => undefined));
+        submitted = true;
+      }
+      if (submitted) this.snapshots.clear(sessionId, pageId);
+      return {
+        sessionId,
+        pageId,
+        typedInto: { ref: args.ref, role: element.role, name: element.name },
+        submitted,
+        url: page.url(),
+      };
+    }, work);
   }
 
   /**
@@ -696,26 +703,27 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args, fills: args.fills.map(fill => ({ ...fill })) }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership);
-    const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership);
-    const outcome = await fillSecretsIntoPage({
-      page,
-      snapshot: scope.snapshot,
-      work,
-      assertSnapshotCurrent: scope.current,
-      fills: args.fills,
-      guard: this.cardGuard,
-      timeoutMs: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
-    });
-    if (!outcome.ok) this.snapshots.clear(sessionId, pageId);
-    return {
-      sessionId,
-      pageId,
-      url: page.url(),
-      filled: outcome.filled,
-      failedRef: outcome.failedRef,
-    };
+    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    return this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      const scope = this.refScope(sessionId, pageId, page, work, ownership);
+      const outcome = await fillSecretsIntoPage({
+        page,
+        snapshot: scope.snapshot,
+        work,
+        assertSnapshotCurrent: scope.current,
+        fills: args.fills,
+        guard: this.cardGuard,
+        timeoutMs: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS,
+      });
+      if (!outcome.ok) this.snapshots.clear(sessionId, pageId);
+      return {
+        sessionId,
+        pageId,
+        url: page.url(),
+        filled: outcome.filled,
+        failedRef: outcome.failedRef,
+      };
+    }, work);
   }
 
   async select(
@@ -724,15 +732,16 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args, values: [...args.values] }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership);
-    const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership, 'select', args);
-    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'select', ownership, args); scope.current();
-    const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
-    await revalidate(); assertCurrent();
-    await credentialCurrent(); assertCurrent();
-    const selected = await work.action(signal => locator.selectOption([...args.values], { timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS, signal }));
-    return { sessionId, pageId, selectedIn: { ref: args.ref, role: element.role, name: element.name }, selected };
+    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    return this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      const scope = this.refScope(sessionId, pageId, page, work, ownership, 'select', args);
+      const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'select', ownership, args); scope.current();
+      const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
+      await revalidate(); assertCurrent();
+      await credentialCurrent(); assertCurrent();
+      const selected = await work.action(signal => locator.selectOption([...args.values], { timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS, signal }));
+      return { sessionId, pageId, selectedIn: { ref: args.ref, role: element.role, name: element.name }, selected };
+    }, work);
   }
 
   async press(
@@ -741,25 +750,26 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership);
-    const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership, 'press', args);
-    const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'press', ownership, args); scope.current();
-    const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
-    if (args.key === 'Enter' || args.key === 'NumpadEnter') {
-      const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
-      await revalidate(); scope.current();
-      await work.wait(() => this.requireOutwardEffectAllowed(
-        'browser.submit',
-        `submit the form on ${this.untrusted.originOf(page.url())} by pressing ${args.key} in ${element.role} "${element.name}"`,
-        formFields,
-      ));
-    }
-    await revalidate(); assertCurrent();
-    await credentialCurrent(); assertCurrent();
-    await work.action(signal => locator.press(args.key, { timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS, signal }));
-    this.snapshots.clear(sessionId, pageId);
-    return { sessionId, pageId, pressed: args.key, on: { ref: args.ref, role: element.role, name: element.name }, url: page.url() };
+    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    return this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      const scope = this.refScope(sessionId, pageId, page, work, ownership, 'press', args);
+      const credentialCurrent = await this.credentialInteraction(page, sessionId, pageId, work, scope.current, 'press', ownership, args); scope.current();
+      const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
+      if (args.key === 'Enter' || args.key === 'NumpadEnter') {
+        const formFields = await work.wait(() => BrowserEngine.enclosingFormFields(locator));
+        await revalidate(); scope.current();
+        await work.wait(() => this.requireOutwardEffectAllowed(
+          'browser.submit',
+          `submit the form on ${this.untrusted.originOf(page.url())} by pressing ${args.key} in ${element.role} "${element.name}"`,
+          formFields,
+        ));
+      }
+      await revalidate(); assertCurrent();
+      await credentialCurrent(); assertCurrent();
+      await work.action(signal => locator.press(args.key, { timeout: args.timeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS, signal }));
+      this.snapshots.clear(sessionId, pageId);
+      return { sessionId, pageId, pressed: args.key, on: { ref: args.ref, role: element.role, name: element.name }, url: page.url() };
+    }, work);
   }
 
   async scroll(
@@ -768,20 +778,21 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership);
-    const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership);
-    if (args.ref) {
-      const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
-      await revalidate(); assertCurrent();
-      await locator.scrollIntoViewIfNeeded({ timeout: DEFAULT_ACTION_TIMEOUT_MS });
-      return { sessionId, pageId, scrolledTo: { ref: args.ref, role: element.role, name: element.name } };
-    }
-    const amount = args.amount ?? 600;
-    const delta = args.direction === 'up' ? -amount : amount;
-    await page.mouse.wheel(0, delta);
-    const position = await page.evaluate(() => ({ scrollY: window.scrollY, scrollHeight: document.body.scrollHeight }));
-    return { sessionId, pageId, scrolledBy: delta, ...position };
+    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    return this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      const scope = this.refScope(sessionId, pageId, page, work, ownership);
+      if (args.ref) {
+        const { locator, element, revalidate, assertCurrent } = await scope.resolve(args.ref);
+        await revalidate(); assertCurrent();
+        await work.wait(() => locator.scrollIntoViewIfNeeded({ timeout: DEFAULT_ACTION_TIMEOUT_MS }));
+        return { sessionId, pageId, scrolledTo: { ref: args.ref, role: element.role, name: element.name } };
+      }
+      const amount = args.amount ?? 600;
+      const delta = args.direction === 'up' ? -amount : amount;
+      await work.wait(() => page.mouse.wheel(0, delta));
+      const position = await work.wait(() => page.evaluate(() => ({ scrollY: window.scrollY, scrollHeight: document.body.scrollHeight })));
+      return { sessionId, pageId, scrolledBy: delta, ...position };
+    }, work);
   }
 
   async waitFor(
@@ -878,34 +889,40 @@ export class BrowserEngine {
     target: BrowserTarget,
     args: { readonly fullPage?: boolean | undefined; readonly path?: string | undefined } = {},
   ): Promise<Record<string, unknown>> {
-    const { sessionId, pageId, page } = await this.target(target);
-    assertCaptureAllowed(this.cardGuard, sessionId, pageId);
-    mkdirSync(this.options.screenshotDirectory, { recursive: true });
-    const fileName = `${sessionId}-${pageId}-${String(Date.now())}.png`;
-    // Resolved once, so the path written, the path recorded, and the path
-    // returned to the model are the same string. The ledger matches on exact
-    // spelling and deliberately does not guess a working directory at read
-    // time, so an unresolved relative path here would record one spelling and
-    // hand back another.
-    const path = resolve(args.path ?? join(this.options.screenshotDirectory, fileName));
-    const buffer = await page.screenshot({ path, fullPage: args.fullPage === true });
-    // Recorded as written by this session, which is what lets the agent open
-    // the file it just made even though it lives under a dotted storage root.
-    //
-    // Declared explicitly rather than inferred from the tool-event stream: that
-    // classifier deliberately refuses to grant a waiver for browser and shell
-    // writes, because those paths did not pass through the model. This one did
-    // not either, but the browser engine KNOWS it just created this exact
-    // file, which is the case the explicit entry point exists for.
-    this.options.recordSessionWrite?.(path);
-    return {
-      sessionId,
-      pageId,
-      url: page.url(),
-      path,
-      bytes: buffer.byteLength,
-      next: `Open it with read path:"${path}".`,
-    };
+    target = { ...target }; args = { ...args };
+    return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
+      assertCaptureAllowed(this.cardGuard, sessionId, pageId);
+      const fileName = `${sessionId}-${pageId}-${String(Date.now())}.png`;
+      // Resolved once, so the path written, the path recorded, and the path
+      // returned to the model are the same string. The ledger matches on exact
+      // spelling and deliberately does not guess a working directory at read
+      // time, so an unresolved relative path here would record one spelling and
+      // hand back another.
+      const path = resolve(args.path ?? join(this.options.screenshotDirectory, fileName));
+      let buffer: Awaited<ReturnType<Page['screenshot']>>;
+      try { buffer = await page.screenshot({ fullPage: args.fullPage === true }); }
+      catch { current(); throw new BrowserSessionError('The page could not be captured.', 'Read the current page before trying another capture.'); }
+      current(); assertCaptureAllowed(this.cardGuard, sessionId, pageId); current();
+      mkdirSync(this.options.screenshotDirectory, { recursive: true });
+      writeFileSync(path, buffer);
+      // Recorded as written by this session, which is what lets the agent open
+      // the file it just made even though it lives under a dotted storage root.
+      //
+      // Declared explicitly rather than inferred from the tool-event stream: that
+      // classifier deliberately refuses to grant a waiver for browser and shell
+      // writes, because those paths did not pass through the model. This one did
+      // not either, but the browser engine KNOWS it just created this exact
+      // file, which is the case the explicit entry point exists for.
+      this.options.recordSessionWrite?.(path);
+      return {
+        sessionId,
+        pageId,
+        url: page.url(),
+        path,
+        bytes: buffer.byteLength,
+        next: `Open it with read path:"${path}".`,
+      };
+    });
   }
 
   async tabs(target: BrowserTarget): Promise<Record<string, unknown>> {
@@ -1000,61 +1017,62 @@ export class BrowserEngine {
     ownership?: BrowserActionLifetime,
   ): Promise<Record<string, unknown>> {
     args = { ...args, ...(args.fields ? { fields: [...args.fields] } : {}) }; target = { ...target }; ownership = ownership && { ...ownership };
-    const work = new BrowserControlIdentityWork(ownership);
-    const { sessionId, pageId, page } = await work.wait(() => this.target(target));
-    const scope = this.refScope(sessionId, pageId, page, work, ownership);
-    const fields = args.fields && args.fields.length > 0 ? args.fields : (['text'] as const);
-    const limit = Math.max(1, Math.min(200, args.limit ?? (args.all === true ? 50 : 1)));
+    const work = new BrowserControlIdentityWork(ownership, { drainReads: true });
+    return this.withTarget(target, async ({ sessionId, pageId, page }) => {
+      const scope = this.refScope(sessionId, pageId, page, work, ownership);
+      const fields = args.fields && args.fields.length > 0 ? args.fields : (['text'] as const);
+      const limit = Math.max(1, Math.min(200, args.limit ?? (args.all === true ? 50 : 1)));
 
-    let matched: number;
-    const extracted: unknown[] = [];
-    if (args.ref) {
-      const { locator, revalidate, assertCurrent } = await scope.resolve(args.ref);
-      await revalidate(); assertCurrent();
-      matched = 1;
-      extracted.push(await work.wait(() => locator.evaluate(readElementData, [...fields])));
-      assertCurrent();
-    } else {
-      const selector = args.selector?.trim() || 'body';
-      const all = page.locator(selector);
-      matched = await all.count().catch(() => 0);
-      if (matched === 0) {
-        throw new BrowserSessionError(
-          `Nothing on this page matches ${selector}.`,
-          'Call action:"snapshot" to see what is on the page, then extract by ref or by a selector that matches.',
-        );
+      let matched: number;
+      const extracted: unknown[] = [];
+      if (args.ref) {
+        const { locator, revalidate, assertCurrent } = await scope.resolve(args.ref);
+        await revalidate(); assertCurrent();
+        matched = 1;
+        extracted.push(await work.wait(() => locator.evaluate(readElementData, [...fields])));
+        assertCurrent();
+      } else {
+        const selector = args.selector?.trim() || 'body';
+        const all = page.locator(selector);
+        matched = await work.wait(() => all.count().catch(() => 0));
+        if (matched === 0) {
+          throw new BrowserSessionError(
+            `Nothing on this page matches ${selector}.`,
+            'Call action:"snapshot" to see what is on the page, then extract by ref or by a selector that matches.',
+          );
+        }
+        const take = args.all === true ? Math.min(matched, limit) : 1;
+        for (let index = 0; index < take; index += 1) {
+          extracted.push(await work.wait(() => all.nth(index).evaluate(readElementData, [...fields])));
+        }
       }
-      const take = args.all === true ? Math.min(matched, limit) : 1;
-      for (let index = 0; index < take; index += 1) {
-        extracted.push(await all.nth(index).evaluate(readElementData, [...fields]));
-      }
-    }
 
-    // Extracted field values are page-written text exactly as body text is,
-    // a value lifted out of a form or a table is as good an injection carrier
-    // as a paragraph, and recording the origin without the words would leave
-    // the derivation check with nothing to compare against.
-    // Scrubbed as one serialized blob, which covers every field the caller
-    // asked for at once: `value` is the obvious one, and `html` and
-    // `attributes` are the ones a page uses when it wants the number to come
-    // back out somewhere nobody thought to check.
-    const payload = this.scrub(sessionId, pageId, JSON.stringify(extracted));
-    const origin = this.recordPageIngest(page.url(), payload);
-    return {
-      sessionId,
-      pageId,
-      url: page.url(),
-      matched,
-      returned: extracted.length,
-      ...(matched > extracted.length
-        ? { note: `Showing ${String(extracted.length)} of ${String(matched)} matches. Pass all:true with a limit to read more.` }
-        : {}),
-      // Whatever the page holds is still the page's own words.
-      data: this.untrusted.label({
-        origin,
-        text: payload,
-      }),
-    };
+      // Extracted field values are page-written text exactly as body text is,
+      // a value lifted out of a form or a table is as good an injection carrier
+      // as a paragraph, and recording the origin without the words would leave
+      // the derivation check with nothing to compare against.
+      // Scrubbed as one serialized blob, which covers every field the caller
+      // asked for at once: `value` is the obvious one, and `html` and
+      // `attributes` are the ones a page uses when it wants the number to come
+      // back out somewhere nobody thought to check.
+      const payload = this.scrub(sessionId, pageId, JSON.stringify(extracted));
+      const origin = this.recordPageIngest(page.url(), payload);
+      return {
+        sessionId,
+        pageId,
+        url: page.url(),
+        matched,
+        returned: extracted.length,
+        ...(matched > extracted.length
+          ? { note: `Showing ${String(extracted.length)} of ${String(matched)} matches. Pass all:true with a limit to read more.` }
+          : {}),
+        // Whatever the page holds is still the page's own words.
+        data: this.untrusted.label({
+          origin,
+          text: payload,
+        }),
+      };
+    }, work);
   }
 
   async shutdown(): Promise<void> {

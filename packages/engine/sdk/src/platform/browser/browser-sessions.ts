@@ -57,10 +57,12 @@ export class BrowserSessionError extends Error {
 interface TrackedPage {
   readonly pageId: string;
   readonly page: Page;
+  readonly lifetime: AbortController;
 }
 
 interface TrackedSession {
   readonly sessionId: string;
+  readonly lifetime: AbortController;
   readonly origin: BrowserSessionOrigin;
   readonly context: BrowserContext;
   readonly browser: Browser | null;
@@ -326,7 +328,7 @@ export class BrowserSessionManager {
     for (const session of this.sessions.values()) {
       if (session.origin !== 'launched') continue;
       if (this.isSessionAlive(session)) return session;
-      this.sessions.delete(session.sessionId);
+      this.forgetSession(session);
     }
     return null;
   }
@@ -609,6 +611,7 @@ export class BrowserSessionManager {
     const sessionId = `b${this.#incarnation}.${String(this.#sessionCounter)}`;
     const session: TrackedSession = {
       sessionId,
+      lifetime: new AbortController(),
       origin: input.origin,
       context: input.context,
       browser: input.browser,
@@ -629,7 +632,7 @@ export class BrowserSessionManager {
       this.#assertOpen();
       return this.describe(session);
     } catch (error) {
-      if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
+      this.forgetSession(session);
       throw error;
     }
   }
@@ -640,7 +643,7 @@ export class BrowserSessionManager {
     if (session.pageCounter >= Number.MAX_SAFE_INTEGER) throw new BrowserSessionError('Browser page references are exhausted.');
     session.pageCounter += 1;
     const pageId = `${session.sessionId}p${String(session.pageCounter)}`;
-    const tracked = { pageId, page };
+    const tracked = { pageId, page, lifetime: new AbortController() };
     session.pages.set(pageId, tracked);
     session.activePageId ??= pageId;
     try { page.on('close', () => { this.forgetPage(session, tracked); }); }
@@ -651,6 +654,12 @@ export class BrowserSessionManager {
     if (session.pages.get(tracked.pageId) !== tracked) return;
     session.pages.delete(tracked.pageId);
     if (session.activePageId === tracked.pageId) session.activePageId = session.pages.keys().next().value ?? null;
+    tracked.lifetime.abort(new BrowserSessionError('The original browser page was closed.'));
+  }
+
+  private forgetSession(session: TrackedSession): void {
+    if (this.sessions.get(session.sessionId) === session) this.sessions.delete(session.sessionId);
+    session.lifetime.abort(new BrowserSessionError('The original browser session was closed or released.'));
   }
 
   private describe(session: TrackedSession): BrowserSessionInfo {
@@ -704,15 +713,17 @@ export class BrowserSessionManager {
   }
 
   /** Host-only reads keep the exact selected page owned until native I/O settles. */
-  async withPage<T>(sessionId: string, pageId: string, read: (page: Page, assertCurrent: () => void) => Promise<T>): Promise<T> {
+  async withPage<T>(sessionId: string, pageId: string, read: (page: Page, assertCurrent: () => void, signal: AbortSignal) => Promise<T>): Promise<T> {
     const session = this.require(sessionId), tracked = session.pages.get(pageId);
     if (!tracked) throw new BrowserSessionError('The selected browser page is no longer available.', 'Read a live page before retrying.');
     return this.#operations.run(async () => {
       const current = (): void => {
         this.assertSessionCurrent(session);
         if (session.pages.get(pageId) !== tracked) throw new BrowserSessionError('The selected browser page was closed.', 'Read a live page before retrying.');
+        tracked.lifetime.signal.throwIfAborted();
       };
-      current(); const result = await read(tracked.page, current); current(); return result;
+      const signal = AbortSignal.any([this.#retiring.signal, session.lifetime.signal, tracked.lifetime.signal]);
+      current(); const result = await read(tracked.page, current, signal); current(); return result;
     });
   }
 
@@ -729,7 +740,7 @@ export class BrowserSessionManager {
     return this.#operations.run(() => this.pageOwned(session, pageId));
   }
 
-  private async pageOwned(session: TrackedSession, pageId?: string): Promise<TrackedPage> {
+  private async pageOwned(session: TrackedSession, pageId?: string): Promise<Pick<TrackedPage, 'pageId' | 'page'>> {
     this.assertSessionCurrent(session);
     if (pageId) {
       const tracked = session.pages.get(pageId);
@@ -739,11 +750,12 @@ export class BrowserSessionManager {
           'Call action:"tabs" to list the pages this session controls.',
         );
       }
+      tracked.lifetime.signal.throwIfAborted();
       return { pageId: tracked.pageId, page: tracked.page };
     }
     if (session.activePageId) {
       const tracked = session.pages.get(session.activePageId);
-      if (tracked) return { pageId: tracked.pageId, page: tracked.page };
+      if (tracked) { tracked.lifetime.signal.throwIfAborted(); return { pageId: tracked.pageId, page: tracked.page }; }
     }
     return this.createPage(session, false);
   }
@@ -753,7 +765,7 @@ export class BrowserSessionManager {
     return this.#operations.run(() => this.createPage(session, true));
   }
 
-  private async createPage(session: TrackedSession, activate: boolean): Promise<TrackedPage> {
+  private async createPage(session: TrackedSession, activate: boolean): Promise<Pick<TrackedPage, 'pageId' | 'page'>> {
     this.assertSessionCurrent(session);
     const page = await session.context.newPage();
     this.#unpublishedPages.add(page);
@@ -763,6 +775,7 @@ export class BrowserSessionManager {
       this.assertSessionCurrent(session);
       const registered = [...session.pages.values()].find((entry) => entry.page === page);
       if (!registered) throw new BrowserSessionError('The browser did not return a usable page.', null);
+      registered.lifetime.signal.throwIfAborted();
       if (activate) session.activePageId = registered.pageId;
       this.#unpublishedPages.delete(page);
       return { pageId: registered.pageId, page: registered.page };
@@ -788,6 +801,7 @@ export class BrowserSessionManager {
         `Session ${sessionId} has no page ${pageId}.`,
         'Call action:"tabs" to list the pages this session controls.',
       );
+      tracked.lifetime.abort(new BrowserSessionError('The original browser page is closing.'));
       await this.retirePage(tracked.page);
       this.forgetPage(session, tracked);
     });
@@ -809,12 +823,14 @@ export class BrowserSessionManager {
 
   setActivePage(sessionId: string, pageId: string): void {
     const session = this.require(sessionId);
-    if (!session.pages.has(pageId)) {
+    const tracked = session.pages.get(pageId);
+    if (!tracked) {
       throw new BrowserSessionError(
         `Session ${sessionId} has no page ${pageId}.`,
         'Call action:"tabs" to list the pages this session controls.',
       );
     }
+    tracked.lifetime.signal.throwIfAborted();
     session.activePageId = pageId;
   }
 
@@ -827,6 +843,7 @@ export class BrowserSessionManager {
     const infos: BrowserPageInfo[] = [];
     for (const tracked of [...session.pages.values()]) {
       this.assertSessionCurrent(session);
+      if (tracked.lifetime.signal.aborted) continue;
       let title = '';
       try {
         title = await tracked.page.title();
@@ -834,7 +851,7 @@ export class BrowserSessionManager {
         title = '';
       }
       this.assertSessionCurrent(session);
-      if (session.pages.get(tracked.pageId) !== tracked) continue;
+      if (session.pages.get(tracked.pageId) !== tracked || tracked.lifetime.signal.aborted) continue;
       const url = tracked.page.url();
       this.assertSessionCurrent(session);
       infos.push({
@@ -862,7 +879,7 @@ export class BrowserSessionManager {
       );
     }
     const info = this.describe(session);
-    this.sessions.delete(sessionId);
+    this.forgetSession(session);
     return this.#operations.run(async () => { await this.closeContext(session.context); return info; });
   }
 
@@ -891,7 +908,7 @@ export class BrowserSessionManager {
   release(sessionId: string): BrowserSessionInfo {
     const session = this.require(sessionId);
     const info = this.describe(session);
-    this.sessions.delete(sessionId);
+    this.forgetSession(session);
     const host = this.hosts.get(sessionId);
     if (host) {
       // Ends the helper process, never the browser it was talking to.
@@ -936,7 +953,7 @@ export class BrowserSessionManager {
       // work settles; only unresolved cleanup makes shutdown fail.
       const pageCleanups = [...this.#unpublishedPages].map(page => this.retirePage(page).catch(() => {}));
       for (const session of [...this.sessions.values()]) {
-        this.sessions.delete(session.sessionId);
+        this.forgetSession(session);
         try {
           if (session.origin === 'launched') await this.closeContext(session.context);
           else if (session.browser) detachBrowser(session.browser);

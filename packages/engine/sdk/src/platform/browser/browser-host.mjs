@@ -127,8 +127,10 @@ const handlers = {
         await page.getByText(args.text, { exact: false }).first().waitFor({ state: 'visible', timeout: args.timeout ?? 30_000 });
         return { value: true };
       case 'screenshot': {
-        const buffer = await page.screenshot({ path: args.path, fullPage: args.fullPage === true });
-        return { value: { bytes: buffer.byteLength } };
+        // Return the image to its original owner. Only that owner may write
+        // it after rechecking the page and live card-material protection.
+        const buffer = await page.screenshot({ fullPage: args.fullPage === true });
+        return { value: { bytes: buffer.byteLength, base64: buffer.toString('base64') } };
       }
       case 'wheel':
         await page.mouse.wheel(0, args.delta ?? 0);

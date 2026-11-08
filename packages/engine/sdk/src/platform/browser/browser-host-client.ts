@@ -520,8 +520,14 @@ export function remotePage(client: BrowserHostClient, pageId: string, initialUrl
       }),
     }),
     screenshot: async (options?: Record<string, unknown>) => {
-      const value = await pageCall('screenshot', options ?? {}) as { bytes: number };
-      return { byteLength: value.bytes };
+      const value = await pageCall('screenshot', options ?? {});
+      if (!value || typeof value !== 'object' || !('bytes' in value) || typeof value.bytes !== 'number' || !Number.isSafeInteger(value.bytes)
+        || value.bytes <= 0 || !('base64' in value) || typeof value.base64 !== 'string') {
+        throw new BrowserHostError('The browser helper did not return a complete screenshot.', 'Update the browser helper with this runtime.');
+      }
+      const bytes = Buffer.from(value.base64, 'base64');
+      if (bytes.byteLength !== value.bytes || bytes.toString('base64') !== value.base64) throw new BrowserHostError('The browser helper returned an invalid screenshot.');
+      return bytes;
     },
     mouse: {
       wheel: async (_x: number, delta: number) => {

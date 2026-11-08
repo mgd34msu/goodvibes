@@ -7,6 +7,10 @@
 - Keep navigation, history traversal, snapshots, text reads, waits and new-tab
   navigation in the original page's shutdown drain. Refuse late results before
   publishing page content or replacing snapshot references after session closure.
+- Bind browser actions and extraction to the original page's cancellation and
+  drain lifetime. Preserve unknown-click classification if the page retires
+  after dispatch. Capture screenshots to a private buffer, including through
+  the Node helper, and check live card protection again before writing the image.
 
 - Check the complete current checkout against the exact notified quote before
   card entry and again before submission. Retain that observation through the

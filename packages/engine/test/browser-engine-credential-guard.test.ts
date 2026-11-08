@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { runInNewContext } from 'node:vm';
 import { BrowserHostClient, BrowserHostError, remotePage, browserHostScriptPath } from '../sdk/src/platform/browser/browser-host-client.js';
@@ -145,6 +145,8 @@ interface PageFixtureOptions {
   readonly checkout?: () => unknown;
   readonly untrusted?: UntrustedContentPort;
   readonly onContextClose?: () => Promise<void>;
+  readonly screenshotDirectory?: string;
+  readonly recordSessionWrite?: (path: string) => void;
 }
 function pageState(url: string, title: string, elements: readonly RawElement[]) {
   return { url, documents: [{ frameChain: [], url, title, controls: elements.map(element => ({ documentUrl: url,
@@ -236,7 +238,9 @@ async function buildEngine(url: string, elements: readonly RawElement[], options
       },
     })) as unknown as NonNullable<ConstructorParameters<typeof BrowserSessionManager>[0]['loadDriver']>,
   });
-  const engine = new BrowserEngine(sessions, { screenshotDirectory: SCREENSHOT_DIRECTORY, untrusted: options.untrusted ?? new NoopUntrustedContentPort(), ...(options.guard ? { cardFieldGuard: options.guard } : {}) });
+  const engine = new BrowserEngine(sessions, { screenshotDirectory: options.screenshotDirectory ?? SCREENSHOT_DIRECTORY,
+    untrusted: options.untrusted ?? new NoopUntrustedContentPort(), recordSessionWrite: options.recordSessionWrite,
+    ...(options.guard ? { cardFieldGuard: options.guard } : {}) });
   engines.add(engine);
   await engine.launch({ headless: true });
   if (options.arm) {
@@ -1165,3 +1169,158 @@ for (const operation of ['navigate', 'snapshot', 'readText', 'back', 'forward', 
         expect(() => engine.assertSnapshotCurrent(sessionId, pageId, originalSnapshotId)).not.toThrow();
       } finally { await pending.drain(); await result; await retiring?.catch(() => undefined); }
     });
+
+for (const method of ['click', 'fill', 'pressSequentially', 'select', 'press'] as const)
+  for (const retirement of ['tab', 'session', 'shutdown'] as const)
+    test(`${method} cancels its native action on ${retirement} retirement and drains a noncooperating native wait`, async () => {
+      const pending = pendingNativeAction(), effects: string[] = [], signals: AbortSignal[] = [];
+      let contextClosed!: () => void;
+      const closed = new Promise<void>(resolve => { contextClosed = resolve; });
+      const rows = [{ ...fixtureRow(ORDINARY_ELEMENTS, 0), tag: method === 'select' ? 'select' : method === 'fill' || method === 'pressSequentially' ? 'input' : 'button',
+        role: method === 'select' ? 'combobox' : method === 'fill' || method === 'pressSequentially' ? 'textbox' : 'button', control: attributes() }];
+      const engine = await buildEngine(ORDINARY_URL, rows, { effects,
+        onContextClose: async () => { contextClosed(); },
+        onAction: async (operation, signal) => {
+          if (operation !== method) return;
+          if (!signal) throw new Error('Missing actual native action cancellation');
+          signals.push(signal);
+          await pending.wait(undefined);
+        },
+      });
+      await engine.snapshot({});
+      const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original session');
+      const { pageId } = await engine.sessionManager().page(sessionId), target = { sessionId, pageId };
+      const result = (method === 'fill' ? engine.type(target, { ref: 'e1', text: 'ordinary input' })
+        : method === 'pressSequentially' ? engine.type(target, { ref: 'e1', text: 'ordinary input', replace: false })
+        : method === 'select' ? engine.select(target, { ref: 'e1', values: ['ordinary'] })
+        : method === 'press' ? engine.press(target, { ref: 'e1', key: 'Space' })
+        : engine.click(target, { ref: 'e1' })).catch((error: unknown) => error);
+      let retiring: Promise<unknown> | undefined, retired = false;
+      try {
+        await pending.started;
+        retiring = (retirement === 'shutdown' ? engine.shutdown() : retirement === 'session' ? engine.close(sessionId)
+          : engine.closeTab(target, { pageId })).then(value => { retired = true; return value; });
+        const observed = retiring.catch((error: unknown) => error);
+        if (retirement !== 'tab') await closed;
+        await new Promise<void>(resolve => { setImmediate(() => { resolve(); }); });
+        expect(signals).toHaveLength(1); expect(signals[0]?.aborted).toBe(true);
+        if (retirement === 'shutdown') expect(retired).toBe(false);
+        const alreadyDone = method === 'pressSequentially' ? ['click'] : [];
+        expect(effects).toEqual(alreadyDone);
+        pending.release(); expect(await result).toBeInstanceOf(Error); await observed;
+        expect(effects).toEqual(alreadyDone);
+      } finally { await pending.drain(); await result; await retiring?.catch(() => undefined); }
+    });
+
+for (const retirement of ['card-entry', 'session', 'shutdown'] as const)
+  test(`screenshot refuses ${retirement} during native capture before writing or publishing the image`, async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'goodvibes-private-capture-')), path = join(directory, 'capture.png');
+    const pending = pendingNativeAction(), guard = new CardMaterialRedactor(), writes: string[] = [];
+    const sentinel = 'The owner already had this file';
+    writeFileSync(path, sentinel);
+    let contextClosed!: () => void;
+    const closed = new Promise<void>(resolve => { contextClosed = resolve; });
+    const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, { guard, screenshotDirectory: directory,
+      recordSessionWrite: file => { writes.push(file); }, onContextClose: async () => { contextClosed(); },
+      preparePage(page) { Object.defineProperty(page, 'screenshot', { value: async (options: object) => {
+        expect(options).not.toHaveProperty('path');
+        await pending.wait(undefined); return Buffer.from('Private image of the page');
+      } }); },
+    });
+    const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original session');
+    const { pageId } = await engine.sessionManager().page(sessionId);
+    const result = engine.screenshot({ sessionId, pageId }, { path }).catch((error: unknown) => error);
+    let retiring: Promise<unknown> | undefined;
+    try {
+      await pending.started;
+      if (retirement === 'card-entry') guard.arm(sessionId, pageId, [{ kind: 'number', value: '4242424242424242' }]);
+      else {
+        retiring = retirement === 'shutdown' ? engine.shutdown() : engine.close(sessionId);
+        void retiring.catch(() => undefined); await closed;
+      }
+      expect(readFileSync(path, 'utf8')).toBe(sentinel);
+      pending.release(); expect(await result).toBeInstanceOf(BrowserSessionError);
+      expect(readFileSync(path, 'utf8')).toBe(sentinel); expect(writes).toEqual([]);
+    } finally { await pending.drain(); await result; await retiring?.catch(() => undefined); rmSync(directory, { recursive: true, force: true }); }
+  });
+
+test('successful screenshot writes only after native capture and publishes the actual written path', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'goodvibes-private-capture-')), path = join(directory, 'capture.png');
+  const pending = pendingNativeAction(), writes: string[] = [], bytes = Buffer.from('Fixture image');
+  const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, { screenshotDirectory: directory,
+    recordSessionWrite: file => { writes.push(file); },
+    preparePage(page) { Object.defineProperty(page, 'screenshot', { value: async (options: object) => {
+      expect(options).not.toHaveProperty('path'); await pending.wait(undefined); return bytes;
+    } }); },
+  });
+  const result = engine.screenshot({}, { path });
+  const handled = result.catch((error: unknown) => error);
+  try {
+    await pending.started; expect(existsSync(path)).toBe(false); expect(writes).toEqual([]);
+    pending.release();
+    expect(await result).toMatchObject({ path, bytes: bytes.length });
+    expect(readFileSync(path).equals(bytes)).toBe(true); expect(writes).toEqual([path]);
+  } finally { await pending.drain(); await handled; rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('actual Node host returns complete image bytes without writing a path', async () => {
+  const client = new BrowserHostClient(), host = clientHostFixture(client), bytes = Buffer.from([0, 255, 128, 1, 42]);
+  const receive: unknown = Reflect.get(client, 'handleLine');
+  if (typeof receive !== 'function') throw new Error('Missing actual native client response parser');
+  const protocol = nativeHostProtocol({ screenshot: async (options: object) => {
+    expect(options).not.toHaveProperty('path'); return bytes;
+  } }, line => { Reflect.apply(receive, client, [line.trim(), host.child]); });
+  host.stdin.write = line => { const message: unknown = JSON.parse(line); protocol.receive(message); return true; };
+  try {
+    const image = await remotePage(client, 'native-page', ORDINARY_URL).screenshot();
+    expect(Buffer.isBuffer(image)).toBe(true); expect(image.equals(bytes)).toBe(true);
+    expect(clientPendingCount(client)).toBe(0); expect(protocol.active()).toBe(0);
+  } finally { await client.close(); }
+});
+
+for (const response of [{ bytes: 3 }, { bytes: 3, base64: '####' }, { bytes: 5, base64: 'YWJj' }, { bytes: 3, base64: 'YWJj ' }])
+  test(`remote screenshot refuses incomplete or noncanonical image response ${JSON.stringify(response)}`, async () => {
+    const client = new BrowserHostClient(), host = clientHostFixture(client);
+    const receive: unknown = Reflect.get(client, 'handleLine');
+    if (typeof receive !== 'function') throw new Error('Missing actual native client response parser');
+    host.stdin.write = line => {
+      const request: unknown = JSON.parse(line);
+      if (!request || typeof request !== 'object' || !('id' in request)) throw new Error('Missing screenshot call');
+      Reflect.apply(receive, client, [JSON.stringify({ id: request.id, ok: true, result: { value: response } }), host.child]);
+      return true;
+    };
+    try { await expect(remotePage(client, 'native-page', ORDINARY_URL).screenshot()).rejects.toBeInstanceOf(BrowserHostError); }
+    finally { await client.close(); }
+  });
+
+test('actual fresh-quote request carries the original page cancellation through a pending model read', async () => {
+  const pending = pendingNativeAction(), guard = new CardMaterialRedactor(), effects: string[] = [], prior = installed;
+  const quotes = fakePort(() => noulAnswer(0.99));
+  const signals: AbortSignal[] = [];
+  installJudgmentPort({ ...prior, async ask(request) {
+    if (request.context?.battery !== checkoutTerms.name) return prior.ask(request);
+    if (!request.signal) throw new Error('Fresh quote lost its page cancellation');
+    signals.push(request.signal); await pending.wait(undefined); return quotes.port.ask(request);
+  } });
+  const rows = [{ ...fixtureRow(ORDINARY_ELEMENTS, 0), name: 'Place order', submits: true }];
+  const engine = await buildEngine(ORDINARY_URL, rows, { guard, effects,
+    checkout: () => ({ text: 'Cable x1 USD 10.00. Standard free. Tax USD 1.00. One-off total USD 11.00.', selections: [], quantities: [] }),
+  });
+  await engine.snapshot({});
+  const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original session');
+  const { pageId } = await engine.sessionManager().page(sessionId);
+  const currency = parseCurrencyCode('USD'); if (!currency) throw new Error('Invalid fixture currency');
+  const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => engine, cardFieldGuard: guard })(sessionId, pageId);
+  if (!driver.verifyTerms) throw new Error('Missing real checkout verification');
+  const expected: CheckoutTerms = { submitTarget: 'e1', merchantDomain: 'example.com', currency,
+    lines: [{ label: 'Cable', quantity: 1, unitMinorUnits: 1_000 }], taxMinorUnits: 100, feesMinorUnits: 0, feeLabels: [],
+    shippingLabel: 'Standard', shippingMinorUnits: 0, totalMinorUnits: 1_100 };
+  const result = driver.verifyTerms(expected, { assertCurrent() {} }).catch((error: unknown) => error);
+  try {
+    await pending.started; await engine.closeTab({ sessionId }, { pageId });
+    expect(signals).toHaveLength(1); expect(signals[0]?.aborted).toBe(true);
+    pending.release(); expect(await result).toBeInstanceOf(Error);
+    await expect(driver.submitOrder('e1')).rejects.toBeInstanceOf(CheckoutSubmitRefused);
+    expect(effects).not.toContain('click');
+  } finally { await pending.drain(); await result; }
+});

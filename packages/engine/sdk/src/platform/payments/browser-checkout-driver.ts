@@ -150,7 +150,7 @@ export interface CheckoutBrowserEngine {
     readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined; readonly beforeDispatch?: (() => Promise<void>) | undefined;
   }) => Promise<Record<string, unknown>>;
   observeCheckoutTerms?: (target: CheckoutEngineTarget, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }, submitTarget?: string) => Promise<{
-    readonly state: object; readonly assertCurrent: () => Promise<void>;
+    readonly state: object; readonly assertCurrent: () => Promise<void>; readonly signal?: AbortSignal | undefined;
   }>;
 }
 
@@ -262,6 +262,8 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     if (typeof observe !== 'function') throw new CheckoutDriverRefusal('Fresh checkout terms cannot be read by this browser.', 'Use the current browser checkout seam.');
     const observation = await observe.call(engine, this.target, owner, retained.submitTarget); owner.assertCurrent();
     const assertObservation = observation.assertCurrent;
+    const observationSignal = observation.signal;
+    const signal = observationSignal && owner.signal ? AbortSignal.any([observationSignal, owner.signal]) : observationSignal ?? owner.signal;
     if (typeof assertObservation !== 'function') throw new CheckoutDriverRefusal('The current checkout observation is incomplete.', 'Read the checkout again.');
     const state = captureOwnedJson(observation.state);
     if (!state || typeof state !== 'object' || Array.isArray(state) || !('url' in state) || typeof state.url !== 'string') throw new CheckoutDriverRefusal('The current checkout page has no verifiable origin.', 'Read the checkout again.');
@@ -270,28 +272,30 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     let url: URL;
     try { url = new URL(state.url); } catch { return false; }
     if (url.protocol !== 'https:' || url.username || url.password || registrableDomain(url.hostname) !== retained.merchantDomain) return false;
-    const current = async (): Promise<void> => {
+    const assertActive = (): void => {
       owner.assertCurrent();
-      if (this.#termsOwner !== token || engine.observeCheckoutTerms !== observe || observation.assertCurrent !== assertObservation) throw new CheckoutDriverRefusal('The original checkout observation was replaced.', 'Read the checkout again.');
-      await assertObservation.call(observation); owner.assertCurrent();
-      if (this.#termsOwner !== token || engine.observeCheckoutTerms !== observe) throw new CheckoutDriverRefusal('The original checkout observation was replaced.', 'Read the checkout again.');
+      signal?.throwIfAborted();
+      if (this.#termsOwner !== token || engine.observeCheckoutTerms !== observe || observation.assertCurrent !== assertObservation || observation.signal !== observationSignal) throw new CheckoutDriverRefusal('The original checkout observation was replaced.', 'Read the checkout again.');
+    };
+    const current = async (): Promise<void> => {
+      assertActive();
+      await assertObservation.call(observation); assertActive();
     };
     const base = owner.port;
     const port: JudgmentPort = { ...base, async ask(request) {
       await current();
       const result = await base.ask({ ...request,
-        beforeAttempt: () => { owner.assertCurrent(); request.beforeAttempt?.(); owner.assertCurrent(); },
-        beforeAsyncAttempt: async () => { await current(); await request.beforeAsyncAttempt?.(); owner.assertCurrent(); },
-        assertLogCurrent: () => { owner.assertCurrent(); request.assertLogCurrent?.(); owner.assertCurrent(); },
+        beforeAttempt: () => { assertActive(); request.beforeAttempt?.(); assertActive(); },
+        beforeAsyncAttempt: async () => { await current(); await request.beforeAsyncAttempt?.(); assertActive(); },
+        assertLogCurrent: () => { assertActive(); request.assertLogCurrent?.(); assertActive(); },
       });
       await current(); checkAnswers(request.questions, result.answers); return result;
     } };
-    const run = await checkoutTerms.run(port, toJson(checkoutTermsView(retained, state)) as EntryType, { site: 'payments.current-checkout-terms', signal: owner.signal });
+    const run = await checkoutTerms.run(port, toJson(checkoutTermsView(retained, state)) as EntryType, { site: 'payments.current-checkout-terms', signal });
     await current();
     const unchanged = run.readings.unchanged.outcome === 'act' && run.readings.unchanged.verdict === 'yes';
     run.recordAction(unchanged ? 'current quote matches the exact notified purchase' : 'refused changed or unestablished current quote');
-    owner.assertCurrent();
-    if (this.#termsOwner !== token) throw new CheckoutDriverRefusal('The original checkout observation was replaced.', 'Read the checkout again.');
+    assertActive();
     if (unchanged) this.#quote = { engine, submitTarget: retained.submitTarget, current };
     return unchanged;
   }

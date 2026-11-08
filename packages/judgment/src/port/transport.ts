@@ -8,6 +8,7 @@ import { requiresLongContext, validateContextBudget, validateQuestions } from '.
 import { withRequestId } from './request-id.ts';
 import { interruptible, retryDelay, retryPolicy } from './retry.ts';
 import { opaqueUuid } from './opaque-uuid.ts';
+import { captureJudgmentInput } from './input-snapshot.ts';
 import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
 
 function needsContextUpgrade(error: unknown): boolean {
@@ -80,7 +81,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
         if ('totalTimeoutMs' in request) throw new JudgmentError('invalid-request', 'judgment total-time limits are not supported; cancel through the owning signal');
         checkCancellation();
         let input: Pick<JudgmentRequest<Q>, 'state' | 'questions'>;
-        try { input = JSON.parse(JSON.stringify({ state: request.state, questions: request.questions })) as typeof input; }
+        try { input = captureJudgmentInput(request); }
         catch { throw new JudgmentError('invalid-request', 'judgment input must be JSON-serializable'); }
         const { state, questions } = input;
         validateQuestions(questions);
@@ -146,7 +147,7 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
                 (id) => { requestId = safeId(id); },
               ), attemptController.signal);
               checkCancellation();
-              const result = response.result;
+              const result = response;
               if (!result || typeof result.model !== 'string' || keys.some((key) => result.model.includes(key)) || !result.answers || !result.usage
                 || ![result.usage.input_tokens, result.usage.output_tokens].every((n) => Number.isFinite(n) && n >= 0)) {
                 throw new JudgmentError('invalid-response', 'System One returned an invalid result envelope');

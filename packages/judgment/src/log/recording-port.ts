@@ -1,5 +1,6 @@
 import { drainOwned } from '../drain-owned.ts';
 import { opaqueUuid } from '../port/opaque-uuid.ts';
+import { captureJudgmentInput } from '../port/input-snapshot.ts';
 import { types as nodeTypes } from 'node:util';
 import { checkAnswers, projectAnswers } from '../port/answers.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentErrorKind } from '../port/errors.ts';
@@ -35,15 +36,6 @@ function identifier(value: unknown, model = false): string | undefined {
 }
 
 const invalidResponse = (): JudgmentError => new JudgmentError('invalid-response', FAILURE_MESSAGES['invalid-response']);
-
-/** Freeze detached JSON recursively before handing it to a borrowed transport. */
-function freezeSnapshot<T>(value: T): T {
-  if (value !== null && typeof value === 'object') {
-    for (const child of Object.values(value)) freezeSnapshot(child);
-    Object.freeze(value);
-  }
-  return value;
-}
 
 /** Only documented, validated attempt evidence may cross the log boundary. */
 function projectLineage(value: unknown): JudgmentLineage | undefined {
@@ -211,7 +203,7 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, now: () =
       const { signal, input, questions, at, context } = (() => {
         try {
           const signal = request.signal;
-          const input = freezeSnapshot(toJson({ state: request.state, questions: request.questions })) as unknown as Pick<JudgmentRequest<Q>, 'state' | 'questions'>;
+          const input = captureJudgmentInput(request, { immutable: true });
           return { signal, input, questions: toJson(input.questions), at: isoTime(now()), context: Object.freeze({ ...request.context }) };
         } finally {
           // Borrowed accessors can revoke retention even when they throw. The

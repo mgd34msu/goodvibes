@@ -119,3 +119,62 @@ test('an open WebSocket loses event and mint authority when its pairing is revok
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+
+test('a retained handler authority pins the original token after its request returns and the socket aborts', async () => {
+  const { root, users } = authFixture(), pairing = new PairingTokenManager(join(root, 'pairing.json'));
+  const device = pairing.mint({ name: 'Original paired owner' }), catalog = new GatewayMethodCatalog();
+  let authorized: ((scopes?: readonly string[]) => boolean) | undefined;
+  const descriptor = { id: 'fixture.retained', title: 'Fixture retained work', description: 'Fixture', category: 'fixture', source: 'builtin' as const,
+    transport: ['http' as const, 'ws' as const], access: 'admin' as const, scopes: ['write:fixture'] };
+  catalog.register(descriptor, invocation => { authorized = invocation.isAuthorized; return { accepted: true }; });
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, pairingTokens: pairing, userAuth: users,
+    authToken: () => 'synthetic-shared' } as unknown as DaemonControlPlaneContext);
+  const abort = new AbortController();
+  const input = { methodId: descriptor.id, authToken: device.token, signal: abort.signal, body: { privateInput: 'original request data' } };
+  expect((await helper.invokeGatewayMethodCall(input)).status).toBe(200);
+  abort.abort(); input.authToken = 'unrelated replacement credential'; input.body.privateInput = 'replaced request data';
+  expect(authorized?.(['write:fixture'])).toBe(true);
+  expect(authorized?.(['write:ungranted'])).toBe(false);
+  pairing.revoke(device.id); expect(authorized?.(['write:fixture'])).toBe(false);
+});
+
+test('mutating a returned request cannot rebind its authority to a newly rotated shared credential', async () => {
+  const { users } = authFixture(), catalog = new GatewayMethodCatalog(); let shared = 'first-shared-credential';
+  let authorized: ((scopes?: readonly string[]) => boolean) | undefined;
+  const descriptor = { id: 'fixture.original-shared', title: 'Fixture', description: 'Fixture', category: 'fixture', source: 'builtin' as const,
+    transport: ['ws' as const], access: 'admin' as const, scopes: ['write:fixture'] };
+  catalog.register(descriptor, invocation => { authorized = invocation.isAuthorized; return {}; });
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, userAuth: users, authToken: () => shared } as unknown as DaemonControlPlaneContext);
+  const input = { methodId: descriptor.id, authToken: shared };
+  await helper.invokeGatewayMethodCall(input); expect(authorized?.(['write:fixture'])).toBe(true);
+  shared = 'second-shared-credential'; input.authToken = shared;
+  expect(authorized?.(['write:fixture'])).toBe(false);
+});
+
+test('retiring and restoring a gateway descriptor does not revive a retained handler authorization', async () => {
+  const { users } = authFixture(), catalog = new GatewayMethodCatalog(); let authorized: ((scopes?: readonly string[]) => boolean) | undefined;
+  const descriptor = { id: 'fixture.catalog-owner', title: 'Fixture', description: 'Fixture', category: 'fixture', source: 'builtin' as const,
+    transport: ['ws' as const], access: 'admin' as const, scopes: ['write:fixture'] };
+  catalog.register(descriptor, invocation => { authorized = invocation.isAuthorized; return {}; });
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, userAuth: users, authToken: () => 'synthetic-shared' } as unknown as DaemonControlPlaneContext);
+  await helper.invokeGatewayMethodCall({ methodId: descriptor.id, authToken: 'synthetic-shared' });
+  expect(authorized?.(['write:fixture'])).toBe(true);
+  catalog.register({ ...descriptor, scopes: ['write:different'] }, () => ({}), { replace: true });
+  expect(authorized?.(['write:fixture'])).toBe(false);
+  catalog.register(descriptor, () => ({}), { replace: true }); expect(authorized?.(['write:fixture'])).toBe(false);
+});
+
+test('native execution authority cannot follow a replacement pairing store over the same persisted token', async () => {
+  const { root, users } = authFixture(), file = join(root, 'pairing.json'), pairing = new PairingTokenManager(file);
+  const device = pairing.mint({ name: 'Original native source' });
+  const context = { gatewayMethods: new GatewayMethodCatalog(), pairingTokens: pairing, userAuth: users,
+    authToken: () => 'synthetic-shared' } as unknown as DaemonControlPlaneContext;
+  const helper = new DaemonControlPlaneHelper(context), authority = helper.createNativeExecutionAuthority(device.token);
+  const original = authority?.current(); if (!authority || !original) throw new Error('Expected actual native pairing authority');
+  Reflect.set(context, 'pairingTokens', new PairingTokenManager(file));
+  expect(authority.current()).toBeNull();
+  let effects = 0;
+  await expect(authority.withCurrent(original, () => { effects++; })).rejects.toThrow();
+  expect(effects).toBe(0);
+});

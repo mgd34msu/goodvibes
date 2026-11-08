@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Retain the original gateway credential, principal, scope ceiling and catalog
+  owner independently of a request's mutable fields or payload. Replacing a
+  handler or authentication owner retires that authorization. Native execution
+  authority cannot follow a replacement pairing store over the same token file.
+
 - Wire the real purchase ledger into interrupted-submission recovery. Keep
   unverified submissions distinct from verified purchases. Damaged, unsupported
   or missing-after-observation accounting refuses instead of returning empty

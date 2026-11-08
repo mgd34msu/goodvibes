@@ -19,6 +19,7 @@ import {
 } from '../security/http-auth.js';
 import type { ControlPlaneGateway, SharedSessionBroker } from '../control-plane/index.js';
 import type { GatewayMethodCatalog, GatewayMethodDescriptor } from '../control-plane/index.js';
+import type { GatewayMethodInvocationContext } from '../control-plane/method-catalog-shared.js';
 import { grantedGatewayScopes } from '../control-plane/method-catalog.js';
 import { CHANNEL_REQUIRED_SCOPE } from '../control-plane/gateway-scope-enforcement.js';
 import type { RuntimeEventDomain } from '../runtime/events/index.js';
@@ -360,6 +361,7 @@ export class DaemonControlPlaneHelper {
     if (!initial) return null;
     const ceiling = new Set(capturedScopes ?? initial.scopes);
     const current = (): NativePairedSnapshot | null => {
+      if (this.context.pairingTokens !== owner) return null;
       const fresh = this.describeNativeExecutionAuthority(token);
       if (!fresh || fresh.tokenId !== initial.tokenId || fresh.authorityRevision !== initial.authorityRevision) return null;
       const scopes = ceiling.has('*') ? fresh.scopes : fresh.scopes.includes('*') ? [...ceiling]
@@ -796,6 +798,28 @@ export class DaemonControlPlaneHelper {
     }
   }
 
+  /** Separate construction scope: a retained handler authorization must not
+   * retain or reread its request body, query, abort signal or mutable authToken
+   * field. The original credential/principal/scopes and actual catalog/auth
+   * owners remain restrictions after a handler returns or its socket closes. */
+  private retainGatewayAuthorization(token: string, descriptor: GatewayMethodDescriptor,
+    context: GatewayMethodInvocationContext | undefined): (requiredScopes?: readonly string[]) => boolean {
+    const catalog = this.context.gatewayMethods, pairing = this.context.pairingTokens, users = this.context.userAuth;
+    const captured = Object.freeze({ principalId: context?.principalId, principalKind: context?.principalKind,
+      admin: context?.admin === true, scopes: Object.freeze([...(context?.scopes ?? [])]) });
+    return (requiredScopes = []) => {
+      if (this.context.gatewayMethods !== catalog || catalog.get(descriptor.id) !== descriptor
+        || this.context.pairingTokens !== pairing || this.context.userAuth !== users) return false;
+      if (descriptor.access === 'public' || descriptor.access === 'remote-peer') return true;
+      const fresh = this.describeAuthenticatedPrincipal(token);
+      return fresh !== null && fresh.principalId === captured.principalId && fresh.principalKind === captured.principalKind
+        && requiredScopes.every(scope => (fresh.scopes.includes('*') || fresh.scopes.includes(scope))
+          && (captured.scopes.includes('*') || captured.scopes.includes(scope)))
+        && this.validateGatewayInvocation(descriptor, fresh) === null
+        && this.validateGatewayInvocation(descriptor, captured) === null;
+    };
+  }
+
   async invokeGatewayMethodCall(input: {
     readonly authToken: string;
     readonly methodId: string;
@@ -895,15 +919,7 @@ export class DaemonControlPlaneHelper {
           query: input.query,
           signal: input.signal,
           nativeExecutionAuthority: this.createNativeExecutionAuthority(input.authToken, context?.scopes ?? []) ?? undefined,
-          isAuthorized: (requiredScopes = []) => {
-            if (descriptor.access === 'public' || descriptor.access === 'remote-peer') return true;
-            const fresh = this.describeAuthenticatedPrincipal(input.authToken);
-            return fresh !== null && fresh.principalId === context?.principalId && fresh.principalKind === context?.principalKind
-              && requiredScopes.every(scope => (fresh.scopes.includes('*') || fresh.scopes.includes(scope))
-                && (context?.scopes?.includes('*') || context?.scopes?.includes(scope)))
-              && this.validateGatewayInvocation(descriptor, fresh) === null
-              && this.validateGatewayInvocation(descriptor, context) === null;
-          },
+          isAuthorized: this.retainGatewayAuthorization(input.authToken, descriptor, context),
           context: {
             authToken: input.authToken,
             principalId: context?.principalId,

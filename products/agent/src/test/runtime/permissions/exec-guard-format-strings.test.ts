@@ -9,7 +9,6 @@ import { describe, it, expect } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
   decideByPreset,
-  forgetCatastrophicReadings,
   GATE_PRESETS,
   readToolCall,
 } from '@goodvibes-jev/engine/sdk/platform/gate';
@@ -32,7 +31,6 @@ async function withCommandReading(
       ? obfuscated === 'uncertain' ? 0.5 : obfuscated ? 0.97 : 0.03
       : 0.03);
   });
-  forgetCatastrophicReadings();
   const previous = installJudgmentPort(port);
   try {
     const reading = await readToolCall({ toolName: 'exec', args: { command }, askObfuscated: true });
@@ -44,7 +42,6 @@ async function withCommandReading(
     await check(reading);
   } finally {
     installJudgmentPort(previous);
-    forgetCatastrophicReadings();
   }
 }
 

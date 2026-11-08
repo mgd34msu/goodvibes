@@ -8,7 +8,6 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import {
   classificationFromReading,
   decideByPreset,
-  forgetCatastrophicReadings,
   GATE_PRESETS,
   readToolCall,
   runBoundary,
@@ -69,7 +68,6 @@ async function withCommandReading(
       default: return noulAnswer(0.03);
     }
   });
-  forgetCatastrophicReadings();
   const previous = installJudgmentPort(port);
   try {
     const reading = await readToolCall({ toolName: 'exec', args: { command }, askObfuscated: true });
@@ -79,7 +77,6 @@ async function withCommandReading(
     await check(reading);
   } finally {
     installJudgmentPort(previous);
-    forgetCatastrophicReadings();
   }
 }
 

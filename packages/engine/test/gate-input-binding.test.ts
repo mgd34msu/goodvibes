@@ -1,4 +1,4 @@
-/** Complete admitted inputs and their cached readings stay bound together. */
+/** Complete gate inputs and standalone readings retain their own source snapshots. */
 import { expect, test } from 'bun:test';
 import { useGateReadings } from './_helpers/gate-readings.ts';
 import { readingArguments, readingState, readToolCall, readCatastrophic } from '../sdk/src/platform/gate/reading.ts';
@@ -28,14 +28,14 @@ test('complete nested JSON is owned and immutable without dropping long string s
   expect(Object.isFrozen(state.arguments)).toBe(true);
 });
 
-test('a short complete command retains the gate cache fast path', async () => {
+test('a standalone assessment does not reuse a previous gate reading', async () => {
   const reading = await readToolCall({ toolName: 'exec', args: { command: original }, askObfuscated: true });
   expect(reading.boundary.catastrophic).toBe('no');
   expect(log.requests).toHaveLength(1);
   expect(log.requests.every(request => JSON.stringify(request.state).includes(original))).toBe(true);
-  expect(await readCatastrophic(original)).toEqual({ verdict: 'no', readByGate: true });
+  expect(await readCatastrophic(original)).toEqual({ verdict: 'no', readByGate: false });
   expect((await guardExecCommand(original)).allowed).toBe(true);
-  expect(log.requests).toHaveLength(1);
+  expect(log.requests).toHaveLength(2);
 });
 
 test.each(['command', 'cmd', 'commands'] as const)('the full %s suffix reaches explicit readings without introducing an exec permission gate', async shape => {
@@ -45,13 +45,13 @@ test.each(['command', 'cmd', 'commands'] as const)('the full %s suffix reaches e
   expect(log.requests).toHaveLength(1);
   expect(log.requests.every(request => JSON.stringify(request.state).includes(marker))).toBe(true);
   expect(reading.boundary.catastrophic).toBe('yes');
-  expect(await readCatastrophic(command)).toEqual({ verdict: 'yes', readByGate: true });
+  expect(await readCatastrophic(command)).toEqual({ verdict: 'yes', readByGate: false });
   for (const astMode of [false, true]) {
     const guard = await guardExecCommand(command, { isEnabled: key => key === 'shell-ast-normalization' && astMode });
     expect(guard.allowed).toBe(true);
     expect(guard.astModeActive).toBe(astMode);
   }
-  expect(log.requests).toHaveLength(1);
+  expect(log.requests).toHaveLength(2);
 });
 
 test('exec-time reading without an earlier gate also sees the complete command', async () => {
@@ -62,7 +62,7 @@ test('exec-time reading without an earlier gate also sees the complete command',
   expect((await guardExecCommand(command)).allowed).toBe(true);
 });
 
-test('changing borrowed arguments while readings settle cannot acquire the original cache entry', async () => {
+test('changing borrowed arguments cannot replace either captured assessment', async () => {
   const args = { commands: [{ cmd: original }] };
   const pending = readToolCall({ toolName: 'exec', args, askObfuscated: true });
   args.commands[0]!.cmd = changed;
@@ -72,16 +72,16 @@ test('changing borrowed arguments while readings settle cannot acquire the origi
   expect((await guardExecCommand(changed)).allowed).toBe(true);
 });
 
-test('the cache remains associated with the owned command that was actually judged', async () => {
+test('a gate reading and a later standalone assessment each retain their complete command', async () => {
   const args = { commands: [{ cmd: original }] };
   const pending = readToolCall({ toolName: 'exec', args, askObfuscated: true });
   args.commands[0]!.cmd = changed;
   await pending;
-  expect(await readCatastrophic(original)).toEqual({ verdict: 'no', readByGate: true });
-  expect(log.requests).toHaveLength(1);
+  expect(await readCatastrophic(original)).toEqual({ verdict: 'no', readByGate: false });
+  expect(log.requests).toHaveLength(2);
 });
 
-test('one batch reading is not cached as separate per-command judgments', async () => {
+test('a batch gate reading cannot substitute for standalone command assessments', async () => {
   await readToolCall({ toolName: 'exec', args: { commands: [{ cmd: original }, { cmd: changed }] }, askObfuscated: true });
   expect(await readCatastrophic(original)).toEqual({ verdict: 'no', readByGate: false });
   expect(await readCatastrophic(changed)).toEqual({ verdict: 'yes', readByGate: false });
@@ -98,7 +98,7 @@ test('interpretation uses the options that requested the readings, not later bor
   expect(log.requests.flatMap(request => Object.keys(request.questions ?? {}))).toContain('effect__kind');
 });
 
-test('cancellation cannot publish a late cache entry even if the borrowed signal is replaced', async () => {
+test('a cancelled gate call cannot substitute for a later standalone assessment', async () => {
   const controller = new AbortController();
   const input = { toolName: 'exec', args: { command: original }, askObfuscated: true, signal: controller.signal };
   const pending = readToolCall(input);

@@ -133,16 +133,20 @@ export interface ReadToolCallInput {
 /** The decision site the gate's readings are logged under. */
 export const GATE_SITE = 'engine.gate';
 
+export type CatastrophicReadingOptions = Pick<ReadToolCallInput, 'workingDirectory' | 'externalRequestEvidence' | 'port'>;
+
+function callReadingState(toolName: string, args: Record<string, unknown>, workingDirectory: string | undefined,
+  evidence: ExternalRequestEvidence | undefined): { [key: string]: JsonValue } {
+  const external = readExternalRequestEvidence(evidence);
+  return Object.freeze({ ...readingState(toolName, args, workingDirectory), ...(external ? { externalRequest: readingArguments(external) } : {}) });
+}
+
 /** Reads the independent gate batteries about one captured call in a shared request. */
 export async function readToolCall(input: ReadToolCallInput, site: string = GATE_SITE): Promise<GateReading> {
   requireDecisionFeature('semantic tool-call risk assessment; Classic uses native permission rules and owner approvals');
   const { toolName, args, workingDirectory, signal: abortSignal, askKind = false, askObfuscated = false, port: scopedPort } = input;
-  const external = readExternalRequestEvidence(input.externalRequestEvidence);
-  const state: { [key: string]: JsonValue } = { ...readingState(toolName, args, workingDirectory), ...(external ? { externalRequest: readingArguments(external) } : {}) };
+  const state = callReadingState(toolName, args, workingDirectory, input.externalRequestEvidence);
   const shell = askObfuscated === true;
-  // Bind cache publication to the owned input actually sent, not borrowed
-  // arguments or options that may change while the readings are in flight.
-  const judgedCommands = shell ? shellCommandsIn(state.arguments as Record<string, unknown>) : [];
   const port = scopedPort ?? judgmentPort(site);
   const signal = abortSignal === undefined ? {} : { signal: abortSignal };
   const run = await fanOut(port, state, { effect: sideEffect, risk: riskFamily, edge: boundaryReading }, {
@@ -162,7 +166,6 @@ export async function readToolCall(input: ReadToolCallInput, site: string = GATE
   const { effect, risk, edge } = run.readings;
   abortSignal?.throwIfAborted();
   const catastrophic = shell ? edge.catastrophic.verdict : undefined;
-  if (catastrophic !== undefined) rememberCatastrophic(judgedCommands, catastrophic);
   const yesNo: Partial<Record<GateFactName, YesNoReading>> = {
     mutates: effect.mutates,
     outward: effect.outward,
@@ -254,37 +257,22 @@ export function shellCommandsIn(args: Record<string, unknown>): string[] {
 }
 
 /**
- * The catastrophic verdicts the gate read, by command text, so the exec tool's
- * run-time check (tools/exec/ast-guard.ts) repeats the gate's decision without
- * asking again. Bounded: the oldest entry leaves first.
- */
-const CATASTROPHIC_SEEN = new Map<string, YesNoReading['verdict']>();
-const CATASTROPHIC_SEEN_LIMIT = 256;
-
-function rememberCatastrophic(commands: readonly string[], verdict: YesNoReading['verdict']): void {
-  if (commands.length !== 1) return;
-  CATASTROPHIC_SEEN.delete(commands[0]!);
-  CATASTROPHIC_SEEN.set(commands[0]!, verdict);
-  if (CATASTROPHIC_SEEN.size > CATASTROPHIC_SEEN_LIMIT) CATASTROPHIC_SEEN.delete(CATASTROPHIC_SEEN.keys().next().value!);
-}
-
-/**
  * Whether one shell command would destroy the machine or the user's data
- * wholesale: the gate's reading of it when the gate read this command
- * (`readByGate`), or a fresh `engine.gate.boundary` reading of just that
- * question, which is not remembered as the gate's.
+ * wholesale, freshly assessed in the supplied context. A previous reading of
+ * identical command text is not authority or evidence for this call. The
+ * ordinary execution gate still owns its own complete admission checks.
  */
 export async function readCatastrophic(
   command: string,
   site = 'engine.gate.exec-time',
   signal?: AbortSignal,
+  options: CatastrophicReadingOptions = {},
 ): Promise<{ readonly verdict: YesNoReading['verdict']; readonly readByGate: boolean }> {
   requireDecisionFeature('semantic catastrophic-command assessment; Classic retains native permission and approval handling');
   signal?.throwIfAborted();
-  const state = readingState('exec', { command });
-  const seen = CATASTROPHIC_SEEN.get(command);
-  if (seen !== undefined) return { verdict: seen, readByGate: true };
-  const run = await executePolicyCheck(() => boundaryReading.run(judgmentPort(site), state, {
+  const { workingDirectory, externalRequestEvidence, port } = options;
+  const state = callReadingState('exec', { command }, workingDirectory, externalRequestEvidence);
+  const run = await executePolicyCheck(() => boundaryReading.run(port ?? judgmentPort(site), state, {
     site, only: ['catastrophic'], ...(signal === undefined ? {} : { signal }),
   }), signal);
   signal?.throwIfAborted();
@@ -294,8 +282,3 @@ export async function readCatastrophic(
 }
 
 export { readTouchesSecrets } from '../permissions/credential-read-defaults.js';
-
-/** Forgets the catastrophic verdicts the gate remembered (tests, and a model change). */
-export function forgetCatastrophicReadings(): void {
-  CATASTROPHIC_SEEN.clear();
-}

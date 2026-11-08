@@ -69,7 +69,7 @@ export type {
 } from './types.js';
 
 export type { DecisionLogEntry, DecisionLogQuery } from './decision-log.js';
-export type { SafetyCheckResult } from './safety-checks.js';
+export type { SafetyCheckOptions, SafetyCheckResult } from './safety-checks.js';
 export type { PolicyLintFinding, PolicyLintSeverity } from './lint.js';
 export type { PermissionRuleSuggestion } from './rule-suggestions.js';
 export type {

@@ -16,7 +16,6 @@ import { approvalMetadataForRequest } from '../../runtime/bootstrap-core.ts';
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetCatastrophicReadings } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 
 /** Build a minimal AgentRecord for testing (mirrors orchestrator.test.ts's helper). */
@@ -105,7 +104,6 @@ describe('fleet plane adoption', () => {
     await Promise.all([memoryStore.init(), projectIndex.load()]);
 
     // Install after runtime construction; ordinary configured writes stay automatic.
-    forgetCatastrophicReadings();
     const previousJudgmentPort = installJudgmentPort(fakePort((wireName, question) => {
     const name = wireName.replace(/^(effect|risk|edge)__/, '');
       if (name === 'family') return choiceAnswer(question, 'file-mutation', 0.97);
@@ -238,7 +236,6 @@ describe('fleet plane adoption', () => {
       }
     } finally {
       installJudgmentPort(previousJudgmentPort);
-      forgetCatastrophicReadings();
       memoryStore.close();
       await projectIndex.dispose();
       if (existsSync(memoryDbPath)) unlinkSync(memoryDbPath);

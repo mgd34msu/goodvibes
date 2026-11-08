@@ -14,7 +14,6 @@ import { PolicyRuntimeState } from '@/runtime/index.ts';
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { forgetFailureReadings, installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetCatastrophicReadings } from '@goodvibes-jev/engine/sdk/platform/gate';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { authoredPrivacyAnswer, errorSpan, errorText } from '../helpers/authored-diagnostic-readings.ts';
 
@@ -177,7 +176,6 @@ describe('AgentOrchestrator', () => {
     // Runtime construction installs its provider-backed port; replace it only
     // afterwards with explicit readings for these runner integration cases.
     forgetFailureReadings();
-    forgetCatastrophicReadings();
     const readDiagnostic = authoredPrivacyAnswer({
       parts: [
         [errorText('API unavailable')],
@@ -259,7 +257,6 @@ describe('AgentOrchestrator', () => {
   afterEach(async () => {
     installJudgmentPort(previousJudgmentPort);
     forgetFailureReadings();
-    forgetCatastrophicReadings();
     process.chdir(originalCwd);
     memoryStore?.close();
     await projectIndex?.dispose();

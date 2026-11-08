@@ -18,14 +18,12 @@ import { afterEach, beforeEach } from 'bun:test';
 import type { Question } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { forgetCatastrophicReadings } from '../../sdk/src/platform/gate/reading.ts';
 import { forgetReadSecrets } from '../../sdk/src/platform/permissions/credential-read-defaults.ts';
 import { forgetCommandNeeds } from '../../sdk/src/platform/runtime/permissions/normalization/classifier.ts';
 import { forgetLedgerArgRoles } from '../../sdk/src/platform/gate/policy/execution-ledger.ts';
 
 /** Clears the readings the gate remembers per process, so one test's answers never serve another. */
 export function forgetGateReadings(): void {
-  forgetCatastrophicReadings();
   forgetReadSecrets();
   forgetCommandNeeds();
   forgetLedgerArgRoles();

@@ -27,7 +27,7 @@
  * The gate runs its readings before the policy evaluator, so the evaluator no
  * longer carries a safety layer of its own.
  */
-import { readCatastrophic, shellCommandsIn } from '../../gate/reading.js';
+import { readCatastrophic, shellCommandsIn, type CatastrophicReadingOptions } from '../../gate/reading.js';
 import type { DecisionReason, EvaluationStep } from './types.js';
 
 export interface SafetyCheckResult {
@@ -39,6 +39,10 @@ export interface SafetyCheckResult {
   detail?: string | undefined;
   /** Steps added to the trace during evaluation (one per check run). */
   steps: EvaluationStep[];
+}
+
+export interface SafetyCheckOptions extends CatastrophicReadingOptions {
+  readonly signal?: AbortSignal | undefined;
 }
 
 /** The path-like string arguments of a call. */
@@ -57,7 +61,9 @@ function pathArgs(args: Record<string, unknown>): string[] {
  * reading is uncertain is blocked here, because nothing in this check can ask
  * the owner (inside the gate the same reading sends the call to the owner).
  */
-export async function runSafetyChecks(args: Record<string, unknown>): Promise<SafetyCheckResult> {
+export async function runSafetyChecks(args: Record<string, unknown>, options: SafetyCheckOptions = {}): Promise<SafetyCheckResult> {
+  const { signal, ...context } = options;
+  signal?.throwIfAborted();
   const steps: EvaluationStep[] = [];
   const nul = pathArgs(args).find((path) => path.includes('\0'));
   steps.push({ layer: 'safety', check: 'path-nul-byte', matched: nul !== undefined, ...(nul !== undefined ? { detail: 'a path argument contains a NUL byte' } : {}) });
@@ -65,7 +71,7 @@ export async function runSafetyChecks(args: Record<string, unknown>): Promise<Sa
     return { blocked: true, reason: 'SAFETY_DENY_PATH_ESCAPE', detail: 'a path argument contains a NUL byte, so the path named is not the path that would be opened', steps };
   }
   for (const command of shellCommandsIn(args)) {
-    const { verdict } = await readCatastrophic(command, 'engine.gate.safety-check');
+    const { verdict } = await readCatastrophic(command, 'engine.gate.safety-check', signal, context);
     const blocked = verdict !== 'no';
     steps.push({ layer: 'safety', check: 'catastrophic', matched: blocked, detail: `Jev reading: ${verdict}` });
     if (blocked) {

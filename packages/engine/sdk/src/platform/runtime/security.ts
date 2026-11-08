@@ -61,6 +61,7 @@ export {
   signBundle,
   verifyBundle,
 } from './permissions/index.js';
+export type { SafetyCheckOptions, SafetyCheckResult } from './permissions/index.js';
 export {
   MAX_INPUT_LENGTH,
   MAX_TOKEN_COUNT,

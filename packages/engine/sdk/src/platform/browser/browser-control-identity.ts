@@ -6,6 +6,7 @@ import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { awaitPermission } from '../permissions/cancellation.js';
 import { currentExecutionMode } from '../gate/execution-context.js';
 import { activateClassicFallback, decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
+import { isCardFieldDescriptor, type FormControlDescriptor } from '../security/card-fields.js';
 
 export const browserControlIdentity = defineBattery({
   name: 'browser.control.same-identity', version: 1, accuracyFloor: 0.95,
@@ -76,6 +77,11 @@ export class BrowserControlIdentityWork {
   private currentSignal(): AbortSignal | undefined {
     const original = this.owner?.signal ?? this.signal;
     return original && this.pageSignal ? AbortSignal.any([original, this.pageSignal]) : original ?? this.pageSignal;
+  }
+
+  /** Snapshot value retention uses the same original reader and native page owner. */
+  cardField(control: FormControlDescriptor): Promise<boolean> {
+    return isCardFieldDescriptor(control, { port: this.owner?.port, signal: this.currentSignal(), assertCurrent: this.assertCurrent });
   }
   async wait<T>(work: () => Promise<T>): Promise<T> {
     this.assertCurrent();

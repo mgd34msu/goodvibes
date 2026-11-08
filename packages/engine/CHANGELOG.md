@@ -11,6 +11,9 @@
   drain lifetime. Preserve unknown-click classification if the page retires
   after dispatch. Capture screenshots to a private buffer, including through
   the Node helper, and check live card protection again before writing the image.
+- Retain the original snapshot reader before DOM access and carry page
+  cancellation through card-field classification. Stop further field readings
+  after retirement instead of adopting a later installed provider.
 
 - Check the complete current checkout against the exact notified quote before
   card entry and again before submission. Retain that observation through the

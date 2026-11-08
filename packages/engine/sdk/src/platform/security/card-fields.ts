@@ -28,7 +28,8 @@
  * comparable, so a control is treated as a payment field unless the reading
  * is a confident no.
  */
-import { judgmentPort } from '@goodvibes-jev/engine/errors';
+import { judgmentPort, JudgmentPortMissingError } from '@goodvibes-jev/engine/errors';
+import { checkAnswers, drainOwned, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { cardField } from './batteries/card-field.js';
 import { runDecisionOrClassic as decisionOrClassic } from '@goodvibes-jev/engine/errors';
 
@@ -74,7 +75,20 @@ const CARD_AUTOCOMPLETE_TOKENS: ReadonlySet<string> = new Set([
 export const CARD_FIELD_SITE = 'security.card-field';
 
 /** Whether this control is a payment field whose value must never be reported. */
-export async function isCardFieldDescriptor(control: FormControlDescriptor): Promise<boolean> {
+export async function isCardFieldDescriptor(control: FormControlDescriptor, reading?: {
+  /** Explicit absence retains the caller's original missing reader. */
+  readonly port: JudgmentPort | undefined;
+  readonly signal?: AbortSignal | undefined;
+  readonly assertCurrent: () => void;
+}): Promise<boolean> {
+  const source = reading?.port, signal = reading?.signal, assertion = reading?.assertCurrent;
+  const current = (): void => {
+    signal?.throwIfAborted();
+    const value: unknown = assertion?.();
+    if (value !== undefined) { drainOwned(value); throw new Error('The card-field reading owner must be synchronous.'); }
+    signal?.throwIfAborted();
+  };
+  current();
   // Every field is coerced rather than trusted. This runs on data that came
   // back from inside a page, where a missing or oddly-typed property is an
   // ordinary occurrence, and a throw here would fail the whole snapshot, which
@@ -90,7 +104,18 @@ export async function isCardFieldDescriptor(control: FormControlDescriptor): Pro
   if (tokens.some((token) => CARD_AUTOCOMPLETE_TOKENS.has(token))) return true;
 
   return decisionOrClassic(async () => {
-    const run = await cardField.run(judgmentPort(CARD_FIELD_SITE), {
+    current();
+    const base = reading === undefined ? judgmentPort(CARD_FIELD_SITE) : source;
+    if (!base) throw new JudgmentPortMissingError(CARD_FIELD_SITE);
+    const port: JudgmentPort = { ...base, async ask(request) {
+      current();
+      const result = await base.ask({ ...request,
+        beforeAttempt: () => { current(); request.beforeAttempt?.(); current(); },
+        assertLogCurrent: () => { current(); request.assertLogCurrent?.(); current(); },
+      });
+      current(); checkAnswers(request.questions, result.answers); return result;
+    } };
+    const run = await cardField.run(port, {
       tag,
       type: text(control.type),
       name: text(control.name),
@@ -98,12 +123,15 @@ export async function isCardFieldDescriptor(control: FormControlDescriptor): Pro
       placeholder: text(control.placeholder),
       ariaLabel: text(control.ariaLabel),
       label: text(control.label),
-    }, { site: CARD_FIELD_SITE });
+    }, { site: CARD_FIELD_SITE, signal, beforeAttempt: current });
+    current();
     const reading = run.readings.card_field;
     const ordinary = reading.verdict === 'no' && reading.outcome === 'act';
     run.recordAction(ordinary ? 'value reported' : 'value suppressed');
+    current();
     return !ordinary;
   }, () => {
+    current();
     // This boolean governs value retention, not a claim that the control is a
     // payment field. With no semantic assessment, omit every form value;
     // selectors, labels, checked state and owner-authorized actions remain usable.

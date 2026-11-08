@@ -2,7 +2,6 @@ import type { Frame, FrameLocator, Locator, Page } from 'playwright-core';
 import { types as nodeTypes } from 'node:util';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
-import { isCardFieldDescriptor } from '../security/card-fields.js';
 import { containsIssuerCredential } from '../utils/redaction.js';
 
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
@@ -623,7 +622,7 @@ function selectorOfFrameElement(element: Element): string {
  * Returns null when any link cannot be addressed, so a frame is either fully
  * reachable or reported not at all, never half-addressable.
  */
-async function frameChainFor(frame: Frame): Promise<readonly string[] | null> {
+async function frameChainFor(frame: Frame, work: BrowserControlIdentityWork): Promise<readonly string[] | null> {
   // A host-backed frame already knows its chain; the host computed it when it
   // listed the frames, so there is nothing to ask for again.
   const precomputed = (frame as unknown as { readonly __frameChain?: readonly string[] }).__frameChain;
@@ -631,9 +630,10 @@ async function frameChainFor(frame: Frame): Promise<readonly string[] | null> {
   const chain: string[] = [];
   let current: Frame | null = frame;
   while (current && current.parentFrame()) {
-    const element = await current.frameElement().catch(() => null);
+    const original = current;
+    const element = await work.wait(() => original.frameElement().catch(() => null));
     if (!element) return null;
-    const selector = await element.evaluate(selectorOfFrameElement).catch(() => '');
+    const selector = await work.wait(() => element.evaluate(selectorOfFrameElement).catch(() => ''));
     if (!selector) return null;
     chain.unshift(selector);
     current = current.parentFrame();
@@ -670,16 +670,20 @@ export async function takeSnapshot(
   page: Page,
   sessionId: string,
   pageId: string,
-  options: { readonly limit?: number | undefined; readonly guard?: CardFieldGuard | undefined; readonly controls?: BrowserControlAdmission | undefined } = {},
+  options: { readonly limit?: number | undefined; readonly guard?: CardFieldGuard | undefined; readonly controls?: BrowserControlAdmission | undefined;
+    readonly work?: BrowserControlIdentityWork | undefined } = {},
 ): Promise<BrowserSnapshot> {
+  const work = options.work ?? new BrowserControlIdentityWork({}, { drainReads: true });
+  work.assertCurrent();
   const limit = options.limit !== undefined && options.limit > 0 ? Math.floor(options.limit) : Number.MAX_SAFE_INTEGER;
   const raw: (RawElement & { readonly frameChain: readonly string[] })[] = [];
   for (const frame of page.frames()) {
     if (!options.controls && raw.length >= limit) break;
-    const chain = frame === page.mainFrame() ? [] : await frameChainFor(frame);
+    work.assertCurrent();
+    const chain = frame === page.mainFrame() ? [] : await frameChainFor(frame, work);
     if (chain === null) { if (options.controls) throw new Error('Complete browser controls unavailable'); continue; }
-    const collected = captureOwnedJson(await frame.evaluate(collectElements, options.controls ? Number.MAX_SAFE_INTEGER : limit - raw.length)
-      .catch(error => { if (options.controls) throw error; return [] as RawElement[]; }), nodeTypes.isProxy) as RawElement[];
+    const collected = captureOwnedJson(await work.wait(() => frame.evaluate(collectElements, options.controls ? Number.MAX_SAFE_INTEGER : limit - raw.length)
+      .catch(error => { if (options.controls) throw error; return [] as RawElement[]; })), nodeTypes.isProxy) as RawElement[];
     raw.push(...collected.map((element) => ({ ...element, frameChain: chain })));
   }
   if (options.controls) {
@@ -693,7 +697,7 @@ export async function takeSnapshot(
   // buttons carry no value and are settled in code without a request.
   const cardFields = await mapLimit(raw, CARD_FIELD_CONCURRENCY, (element) => {
     const control = element.control ?? undefined;
-    return isCardFieldDescriptor({
+    return work.cardField({
       tag: element.tag,
       type: control?.type ?? '',
       autocomplete: control?.autocomplete ?? '',
@@ -746,7 +750,7 @@ export async function takeSnapshot(
     sessionId,
     pageId,
     url: page.url(),
-    title: await page.title().catch(() => ''),
+    title: await work.wait(() => page.title().catch(() => '')),
     snapshotId: `s${String(snapshotCounter)}`,
     elements,
     truncated: !options.controls && raw.length >= limit,

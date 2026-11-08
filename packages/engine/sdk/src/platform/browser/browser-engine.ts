@@ -366,6 +366,7 @@ export class BrowserEngine {
 
   async snapshot(target: BrowserTarget, args: { readonly limit?: number | undefined } = {}, controls?: BrowserControlAdmission): Promise<Record<string, unknown>> {
     target = { ...target }; args = { ...args };
+    const work = new BrowserControlIdentityWork({}, { drainReads: true });
     return this.withTarget(target, async ({ sessionId, pageId, page, current }) => {
       const prior = this.currentSnapshot(sessionId, pageId);
       if (controls?.verifySnapshotId !== undefined && prior?.snapshotId !== controls.verifySnapshotId) throw new StaleElementError('The offered browser snapshot was replaced.', 'Read the page again.');
@@ -374,6 +375,7 @@ export class BrowserEngine {
       // would be the same leak one indirection further away.
       const snapshot = await takeSnapshot(page, sessionId, pageId, {
         ...args,
+        work,
         ...(controls ? { controls } : {}),
         ...(this.cardGuard === null ? {} : { guard: this.cardGuard }),
       });
@@ -407,7 +409,7 @@ export class BrowserEngine {
           ...(element.checked === undefined ? {} : { checked: element.checked }),
         })),
       };
-    });
+    }, work);
   }
 
   /** Synchronous page/ref ownership for retained structured setup readers. */

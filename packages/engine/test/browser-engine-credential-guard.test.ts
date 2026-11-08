@@ -1324,3 +1324,52 @@ test('actual fresh-quote request carries the original page cancellation through 
     expect(effects).not.toContain('click');
   } finally { await pending.drain(); await result; }
 });
+
+for (const original of ['installed', 'missing'] as const)
+  test(`snapshot retains an ${original} reader before native DOM work and never adopts a later installation`, async () => {
+    const pending = pendingNativeAction();
+    const rows = [{ ...fixtureRow(EMAIL_STEP_ELEMENTS, 0), name: 'Search products', role: 'searchbox', control: attributes('search') }];
+    const engine = await buildEngine(ORDINARY_URL, rows, { preparePage(page) {
+      const frames: unknown = Reflect.get(page, 'frames');
+      if (typeof frames !== 'function') throw new Error('Missing original frame accessor');
+      const vector: unknown = Reflect.apply(frames, page, []);
+      if (!Array.isArray(vector) || !vector[0] || typeof vector[0] !== 'object') throw new Error('Missing original native frame');
+      const frame = vector[0], evaluate: unknown = Reflect.get(frame, 'evaluate');
+      if (typeof evaluate !== 'function') throw new Error('Missing original native collector');
+      Object.defineProperty(frame, 'evaluate', { value: async (fn: unknown, arg: unknown) => {
+        await pending.wait(undefined); return Reflect.apply(evaluate, frame, [fn, arg]);
+      } });
+    } });
+    if (original === 'missing') installJudgmentPort(undefined);
+    const result = engine.snapshot({}).catch((error: unknown) => error);
+    const later = fakePort(() => noulAnswer(0.01));
+    try {
+      await pending.started; installJudgmentPort(later.port); pending.release();
+      expect(await result).toBeInstanceOf(Error); expect(later.requests).toHaveLength(0);
+    } finally { await pending.drain(); await result; }
+  });
+
+test('snapshot card-field classification retains page cancellation and stops admitting further fields', async () => {
+  const pending = pendingNativeAction(), prior = installed, signals: AbortSignal[] = [];
+  let firstBatch!: () => void;
+  const started = new Promise<void>(resolve => { firstBatch = resolve; });
+  installJudgmentPort({ ...prior, async ask(request) {
+    if (request.context?.battery !== 'engine.security.card-field') return prior.ask(request);
+    if (!request.signal) throw new Error('Snapshot classification lost page cancellation');
+    signals.push(request.signal); if (signals.length === 8) firstBatch();
+    await pending.wait(undefined); return prior.ask(request);
+  } });
+  const rows = Array.from({ length: 10 }, (_, index) => ({ ...fixtureRow(EMAIL_STEP_ELEMENTS, 0),
+    selector: `#ordinary-field-${index}`, name: `Ordinary field ${index}`, control: attributes('text') }));
+  const engine = await buildEngine(ORDINARY_URL, rows);
+  const sessionId = engine.sessionManager().defaultSessionId(); if (!sessionId) throw new Error('Missing original session');
+  const { pageId } = await engine.sessionManager().page(sessionId);
+  const result = engine.snapshot({ sessionId, pageId }).catch((error: unknown) => error);
+  try {
+    await started;
+    await engine.closeTab({ sessionId }, { pageId });
+    expect(signals).toHaveLength(8); expect(signals.every(signal => signal.aborted)).toBe(true);
+    pending.release(); expect(await result).toBeInstanceOf(Error);
+    expect(signals).toHaveLength(8);
+  } finally { await pending.drain(); await result; }
+});

@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
+import { nativeReaderCapabilities } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { recordDaemonCiArtifact, readVerifiedDaemonCiArtifact, verifyDaemonCiArtifact, type DaemonArtifactSource } from '../../../scripts/ci-artifact.ts';
 import { nativeReaderProbeScript, nativeRuntimeProvenance, writeV1NativeArtifactFixture } from '../helpers/native-runtime-provenance.ts';
 
@@ -22,7 +23,7 @@ async function fixture(run: (root: string) => Promise<void>) {
 test('a tar round trip preserves the exact source, binary, library and executable modes', () => fixture(async root => {
   await recordDaemonCiArtifact(root, source);
   const manifest = JSON.parse(readFileSync(join(root, 'native/ci-artifact.json'), 'utf8'));
-  expect(manifest).toMatchObject({ schema: 2, ...source, target: 'linux-x64', readers: { schema: 1, version: '3.1.2', formats: ['payment-retained-holds-v2'] } });
+  expect(manifest).toMatchObject({ schema: 2, ...source, target: 'linux-x64', readers: nativeReaderCapabilities('3.1.2') });
   expect(manifest.files.map((file: { path: string; mode: number }) => [file.path, file.mode])).toEqual([
     ['goodvibes-daemon-linux-x64', 0o755], ['goodvibes-daemon-linux-x64.bun', 0o755], ['goodvibes-daemon-linux-x64.bun.LICENSE.md', 0o644], ['goodvibes-daemon-linux-x64.bun.json', 0o644], ['lib/sqlite-vec-linux-x64/vec0.so', 0o644],
   ]);

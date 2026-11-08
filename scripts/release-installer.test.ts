@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { nativeReaderCapabilities } from '../packages/engine/sdk/src/platform/runtime/self-update.ts';
 
 let root: string, assets: string, home: string;
 const version = '3.1.2';
@@ -13,7 +14,7 @@ function writeChecksums() {
 }
 function readerArtifact() {
   const base = JSON.parse(readFileSync(join(assets, 'goodvibes-daemon-linux-x64.ci-artifact.json'), 'utf8'));
-  return { ...base, schema: 2, readers: { schema: 1, version, formats: ['payment-retained-holds-v2'] } };
+  return { ...base, schema: 2, readers: nativeReaderCapabilities(version) };
 }
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'goodvibes-release-install-'));

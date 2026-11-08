@@ -12,6 +12,8 @@ import { compareSemanticVersions, parseSemanticVersion } from './semantic-versio
 import type { UpdateFileIo } from './self-update.js';
 
 export const NATIVE_READER_REQUIREMENT_FILE = '.goodvibes-reader-requirements.json';
+/** Installation metadata support, separate from application-data write floors. */
+export const NATIVE_PREVIOUS_READER_RECEIPT_FORMAT = 'daemon-previous-reader-receipt-v1';
 export type NativeDataFormat = 'payment-retained-holds-v2';
 const requirements: Readonly<Record<NativeDataFormat, string>> = { 'payment-retained-holds-v2': '3.1.2' };
 export interface NativeReaderCapabilities {
@@ -24,7 +26,8 @@ export interface NativeReaderCapabilities {
  * a candidate's version or filled in when opening an older artifact. */
 export function nativeReaderCapabilities(readerVersion: string): NativeReaderCapabilities {
   version(readerVersion);
-  return Object.freeze({ schema: 1, version: readerVersion, formats: Object.freeze(Object.keys(requirements).sort()) });
+  return Object.freeze({ schema: 1, version: readerVersion,
+    formats: Object.freeze([...Object.keys(requirements), NATIVE_PREVIOUS_READER_RECEIPT_FORMAT].sort()) });
 }
 
 export function parseNativeReaderCapabilities(value: unknown): NativeReaderCapabilities {

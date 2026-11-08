@@ -51,4 +51,7 @@ test('receipt admission rejects malformed and version-mismatched previous-reader
     { ...evidence, artifact: { ...evidence.artifact, readers: { ...evidence.artifact.readers, formats: ['x', 'x'] } } }]) {
     expect(() => parseDaemonInstallationReceipt({ ...f.companion, previousReader }, 'linux-x64')).toThrow();
   }
+  for (const artifact of [f.candidate.artifact, { ...f.companion.artifact, readers: { schema: 1, version: '3.1.3', formats: ['payment-retained-holds-v2'] } }]) {
+    expect(() => parseDaemonInstallationReceipt({ ...f.companion, artifact }, 'linux-x64')).toThrow('does not confirm support');
+  }
 });

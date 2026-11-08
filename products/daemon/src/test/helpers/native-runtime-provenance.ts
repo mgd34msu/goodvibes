@@ -1,6 +1,6 @@
 import { mkdirSync, chmodSync, lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { resolveDaemonNativePayloads, resolveDaemonNativeTargets, sha256, type DaemonInstallationReceipt, type DaemonArtifactSource, type DaemonCiArtifact } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { nativeReaderCapabilities, resolveDaemonNativePayloads, resolveDaemonNativeTargets, sha256, type DaemonInstallationReceipt, type DaemonArtifactSource, type DaemonCiArtifact } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import type { DaemonNativeTarget } from '../../cli/native-artifact.ts';
 /** Metadata fixture for inert/synthetic interpreters; it does not claim actual ELF execution. */
 export function nativeRuntimeProvenance(runtime: string, target: DaemonNativeTarget = 'linux-x64'): string {
@@ -22,7 +22,7 @@ export function writeV1NativeArtifactFixture(root: string, source: DaemonArtifac
 
 /** Executable shell fixture of the compiled read-only capability protocol. */
 export function nativeReaderProbeScript(version: string, fallback = ''): string {
-  return `#!/bin/sh\nif [ "$1" = check-install-reader ] && [ "$2" = --describe ]; then\n  printf '%s\\n' '${JSON.stringify({ schema: 1, version, formats: ['payment-retained-holds-v2'] })}'\n  exit 0\nfi\n${fallback}\n`;
+  return `#!/bin/sh\nif [ "$1" = check-install-reader ] && [ "$2" = --describe ]; then\n  printf '%s\\n' '${JSON.stringify(nativeReaderCapabilities(version))}'\n  exit 0\nfi\n${fallback}\n`;
 }
 
 /** Complete inert native metadata; no fixture payload is executed. */

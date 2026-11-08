@@ -285,7 +285,7 @@ const ARTIFACT = { version: '2.0.0', execPath: EXEC_PATH };
 describe('crash-loop rollback at boot', () => {
   for (const matches of [false, true]) test(`v1 rollback uses only evidence bound to its entire actual previous cohort (matches=${matches})`, async () => {
     const previous = nativeCohortFixture({ version: '3.1.2', daemonBytes: 'v1-previous-reader' });
-    const current = nativeCohortFixture({ version: '3.1.3', daemonBytes: 'new-current-reader' });
+    const current = nativeCohortFixture({ version: '3.1.3', daemonBytes: 'new-current-reader', readers: nativeReaderCapabilities('3.1.3') });
     const receiptPath = '/opt/gv/daemon-installation.json';
     const receipt = { ...JSON.parse(current.receipt.toString()), previousReader: { version: '3.1.2', artifact: {
       ...previous.artifact, schema: 2, sourceTree: matches ? previous.artifact.sourceTree : 'd'.repeat(40), readers: nativeReaderCapabilities('3.1.2'),

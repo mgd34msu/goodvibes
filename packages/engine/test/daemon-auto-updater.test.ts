@@ -23,6 +23,7 @@ import {
   sha256,
   nativeReaderCapabilities,
   type DaemonCurrentReader,
+  type NativeReaderCapabilities,
   type UpdateFetchLike,
   type UpdateFileIo,
 } from '../sdk/src/platform/runtime/self-update.js';
@@ -90,11 +91,11 @@ const originalFiles = () => currentCohort().installation(EXEC_PATH);
 const originalPaths = () => Object.keys(originalFiles()).sort();
 const memoryIo = nativeMemoryIo;
 
-function releaseFetch(overrides: { latestTag?: string; assetName?: string } = {}): { fetchImpl: UpdateFetchLike; requests: string[] } {
+function releaseFetch(overrides: { latestTag?: string; assetName?: string; readers?: NativeReaderCapabilities } = {}): { fetchImpl: UpdateFetchLike; requests: string[] } {
   const tag = overrides.latestTag ?? NEW_TAG;
   const assetName = overrides.assetName ?? DAEMON_ASSET;
   const base = defaultDownloadBaseUrl(LATEST_URL, tag);
-  const cohort = nativeCohortFixture({ version: tag.replace(/^v/, ''), daemonBytes: NEW_DAEMON.toString() });
+  const cohort = nativeCohortFixture({ version: tag.replace(/^v/, ''), daemonBytes: NEW_DAEMON.toString(), ...(overrides.readers ? { readers: overrides.readers } : {}) });
   const assets = { ...cohort.assets, [assetName]: NEW_DAEMON };
   const manifest = Object.entries(assets).map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join('');
   const requests: string[] = [];
@@ -146,6 +147,7 @@ function makeHarness(options: {
   latestTag?: string;
   currentVersion?: string;
   currentReader?: DaemonCurrentReader;
+  releaseReaders?: NativeReaderCapabilities;
   /** The version a crash-loop rollback rejected, as the lifecycle marker would report it. */
   rejectedVersion?: () => string | null;
   /** Consecutive failed checks before the owner is told. */
@@ -162,7 +164,8 @@ function makeHarness(options: {
 } ): Harness {
   const scratch = mkdtempSync(join(tmpdir(), 'auto-updater-'));
   const { files, io, mutations } = memoryIo(currentCohort(options.currentVersion ?? '1.0.0').installation(EXEC_PATH));
-  const { fetchImpl, requests } = releaseFetch({ assetName: options.platform === 'darwin' ? 'goodvibes-daemon-macos-x64' : DAEMON_ASSET, ...(options.latestTag ? { latestTag: options.latestTag } : {}) });
+  const { fetchImpl, requests } = releaseFetch({ assetName: options.platform === 'darwin' ? 'goodvibes-daemon-macos-x64' : DAEMON_ASSET,
+    ...(options.latestTag ? { latestTag: options.latestTag } : {}), ...(options.releaseReaders ? { readers: options.releaseReaders } : {}) });
   const receipts = new DaemonReceiptStore(join(scratch, 'receipts.json'), { now: () => new Date(2026, 6, 12, 14, 30).getTime() });
   const actions = { supervised: options.supervised ?? true, adopted: 0, restarted: 0 };
   const sequence: string[] = [];
@@ -224,9 +227,10 @@ const unreachableFetch: UpdateFetchLike = async () => {
 
 describe('DaemonAutoUpdater', () => {
   test('the real update loop preserves captured running readers for an outgoing v1 receipt', async () => {
-    const profile = { schema: 1 as const, version: '3.1.2', formats: ['payment-retained-holds-v2'] };
+    const confirmed = nativeReaderCapabilities('3.1.2');
+    const profile = { ...confirmed, formats: [...confirmed.formats] };
     let guardCalls = 0;
-    const h = makeHarness({ idle: () => true, currentVersion: profile.version, latestTag: 'v3.1.3',
+    const h = makeHarness({ idle: () => true, currentVersion: profile.version, latestTag: 'v3.1.3', releaseReaders: nativeReaderCapabilities('3.1.3'),
       currentReader: { readers: profile, assertCurrent: () => { guardCalls++; } } });
     profile.formats.length = 0;
     try {
@@ -239,6 +243,20 @@ describe('DaemonAutoUpdater', () => {
       expect(guardCalls).toBeGreaterThanOrEqual(2);
       const previous = JSON.parse(h.files.get('/opt/gv/daemon-installation.json.previous')?.toString() ?? 'null');
       expect(previous.artifact.schema).toBe(1); expect(previous.previousReader).toBeUndefined();
+    } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
+  });
+
+  for (const advertised of [false, true]) test(`an incoming older receipt parser cannot receive unsupported extension fields (profile=${advertised})`, async () => {
+    const h = makeHarness({ idle: () => true, currentVersion: '3.1.2', latestTag: 'v3.1.3',
+      currentReader: { readers: nativeReaderCapabilities('3.1.2'), assertCurrent() {} },
+      ...(advertised ? { releaseReaders: { schema: 1 as const, version: '3.1.3', formats: ['payment-retained-holds-v2'] } } : {}) });
+    const before = [...h.files.entries()];
+    try {
+      await h.updater.tick();
+      expect(h.updater.snapshot().appliedVersion).toBeNull();
+      expect([...h.files.entries()]).toEqual(before);
+      expect(h.mutations.some(operation => operation.startsWith('rename:'))).toBe(false);
+      expect(h.actions.restarted).toBe(0);
     } finally { h.updater.stop(); rmSync(h.scratch, { recursive: true, force: true }); }
   });
 

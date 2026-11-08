@@ -70,10 +70,14 @@ export function resolveInstalledDaemonUpdateArtifact(
   const receipt = inspectDaemonNativeInstallation(execPath, platform, arch, '', io, { integrity: false });
   if (!receipt || receipt.version !== version) throw new Error('Running daemon does not own the installed native version');
   const assertRetained = () => { signal?.throwIfAborted(); assertInstallationCurrent(); assertIdle(); };
+  let verifiedCurrent = false;
   const assertCurrent = () => {
     assertRetained();
-    inspectDaemonNativeInstallation(execPath, platform, arch, '', io);
-    assertRetained();
+    if (!verifiedCurrent) {
+      inspectDaemonNativeInstallation(execPath, platform, arch, '', io);
+      assertRetained();
+      verifiedCurrent = true;
+    }
   };
   let assertStarting = assertCurrent;
   let healthyCurrent = true;
@@ -84,11 +88,8 @@ export function resolveInstalledDaemonUpdateArtifact(
     // recovery owner; normal startup still has to pass assertCurrent.
     assertRetained();
     if (!inspectDaemonNativeInstallation(execPath, platform, arch, '.previous', io)) throw error;
-    assertStarting = () => {
-      assertRetained();
-      inspectDaemonNativeInstallation(execPath, platform, arch, '.previous', io);
-      assertRetained();
-    };
+    assertRetained();
+    assertStarting = assertRetained;
   }
   assertStarting();
   const currentReader = Object.freeze({ readers: nativeReaderCapabilities(version), assertCurrent: () => {

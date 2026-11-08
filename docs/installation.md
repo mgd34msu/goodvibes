@@ -59,6 +59,8 @@ When an older updater installs a newer daemon using an older receipt format,
 the running daemon preserves its confirmed reader support during its next
 automatic update. Rollback uses that evidence only for the matching executable
 and complete payload cohort; it does not infer compatibility from the version.
+The incoming build must also confirm support for this receipt format before the
+updater writes it.
 
 Installation holds transaction claims beside the three executables while suite
 files are replaced. A competing updater is refused. If replacement is interrupted

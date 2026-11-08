@@ -2,8 +2,9 @@
 import { createHash } from 'node:crypto';
 import { basename, dirname, join } from 'node:path';
 import { parseSemanticVersion } from './semantic-version.js';
-import type { UpdateFileIo, UpdateTarget } from './self-update.js';
-import { parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
+import type { UpdateTarget } from './self-update.js';
+import { hasNativeUpdateObservations, type UpdateFileIo } from './update-file-io.js';
+import { NATIVE_PREVIOUS_READER_RECEIPT_FORMAT, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
 
 export const DAEMON_NATIVE_TARGETS = ['linux-x64', 'linux-arm64'] as const;
 export type DaemonNativeTarget = typeof DAEMON_NATIVE_TARGETS[number];
@@ -83,6 +84,7 @@ export function parseDaemonInstallationReceipt(value: unknown, target: DaemonNat
   if (artifact.schema === 2 && artifact.readers.version !== value.version) throw new Error('Native daemon reader version differs from its installed product');
   let previousReader: DaemonPreviousReader | undefined;
   if (Object.hasOwn(value, 'previousReader')) {
+    if (artifact.schema !== 2 || !artifact.readers.formats.includes(NATIVE_PREVIOUS_READER_RECEIPT_FORMAT)) throw new Error('Native daemon does not confirm support for previous-reader receipts');
     const previous = value.previousReader;
     if (!record(previous) || !exact(previous, ['version', 'artifact']) || typeof previous.version !== 'string'
       || !parseSemanticVersion(previous.version)) throw new Error('Previous native reader evidence is invalid');
@@ -151,16 +153,36 @@ export function inspectDaemonNativeInstallation(execPath: string, platform: stri
   }
   return receipt;
 }
-/** Complete physical identities and bytes are retained across asynchronous preparation. */
+type FileIdentity = NonNullable<ReturnType<NonNullable<UpdateFileIo['observe']>>>;
+function sameIdentity(left: FileIdentity | null, right: FileIdentity | null): boolean {
+  return left === null || right === null ? left === right
+    : left.identity === right.identity && left.ownerIdentity === right.ownerIdentity && left.mode === right.mode;
+}
+function captureIdentity(observe: NonNullable<UpdateFileIo['observe']>, path: string): FileIdentity | null {
+  const stat = observe(path);
+  return stat === null ? null : { identity: stat.identity, ownerIdentity: stat.ownerIdentity, mode: stat.mode };
+}
+/** Actual native I/O certifies physical revisions after initial payload pin
+ * verification. Borrowed adapters must also retain and compare exact bytes. */
 export function retainDaemonNativeFiles(targets: readonly UpdateTarget[], io: UpdateFileIo): () => void {
   const readFile = io.readFile, observe = io.observe;
   if (!readFile || !observe) throw new Error('Native daemon I/O requires retained file observations and reads');
+  const native = hasNativeUpdateObservations(io, readFile, observe);
   const snapshot = (path: string) => {
-    const stat = observe(path);
-    return stat === null ? null : `${stat.identity}:${stat.mode}:${digest(readFile(path))}`;
+    const stat = captureIdentity(observe, path);
+    if (stat === null) return null;
+    const bytes = native ? undefined : Buffer.from(readFile(path));
+    if (!native && !sameIdentity(stat, observe(path))) throw new Error('Native daemon installation changed during preparation');
+    return { stat, bytes };
   };
   const retained = targets.flatMap(target => [target.path, target.path + '.previous']).map(path => ({ path, identity: snapshot(path) }));
-  return () => { for (const file of retained) if (snapshot(file.path) !== file.identity) throw new Error('Native daemon installation changed during preparation'); };
+  return () => { for (const file of retained) {
+    const current = snapshot(file.path), original = file.identity;
+    if (current === null || original === null ? current !== original
+      : !sameIdentity(current.stat, original.stat) || (original.bytes !== undefined && !current.bytes?.equals(original.bytes))) {
+      throw new Error('Native daemon installation changed during preparation');
+    }
+  } };
 }
 export interface DaemonNativeRenameGuard {
   beforeRename(from: string, to: string, recovering: boolean): void;
@@ -170,16 +192,27 @@ export interface DaemonNativeRenameGuard {
 export function createDaemonNativeRenameGuard(targets: readonly UpdateTarget[], io: UpdateFileIo): DaemonNativeRenameGuard {
   const readFile = io.readFile, observe = io.observe;
   if (!readFile || !observe) throw new Error('Native daemon I/O requires retained file observations and reads');
-  const snapshot = (path: string) => {
-    const stat = observe(path);
+  const native = hasNativeUpdateObservations(io, readFile, observe);
+  interface Snapshot { readonly stat: FileIdentity; readonly bytes: Buffer }
+  const snapshot = (path: string, previous?: Snapshot | null): Snapshot | null => {
+    const stat = captureIdentity(observe, path);
     if (stat !== null && !stat.ownerIdentity) throw new Error('Native daemon physical file ownership is unavailable');
-    return stat === null ? null : { ...stat, hash: digest(readFile(path)) };
+    if (stat === null) return null;
+    if (native && previous && sameIdentity(stat, previous.stat)) return previous;
+    const bytes = Buffer.from(readFile(path));
+    if (!sameIdentity(stat, observe(path))) throw new Error('Native daemon replacement changed during observation');
+    return { stat, bytes };
   };
   const states = new Map(targets.flatMap(target => ['', '.previous', '.update-download', '.update-previous', '.rollback-exchange'].map(suffix => {
     const path = target.path + suffix; return [path, snapshot(path)] as const;
   })));
   const check = (path: string) => {
-    if (!states.has(path) || JSON.stringify(snapshot(path)) !== JSON.stringify(states.get(path))) throw new Error('Native daemon replacement is not the retained transaction owner');
+    if (!states.has(path)) throw new Error('Native daemon replacement is not the retained transaction owner');
+    const expected = states.get(path), actual = snapshot(path, expected);
+    if (actual === null || expected === null ? actual !== expected
+      : expected === undefined || !sameIdentity(actual.stat, expected.stat) || !actual.bytes.equals(expected.bytes)) {
+      throw new Error('Native daemon replacement is not the retained transaction owner');
+    }
   };
   return {
     beforeRename(from, to, recovering) {
@@ -189,8 +222,8 @@ export function createDaemonNativeRenameGuard(targets: readonly UpdateTarget[], 
     },
     afterRename(from, to, recovering) {
       const expected = states.get(from), actual = snapshot(to);
-      if (!expected || !actual || actual.ownerIdentity !== expected.ownerIdentity || actual.hash !== expected.hash
-        || actual.mode !== expected.mode || snapshot(from) !== null) throw new Error('Native daemon rename result is unknown');
+      if (!expected || !actual || actual.stat.ownerIdentity !== expected.stat.ownerIdentity || !actual.bytes.equals(expected.bytes)
+        || actual.stat.mode !== expected.stat.mode || snapshot(from) !== null) throw new Error('Native daemon rename result is unknown');
       states.set(from, null); states.set(to, actual);
       if (!recovering) for (const path of states.keys()) check(path);
     },

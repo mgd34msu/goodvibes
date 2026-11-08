@@ -70,7 +70,7 @@ describe('source amount syntax', () => {
     for (const candidate of candidates ?? []) expect(text.slice(candidate.content.start, candidate.content.end)).toBe(candidate.content.literal);
   });
   test('negative and invalid full numerals never become positive suffix candidates', () => {
-    expect(checkoutAmountCandidates(['-1 234.56; (12.00); −3.00; –4.00; 1,23,456; valid 5.00'], 'USD')?.map(candidate => candidate.content.literal)).toEqual(['5.00']);
+    expect(checkoutAmountCandidates(['-1 234.56; (12.00); −3.00; –4.00; 1,23,456; 1e6; -1e6; 0x10; 10 - 12; 1/2; valid 5.00'], 'USD')?.map(candidate => candidate.content.literal)).toEqual(['5.00']);
   });
   test('refuses a candidate overflow rather than silently dropping later amounts', () => {
     expect(checkoutAmountCandidates([Array.from({ length: 193 }, (_, index) => `${index}.00`).join('; ')], 'USD')).toBeNull();

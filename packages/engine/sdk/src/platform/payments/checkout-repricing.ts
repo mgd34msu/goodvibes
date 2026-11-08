@@ -45,9 +45,11 @@ export function checkoutAmountCandidates(texts: readonly string[], currency: str
   const candidates: AmountCandidate[] = [];
   for (const [document, text] of texts.entries()) {
     const spans = new Map<string, { readonly start: number; readonly end: number; readonly literal: string }>();
-    // Include ordinary and grouped numerals. A negative grouped numeral also
-    // excludes every inner positive fragment; it must never become a price.
-    for (const pattern of [/[-−‐-―﹣－(]?\d(?:[\d.,]*\d)?\)?/g, /[-−‐-―﹣－(]?\d{1,3}(?:[ \u00a0\u202f\u2009]\d{3})+(?:[.,]\d+)?\)?/g]) {
+    // Include ordinary and grouped numerals. Consume unsupported exponent,
+    // base and range forms too, so their inner decimal fragments cannot become
+    // prices. The token boundary avoids rescanning every suffix of a long run.
+    for (const pattern of [/[-−‐-―﹣－(]?\d(?:[\d.,]*\d)?\)?/g, /[-−‐-―﹣－(]?\d{1,3}(?:[ \u00a0\u202f\u2009]\d{3})+(?:[.,]\d+)?\)?/g,
+      /(?<![\d.,])(?:0[xXbBoO][\dA-Fa-f]+|\d(?:[\d.,]*\d)?[eE][+-]?\d+|\d(?:[\d.,]*\d)?\s*[-−‐-―﹣－/]\s*\d(?:[\d.,]*\d)?)/g]) {
       for (const match of text.matchAll(pattern)) {
         const start = match.index, end = start + match[0].length;
         spans.set(`${start}:${end}`, { start, end, literal: match[0] });
@@ -56,7 +58,7 @@ export function checkoutAmountCandidates(texts: readonly string[], currency: str
     const ordered = [...spans.values()].sort((left, right) => left.start - right.start || right.end - left.end);
     let claimedUntil = -1;
     for (const { start, end, literal } of ordered) {
-      if (start < claimedUntil) continue;
+      if (start < claimedUntil) { claimedUntil = Math.max(claimedUntil, end); continue; }
       claimedUntil = end;
       if (/^[-−‐-―﹣－(]/.test(literal) || literal.endsWith(')')) continue;
       if (parseMinorUnits(literal, currency) === null) continue;

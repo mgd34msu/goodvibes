@@ -8,7 +8,8 @@ export const SERVICE = 'goodvibes-jev.service';
 export const COMMANDS = ['goodvibes', 'goodvibes-agent', 'goodvibes-daemon', 'goodvibes-uninstall'] as const;
 export interface Layout { prefix: string; binDir: string; dataDir: string; home: string }
 export interface Installation extends Layout {
-  schema: 1;
+  /** v1 contains digests; v2 retains exact generated wrapper/unit text. */
+  schema: 1 | 2;
   package: typeof PACKAGE;
   id: string;
   release: string;
@@ -30,7 +31,6 @@ export const run: Run = (command, args, options = {}) => {
   return result.stdout?.trim() ?? '';
 };
 export const quote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
-export const digest = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
 export const present = (path: string): boolean => {
   try { lstatSync(path); return true; } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
 };
@@ -98,13 +98,24 @@ export function readInstallation(prefix: string): Installation | undefined {
   if (!present(path)) return undefined;
   plainPath(path);
   const value = JSON.parse(readFileSync(path, 'utf8')) as Installation;
-  if (value.schema !== 1 || value.package !== PACKAGE || value.prefix !== prefix || !/^[0-9a-f-]{36}$/.test(value.id)
+  if ((value.schema !== 1 && value.schema !== 2) || value.package !== PACKAGE || value.prefix !== prefix || !/^[0-9a-f-]{36}$/.test(value.id)
     || !/^[0-9a-f]{40}-[0-9a-f-]{36}$/.test(value.release) || !/^[0-9a-f]{40}$/.test(value.sourceCommit)
     || typeof value.service !== 'boolean' || typeof value.unit !== 'string' || !value.wrappers
     || !Number.isInteger(value.port) || value.port < 1024 || value.port > 65535) throw new Error('Invalid Jev installation receipt.');
   validateLayout(value);
   for (const name of COMMANDS) if (typeof value.wrappers[name] !== 'string') throw new Error('Invalid command ownership receipt.');
   return value;
+}
+
+/** v1 saved only a digest of each generated file. Reading that existing receipt
+ * is the only remaining hashing path: it lets an update/uninstall detect edits
+ * without trusting the current file as its own expected content. Every new
+ * receipt saves the original generated UTF-8 text and compares bytes directly.
+ */
+function managedFileMatches(path: string, expected: string, schema: Installation['schema']): boolean {
+  const actual = readFileSync(path);
+  return schema === 1 ? createHash('sha256').update(actual).digest('hex') === expected
+    : actual.equals(Buffer.from(expected, 'utf8'));
 }
 export function dataOwner(layout: Layout): string { return join(layout.dataDir, '.goodvibes-jev-owner.json'); }
 export function readDataId(layout: Layout): string | undefined {
@@ -126,10 +137,12 @@ export function assertOwnedFiles(receipt: Installation): void {
       throw new Error(`Refusing to replace or remove another installation: ${link}`);
     }
     const wrapper = join(receipt.prefix, 'commands', name); plainPath(wrapper);
-    if (present(wrapper) && digest(readFileSync(wrapper)) !== receipt.wrappers[name]) throw new Error(`Managed command has been modified: ${wrapper}`);
+    const expected = receipt.wrappers[name];
+    if (typeof expected !== 'string') throw new Error('Invalid command ownership receipt.');
+    if (present(wrapper) && !managedFileMatches(wrapper, expected, receipt.schema)) throw new Error(`Managed command has been modified: ${wrapper}`);
   }
   const unit = unitPath(receipt); plainPath(unit);
-  if (present(unit) && (!receipt.service || digest(readFileSync(unit)) !== receipt.unit)) throw new Error(`Service has been modified or is not owned: ${unit}`);
+  if (present(unit) && (!receipt.service || !managedFileMatches(unit, receipt.unit, receipt.schema))) throw new Error(`Service has been modified or is not owned: ${unit}`);
   const current = join(receipt.prefix, 'current');
   if (present(current) && (!lstatSync(current).isSymbolicLink() || readlinkSync(current) !== `releases/${receipt.release}`)) throw new Error('Installation current link has changed.');
   plainPath(join(receipt.prefix, 'releases', receipt.release));

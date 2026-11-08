@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createServer } from 'node:net';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { install, parseOptions, preflight, wrapper, type InstallHooks, type Options, assertPortFree } from './install.ts';
-import { COMMANDS, assertOwnedFiles, atomicWrite, dataOwner, isReleaseInUse, readInstallation, unitPath, uninstall, validateLayout, withLock, type Run } from './installation.ts';
+import { COMMANDS, assertOwnedFiles, atomicWrite, dataOwner, isReleaseInUse, readInstallation, receiptPath, unitPath, uninstall, validateLayout, withLock, type Run } from './installation.ts';
 
 let home: string;
 let previousHome: string | undefined;
@@ -14,6 +15,17 @@ let actions: string[][];
 let execute: Run;
 let hooks: InstallHooks;
 const COMMIT = 'a'.repeat(40);
+
+/** Reproduce the actual v1 writer, independently of the new receipt reader. */
+function saveV1Receipt() {
+  const receipt = readInstallation(options.prefix);
+  if (!receipt || receipt.schema !== 2) throw new Error('Expected the new installation fixture');
+  const originalDigest = (text: string) => createHash('sha256').update(text).digest('hex');
+  const old = { ...receipt, schema: 1 as const, unit: originalDigest(receipt.unit),
+    wrappers: Object.fromEntries(Object.entries(receipt.wrappers).map(([name, text]) => [name, originalDigest(text)])) };
+  atomicWrite(receiptPath(options), JSON.stringify(old));
+  return old;
+}
 beforeEach(async () => {
   home = mkdtempSync(join(tmpdir(), 'jev-suite-test-'));
   previousHome = process.env.HOME; process.env.HOME = home;
@@ -69,6 +81,8 @@ describe('suite install and uninstall', () => {
   test('installs all command links and preserves credentials/data on removal', async () => {
     await install(options, hooks);
     const receipt = readInstallation(options.prefix)!;
+    expect(receipt.schema).toBe(2);
+    for (const name of COMMANDS) expect(receipt.wrappers[name]).toBe(wrapper(options, name));
     assertOwnedFiles(receipt);
     for (const name of COMMANDS) expect(readlinkSync(join(options.binDir, name))).toBe(join(options.prefix, 'commands', name));
     atomicWrite(join(options.dataDir, 'environment'), "TYPESAFE_API_KEY='synthetic-private-value'\n");
@@ -115,6 +129,71 @@ describe('suite install and uninstall', () => {
     expect(after.sourceCommit).not.toBe(before.sourceCommit);
     expect(existsSync(join(options.prefix, 'releases', before.release))).toBe(false);
     expect(readFileSync(join(options.dataDir, 'user-notes'), 'utf8')).toBe('keep');
+  });
+  test('a v1 checkout installation upgrades its receipt without changing its data owner', async () => {
+    options.service = true;
+    await install(options, hooks);
+    const old = saveV1Receipt();
+    assertOwnedFiles(old);
+    writeFileSync(join(options.dataDir, 'saved-note'), 'Preserve this note');
+    await install(options, { ...hooks, build: async () => 'b'.repeat(40) });
+    const current = readInstallation(options.prefix);
+    expect(current).toMatchObject({ schema: 2, id: old.id, unit: '[Service]\nExecStart=/owned/goodvibes-daemon serve\n' });
+    if (!current) throw new Error('Missing upgraded receipt');
+    assertOwnedFiles(current);
+    expect(readFileSync(join(options.dataDir, 'saved-note'), 'utf8')).toBe('Preserve this note');
+  });
+  test('a v1 receipt still refuses a changed launcher before update or uninstall', async () => {
+    await install(options, hooks);
+    saveV1Receipt();
+    atomicWrite(join(options.prefix, 'commands', 'goodvibes'), '#!/bin/sh\necho user edit\n', 0o755);
+    actions = [];
+    await expect(install(options, hooks)).rejects.toThrow('Managed command has been modified');
+    await expect(uninstall(options.prefix, true, execute)).rejects.toThrow('Managed command has been modified');
+    expect(actions).toEqual([]);
+    expect(existsSync(options.dataDir)).toBe(true);
+  });
+  test('uninstall can read a v1 receipt and preserve its saved data', async () => {
+    options.service = true;
+    await install(options, hooks);
+    saveV1Receipt();
+    writeFileSync(join(options.dataDir, 'saved-note'), 'keep');
+    await uninstall(options.prefix, false, execute);
+    expect(existsSync(options.prefix)).toBe(false);
+    expect(readFileSync(join(options.dataDir, 'saved-note'), 'utf8')).toBe('keep');
+  });
+  test('a v1 receipt refuses a changed service before stopping it', async () => {
+    options.service = true;
+    await install(options, hooks);
+    saveV1Receipt();
+    atomicWrite(unitPath(options), '[Service]\nExecStart=/user/edited\n');
+    actions = [];
+    await expect(uninstall(options.prefix, true, execute)).rejects.toThrow('Service has been modified');
+    expect(actions).toEqual([]);
+    expect(state).toBe('active');
+  });
+  test('failed readiness restores the original v1 files without rewriting its receipt', async () => {
+    options.service = true;
+    await install(options, hooks);
+    const old = saveV1Receipt();
+    await expect(install(options, { ...hooks, ready: async () => { throw new Error('readiness failure'); } })).rejects.toThrow('readiness failure');
+    expect(readInstallation(options.prefix)).toEqual(old);
+    assertOwnedFiles(old);
+    expect(state).toBe('active');
+  });
+  test('v2 compares exact launcher bytes even when invalid UTF-8 would decode to the expected text', async () => {
+    await install(options, hooks);
+    const receipt = readInstallation(options.prefix);
+    if (!receipt) throw new Error('Missing installation fixture');
+    const expected = '#!/bin/sh\n# generated \ufffd\n';
+    receipt.wrappers.goodvibes = expected;
+    atomicWrite(receiptPath(options), JSON.stringify(receipt));
+    const path = join(options.prefix, 'commands', 'goodvibes');
+    writeFileSync(path, Buffer.concat([Buffer.from('#!/bin/sh\n# generated '), Buffer.from([0xff]), Buffer.from('\n')]));
+    expect(readFileSync(path, 'utf8')).toBe(expected);
+    expect(() => assertOwnedFiles(receipt)).toThrow('Managed command has been modified');
+    writeFileSync(path, expected);
+    expect(() => assertOwnedFiles(receipt)).not.toThrow();
   });
   test('an update retains the previous runtime while a terminal still uses it', async () => {
     await install(options, hooks);

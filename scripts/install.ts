@@ -5,7 +5,7 @@ import { createServer } from 'node:net';
 import { chmodSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { COMMANDS, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, digest, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, run, stopService, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
+import { COMMANDS, PACKAGE, SERVICE, assertOwnedFiles, atomicWrite, contained, dataOwner, isReleaseInUse, plainPath, present, quote, readDataId, readInstallation, receiptPath, run, stopService, unitPath, validateLayout, withLock, type Installation, type Layout, type Run } from './installation.ts';
 
 export interface Options extends Layout { port: number; service: boolean; runtimeDir: string; nodePath?: string; workspace?: string; decisionPolicy?: DecisionModelPolicy }
 const ROOT = resolve(import.meta.dir, '..');
@@ -209,7 +209,7 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
       const wrappers: Record<string, string> = {};
       mkdirSync(options.binDir, { recursive: true });
       for (const name of COMMANDS) {
-        const contents = wrapper(options, name); wrappers[name] = digest(contents);
+        const contents = wrapper(options, name); wrappers[name] = contents;
         atomicWrite(join(options.prefix, 'commands', name), contents, 0o755);
         const link = join(options.binDir, name);
         if (!present(link)) symlinkSync(join(options.prefix, 'commands', name), link);
@@ -244,8 +244,8 @@ export async function install(options: Options, hooks: InstallHooks = {}): Promi
         rmSync(unitPath(options)); execute('systemctl', ['--user', 'daemon-reload']);
       }
       const { runtimeDir: _runtimeDir, nodePath: _nodePath, ...installedOptions } = options;
-      const receipt: Installation = { ...installedOptions, schema: 1, package: PACKAGE, id, release: releaseName, sourceCommit: commit,
-        service: options.service, unit: digest(unit), wrappers };
+      const receipt: Installation = { ...installedOptions, schema: 2, package: PACKAGE, id, release: releaseName, sourceCommit: commit,
+        service: options.service, unit, wrappers };
       atomicWrite(receiptPath(options), JSON.stringify(receipt, null, 2) + '\n');
       // Keep the previous release until all publication and readiness checks pass.
       if (old) {

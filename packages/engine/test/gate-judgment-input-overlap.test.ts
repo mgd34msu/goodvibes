@@ -53,3 +53,25 @@ test('bounded long label chains and long values retain late declaration screenin
   // raised limit or a data-dependent short circuit around the privacy scan.
   expect(performance.now() - started).toBeLessThan(5_000);
 });
+
+test('nested assignment and safe-reference chains retain late protected fields without repeated suffix scans', () => {
+  const started = performance.now();
+  for (const prefix of ['ordinary='.repeat(30_000), 'password=goodvibes://secrets/key='.repeat(10_000)]) {
+    expect(() => assertJudgmentInput(prefix + 'end')).not.toThrow();
+    expect(() => assertJudgmentInput(prefix + 'end;password=synthetic-late-value')).toThrow(JudgmentInputError);
+    expect(judgmentInputCardProblem(prefix + 'end;password=synthetic-late-value')).toBeUndefined();
+    expect(judgmentInputCardProblem(prefix + 'end;cvv=synthetic-late-value')).toBe('card-material');
+    expect(() => snapshotJudgmentEvidence(prefix + 'end;password=[REDACTED]')).not.toThrow();
+    expect(() => assertJudgmentInput(prefix + 'end;password=[REDACTED]')).toThrow(JudgmentInputError);
+  }
+  expect(performance.now() - started).toBeLessThan(5_000);
+});
+
+test('long whitespace after a flag preserves empty-value admission and conservative equals refusal', () => {
+  const started = performance.now();
+  const text = '--password' + ' '.repeat(300_000);
+  expect(() => assertJudgmentInput(text)).not.toThrow();
+  expect(() => assertJudgmentInput(text + '=')).toThrow(JudgmentInputError);
+  expect(() => assertJudgmentInput(text + '=goodvibes://secrets/fixture')).not.toThrow();
+  expect(performance.now() - started).toBeLessThan(5_000);
+});

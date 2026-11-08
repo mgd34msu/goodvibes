@@ -18,6 +18,7 @@ import { isSecretBearingConfigKey, isSecretReferenceValue } from '../config/secr
 import { CARD_FIELD_NAMES } from '../payments/card-material.js';
 import { findCardNumberShapes } from '../security/card-shapes.js';
 import type { EntryType, JsonValue } from '@goodvibes-jev/judgment';
+import { evidenceCredentialMarker, inlineDeclarations, literalDeclarationValue } from './inline-declarations.js';
 
 export type JudgmentInputProblem = 'credential-material' | 'card-material' | 'unsupported-input';
 
@@ -226,23 +227,8 @@ function reference(value: unknown): boolean {
   return isSecretReferenceValue(value) && typeof value === 'string' && /^goodvibes:\/\/secrets\/[^\s?#]+$/.test(value.trim());
 }
 
-// Exact public replacement tokens contain no credential. They are meaningful
-// only in observational evidence; action input still treats them as values.
-function evidenceCredentialMarker(value: unknown, evidence: boolean): boolean {
-  return evidence && typeof value === 'string' && [
-    '[REDACTED]', '<redacted>', '[REDACTED_TOKEN]', '[REDACTED_API_KEY]',
-    '[REDACTED_GITHUB_TOKEN]', '[REDACTED_GITLAB_TOKEN]', '[REDACTED_SLACK_TOKEN]',
-    '[REDACTED_AWS_KEY]', '[REDACTED_PROFILE]', '[REDACTED_TEXT]',
-  ].includes(value);
-}
 function safeReference(value: unknown, problem: JudgmentInputProblem | undefined, evidence: boolean): boolean {
   return reference(value) || (problem === 'credential-material' && evidenceCredentialMarker(value, evidence));
-}
-
-/** A literal assignment/header value can be quoted; references carry no secret. */
-function literalValue(text: string, problem: JudgmentInputProblem, evidence: boolean): boolean {
-  const value = text.trim().replace(/^["']|["']$/g, '');
-  return value.length > 0 && !safeReference(value, problem, evidence);
 }
 
 // Syntax screening is deterministic for an immutable string and these two
@@ -279,17 +265,11 @@ function inlineProblem(text: string, cardOnly = false, evidence = false): Judgme
 function inspectInlineProblem(text: string, cardOnly = false, evidence = false): JudgmentInputProblem | undefined {
   if (findCardNumberShapes(text, 1).length > 0) return 'card-material';
   if (!cardOnly && /-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(text)) return 'credential-material';
-  const assignments = /(?:^|[\s{[,;&?="'])--?([A-Za-z_][A-Za-z0-9_.-]*)\s*(?:=|\s)\s*(?=([^\s,;}]+))/g;
-  const fields = /(?:^|[\s{[,;&?="'])([A-Za-z_][A-Za-z0-9_.-]*)["']?\s*[:=]\s*(?=([^\s,;}]+))/g;
-  for (const pattern of [assignments, fields]) {
-    let match: RegExpExecArray | null;
-    while ((match = pattern.exec(text)) !== null) {
-      // A preceding ordinary label can consume the boundary of a credential
-      // declaration in its value ("note: password=..."). Inspect overlaps,
-      // retaining the exact declaration grammar and advancing on every match.
-      pattern.lastIndex = match.index + 1;
-      const problem = protectedKey(match[1]!);
-      if (problem && (!cardOnly || problem === 'card-material') && literalValue(match[2]!, problem, evidence)) return problem;
+  for (const flags of [true, false]) {
+    for (const declaration of inlineDeclarations(text, flags)) {
+      const problem = protectedKey(declaration.key);
+      if (problem && (!cardOnly || problem === 'card-material')
+        && literalDeclarationValue(text, declaration, problem === 'credential-material' && evidence)) return problem;
     }
   }
   // Start once per contiguous scheme-character run, rather than restarting a

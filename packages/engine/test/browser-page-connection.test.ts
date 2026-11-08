@@ -9,6 +9,8 @@ import { captureBrowserPageConnection } from '../sdk/src/platform/browser/browse
 import { DRIVER_VERSION } from '../sdk/src/platform/browser/browser-provision-io.js';
 import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
+import { createUntrustedContentPort, UntrustedContentLedger } from '../sdk/src/platform/security/untrusted-content.js';
+import { withSecurityReadings } from './helpers/security-readings.ts';
 
 const cleanup: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -18,7 +20,11 @@ const documents = { frameTree: { frame: { id: 'native-tab', loaderId: 'original-
   childFrames: [{ frame: { id: 'child-frame', loaderId: 'original-child-document', parentId: 'native-tab', url: 'https://card.example/private' } }] } };
 function barrier() { let release!: () => void; const wait = new Promise<void>(resolve => { release = resolve; }); return { wait, release }; }
 function nativeContext(options: { readonly send?: (method: string) => Promise<unknown>; readonly detach?: () => Promise<void> } = {}) {
-  const effects: string[] = [], page = { url: () => 'https://merchant.example/checkout', on() {} } as unknown as Page;
+  const effects: string[] = [];
+  const frame = { async evaluate() { return [{ documentUrl: 'https://merchant.example/checkout', tag: 'button', role: 'button', name: 'Place order',
+    selector: '#original-submit', value: null, disabled: false, checked: null, depth: 1, submits: true }]; } };
+  const page = { url: () => 'https://merchant.example/checkout', title: async () => 'Original checkout',
+    frames: () => [frame], mainFrame: () => frame, on() {} } as unknown as Page;
   const context = { pages: () => [page], on() {},
     async newCDPSession(selected: Page) {
       expect(selected).toBe(page); effects.push('cdp-open');
@@ -47,9 +53,13 @@ async function attached(options: Parameters<typeof nativeContext>[0] = {}) {
   if (!session.activePageId) throw new Error('Missing original page');
   return { ...f, manager, session, pageId: session.activePageId };
 }
+function engineFor(manager: BrowserSessionManager): BrowserEngine {
+  return new BrowserEngine(manager, { screenshotDirectory: makeProjectTempDir('browser-source-screenshots'),
+    untrusted: createUntrustedContentPort({ surface: 'web-page', toolName: 'browser-source-fixture', ledger: new UntrustedContentLedger() }) });
+}
 
 test('the actual session/engine retain the originally selected browser endpoint and native tab/documents privately', async () => {
-  const f = await attached(), engine = new BrowserEngine(f.manager);
+  const f = await attached(), engine = engineFor(f.manager);
   const source = await engine.capturePageConnection({ sessionId: f.session.sessionId, pageId: f.pageId }, {});
   expect(source).toMatchObject({ version: 1, endpoint, targetId: 'native-tab', browserContextId: 'native-context' });
   expect(source?.frames).toEqual([
@@ -60,6 +70,33 @@ test('the actual session/engine retain the originally selected browser endpoint 
   expect(JSON.stringify(f.manager.list())).not.toContain('private=fixture-only');
   expect(JSON.stringify(source)).not.toContain('merchant.example'); expect(JSON.stringify(source)).not.toContain('Do not retain');
   expect(Object.isFrozen(source?.frames)).toBe(true);
+});
+
+test('actual native snapshot and protocol observations are retained together through the serving engine', async () => {
+  await withSecurityReadings({}, async requests => {
+    const f = await attached(), engine = engineFor(f.manager), target = { sessionId: f.session.sessionId, pageId: f.pageId };
+    const snapshot = await engine.snapshot(target);
+    const recovery = await engine.captureCheckoutRecovery(target, ['e1'], {});
+    expect(recovery?.connection.endpoint).toBe(endpoint);
+    expect(recovery?.controls.snapshotId).toBe(snapshot['snapshotId']);
+    expect(recovery?.controls.controls[0]).toMatchObject({ ref: 'e1', selector: '#original-submit',
+      metadata: { name: 'Place order', documentUrl: 'https://merchant.example/checkout' } });
+    expect(requests).toEqual([]);
+  });
+});
+
+test('a replacement snapshot during native protocol capture cannot replace the originally selected controls', async () => {
+  await withSecurityReadings({}, async () => {
+    const entered = barrier(), release = barrier();
+    const f = await attached({ send: async method => { if (method === 'Target.getTargetInfo') { entered.release(); await release.wait; return target; } return documents; } });
+    cleanup.push(release.release);
+    const engine = engineFor(f.manager), selected = { sessionId: f.session.sessionId, pageId: f.pageId };
+    await engine.snapshot(selected);
+    const pending = engine.captureCheckoutRecovery(selected, ['e1'], {}).catch(error => error as unknown);
+    await entered.wait; await engine.snapshot(selected); release.release();
+    expect(await pending).toBeInstanceOf(Error);
+    expect(f.effects.at(-1)).toBe('cdp-detach');
+  });
 });
 
 test('native reading uses the Node host original page mapping, not a serialized page id', async () => {

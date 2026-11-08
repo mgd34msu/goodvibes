@@ -70,6 +70,7 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
   const expected = captureOwnedJson(paired), config = captureOwnedJson(readPaymentsServiceConfig(deps.config));
   const issue = native.issueContinuation?.bind(native), revoke = native.revokeContinuation?.bind(native);
   const capturePage = seam.capturePageConnection?.bind(seam);
+  const captureRecovery = seam.captureCheckoutRecovery?.bind(seam);
   if (!issue || !revoke) throw new HandlerError('The paired host cannot retain checkout continuation authority.', 'FAILED_PRECONDITION', 409);
   // The dispatcher starts the owner turn before this handler. Include the
   // immediately displaced window, then keep these exact facts across later
@@ -93,6 +94,15 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
       catch (error) { revoke(grant); throw error; }
     },
     revokeContinuation: revoke,
+    ...(captureRecovery ? { captureBrowserRecovery: async (input: BeginCheckoutInput, owner: DetachedCheckoutOwner) => {
+      assertCurrent(); owner.assertCurrent();
+      const refs = [...new Set([...input.controls.cardFields.map(field => field.ref),
+        ...(input.controls.addressFields ?? []).map(field => field.ref), ...(input.controls.shippingTargets ?? []), input.controls.placeOrderTarget])];
+      try {
+        const original = await captureRecovery(input.sessionId, input.pageId, refs, owner);
+        assertCurrent(); owner.assertCurrent(); return original;
+      } catch { throw new BrowserPageConnectionError(); }
+    } } : {}),
     ...(capturePage ? { capturePageConnection: async (input: BeginCheckoutInput, owner: DetachedCheckoutOwner) => {
       assertCurrent(); owner.assertCurrent();
       try {

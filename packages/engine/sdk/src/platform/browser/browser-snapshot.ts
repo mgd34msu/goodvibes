@@ -7,6 +7,7 @@ import { containsIssuerCredential } from '../utils/redaction.js';
 import { BrowserControlIdentityWork } from './browser-control-identity.js';
 import { hasAdmittedBrowserWork } from './browser-action-admission.js';
 import type { BrowserElementRef, BrowserSnapshot, CardFieldGuard } from './browser-types.js';
+import { captureBrowserControlSnapshot, BrowserControlSnapshotError, type BrowserControlSnapshot } from './browser-control-snapshot-data.js';
 
 /** How many card-field readings a snapshot runs at once. */
 const CARD_FIELD_CONCURRENCY = 8;
@@ -578,6 +579,8 @@ function admitLiveDescriptor(value: unknown): ReturnType<typeof describeElement>
 // retaining any entered field values. A copied snapshot cannot acquire this data.
 const assertIdentityReadingAllowed = new WeakMap<BrowserElementRef, () => void>();
 const identityMetadata = new WeakMap<BrowserElementRef, { readonly name: string; readonly documentUrl?: string | undefined; readonly control?: RawElement['control'] | undefined }>();
+/** A JSON copy or a fabricated SnapshotStore entry cannot acquire native data. */
+const nativeSnapshots = new WeakSet<BrowserSnapshot>();
 let snapshotCounter = 0;
 
 export class StaleElementError extends Error {
@@ -602,6 +605,25 @@ export class SnapshotStore {
   clear(sessionId: string, pageId: string): void {
     this.snapshots.delete(`${sessionId}:${pageId}`);
   }
+}
+
+/** Capture only selected identities from an actual immutable native snapshot.
+ * No DOM read or model call, and no entered field value is visited or retained. */
+export function captureNativeSnapshotControls(snapshot: BrowserSnapshot, refs: readonly string[]): BrowserControlSnapshot {
+  if (!nativeSnapshots.has(snapshot) || refs.length === 0 || refs.length > 4096) throw new BrowserControlSnapshotError();
+  const wanted = [...new Set(refs)];
+  const byRef = new Map(snapshot.elements.map(element => [element.ref, element]));
+  const controls = wanted.map(ref => {
+    const element = byRef.get(ref), metadata = element && identityMetadata.get(element);
+    if (!element || !metadata?.documentUrl) throw new BrowserControlSnapshotError();
+    return { ref: element.ref, role: element.role, name: element.name, tag: element.tag, selector: element.selector,
+      depth: element.depth, submits: element.submits, frameChain: [...element.frameChain],
+      ...(element.disabled === undefined ? {} : { disabled: element.disabled }),
+      ...(element.cardField === undefined ? {} : { cardField: element.cardField }),
+      metadata: { name: metadata.name, documentUrl: metadata.documentUrl,
+        ...(metadata.control === undefined ? {} : { control: metadata.control }) } };
+  });
+  return captureBrowserControlSnapshot({ version: 1, snapshotId: snapshot.snapshotId, url: snapshot.url, controls });
 }
 
 /** The selector of one element within its own document, used to address iframes. */
@@ -693,7 +715,9 @@ export async function takeSnapshot(
   if (options.controls) {
     options.controls.admit(raw.map((element, index) => ({ ref: `e${String(index + 1)}`, role: element.role, name: element.name, tag: element.tag, disabled: element.disabled, ...(element.control ? { control: element.control } : {}) })));
   }
+  if (snapshotCounter >= Number.MAX_SAFE_INTEGER) throw new StaleElementError('Browser snapshot references are exhausted.', 'Restart the browser runtime before taking another snapshot.');
   snapshotCounter += 1;
+  const snapshotId = `s${String(snapshotCounter)}`;
   const scrub = (text: string): string =>
     options.guard === undefined ? text : options.guard.redact(sessionId, pageId, text);
 
@@ -748,17 +772,20 @@ export async function takeSnapshot(
     }
     identityMetadata.set(recorded, captureOwnedJson({ name: scrub(element.name), documentUrl: element.documentUrl,
       ...(element.control ? { control: Object.fromEntries((['type', 'autocomplete', 'name', 'id', 'placeholder', 'ariaLabel', 'label'] as const).map(key => [key, scrub(element.control![key])])) } : {}) }, nodeTypes.isProxy) as NonNullable<ReturnType<typeof identityMetadata.get>>);
-    return recorded;
+    Object.freeze(recorded.frameChain);
+    return Object.freeze(recorded);
   });
-  return {
+  const snapshot = Object.freeze({
     sessionId,
     pageId,
     url: page.url(),
     title: await work.wait(() => page.title().catch(() => '')),
-    snapshotId: `s${String(snapshotCounter)}`,
-    elements,
+    snapshotId,
+    elements: Object.freeze(elements),
     truncated: !options.controls && raw.length >= limit,
-  };
+  });
+  nativeSnapshots.add(snapshot);
+  return snapshot;
 }
 
 /** Narrows the page to the frame an element lives in, following the chain. */

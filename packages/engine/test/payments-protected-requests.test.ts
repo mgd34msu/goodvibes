@@ -44,6 +44,27 @@ test('retains native browser observations only inside the original encrypted req
   expect(ciphertext).not.toContain(browser.endpoint); expect(ciphertext).not.toContain(browser.targetId);
 });
 
+test('retained browser controls cover the original requested refs and exclude entered field values', async () => {
+  const root = join(makeProjectTempDir('payment-protected-controls'), 'requests'), original = protectedPaymentRequest();
+  const browser = { version: 1 as const, endpoint: 'ws://127.0.0.1:9222/devtools/browser/retained-browser', targetId: 'tab', browserContextId: null,
+    frames: [{ id: 'frame', loaderId: 'document', parentId: null }] };
+  const control = (ref: string) => ({ ref, role: 'textbox', name: 'Original identity', tag: 'input', selector: `#${ref}`, depth: 1,
+    submits: false, frameChain: [], metadata: { name: 'Original identity', documentUrl: original.input.checkoutUrl } });
+  const browserControls = { version: 1 as const, snapshotId: 'original-snapshot', url: original.input.checkoutUrl,
+    controls: [control('original-card-field'), control('original-submit')] };
+  await new ProtectedPaymentRequests(root).retain({ ...original, host: { ...original.host, browser, browserControls } }, noop);
+  const saved = await new ProtectedPaymentRequests(root).read(original.purchaseId, original.operationId, noop);
+  expect(saved.host.browserControls).toEqual(browserControls);
+  expect(Object.isFrozen(saved.host.browserControls?.controls)).toBe(true);
+  for (const controls of [browserControls.controls.slice(0, 1), [control('foreign-ref'), control('original-submit')],
+    [{ ...control('original-card-field'), value: 'do-not-retain' }, control('original-submit')]]) {
+    const rejected = join(makeProjectTempDir('payment-protected-bad-controls'), 'requests');
+    await expect(new ProtectedPaymentRequests(rejected).retain({ ...original,
+      host: { ...original.host, browser, browserControls: { ...browserControls, controls } } }, noop)).rejects.toBeInstanceOf(ProtectedPaymentRequestError);
+    expect(existsSync(rejected)).toBe(false);
+  }
+});
+
 test('exclusive publication preserves the first request and refuses another operation under that purchase identity', async () => {
   const root = join(makeProjectTempDir('payment-protected-exclusive'), 'requests'), original = protectedPaymentRequest();
   await new ProtectedPaymentRequests(root).retain(original, noop);

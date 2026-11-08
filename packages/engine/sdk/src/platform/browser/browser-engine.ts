@@ -10,8 +10,10 @@ import type { Locator, Page } from 'playwright-core';
 import { BrowserSessionError, BrowserSessionManager, hasDisplay } from './browser-sessions.js';
 import type { BrowserAttachOptions, BrowserLaunchOptions } from './browser-sessions.js';
 import type { BrowserPageConnection } from './browser-page-connection-data.js';
+import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from './browser-checkout-recovery-data.js';
+import { BrowserControlSnapshotError } from './browser-control-snapshot-data.js';
 import { describeProvisionWork } from './browser-provisioning.js';
-import { captureCredentialPage, retainBrowserMethods, resolveRef, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
+import { captureCredentialPage, captureNativeSnapshotControls, retainBrowserMethods, resolveRef, SnapshotStore, StaleElementError, takeSnapshot, type BrowserControlAdmission } from './browser-snapshot.js';
 import { assertCaptureAllowed, fillSecretsIntoPage } from './browser-secret-fill.js';
 import type {
   BrowserProvisionReport,
@@ -490,6 +492,27 @@ export class BrowserEngine {
     const { sessionId, pageId } = target;
     if (!sessionId || !pageId) throw new BrowserSessionError('The original checkout page must be selected explicitly.');
     return this.sessions.pageConnection(sessionId, pageId, owner);
+  }
+
+  /** Retain selected original native control identities alongside the actual
+   * connection observation. Do not adopt a snapshot produced during an await. */
+  async captureCheckoutRecovery(target: BrowserTarget, refs: readonly string[], owner: BrowserProvisionLifetime): Promise<BrowserCheckoutRecovery | null> {
+    const { sessionId, pageId } = target;
+    if (!sessionId || !pageId) throw new BrowserControlSnapshotError();
+    const snapshot = this.currentSnapshot(sessionId, pageId);
+    const selected = [...refs];
+    const signal = owner.signal, check = owner.assertCurrent?.bind(owner);
+    const current = () => {
+      signal?.throwIfAborted(); check?.();
+      if (this.currentSnapshot(sessionId, pageId) !== snapshot) throw new BrowserControlSnapshotError();
+    };
+    current();
+    const controls = snapshot ? captureNativeSnapshotControls(snapshot, selected) : null;
+    const connection = await this.sessions.pageConnection(sessionId, pageId, { signal, assertCurrent: current });
+    current();
+    if (!connection) return null;
+    if (!controls) throw new BrowserControlSnapshotError();
+    return captureBrowserCheckoutRecovery({ connection, controls });
   }
 
   /** Keep the shared tool decision bound to this serving browser and original input. */

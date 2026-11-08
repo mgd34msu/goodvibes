@@ -45,6 +45,13 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   const originalBrowser = { version: 1 as const, endpoint: 'ws://127.0.0.1:9222/devtools/browser/original-private-browser',
     targetId: 'original-native-tab', browserContextId: 'original-native-context',
     frames: [{ id: 'original-native-frame', loaderId: 'original-native-document', parentId: null }] };
+  const originalControls = { version: 1 as const, snapshotId: 'original-native-snapshot', url: 'https://www.bestbuy.com/checkout',
+    controls: [
+      { ref: 'card', tag: 'input', role: 'textbox', name: 'Card number', selector: '#original-card', depth: 1, submits: false, frameChain: [], cardField: true,
+        metadata: { name: 'Card number', documentUrl: 'https://www.bestbuy.com/checkout' } },
+      { ref: 'submit', tag: 'button', role: 'button', name: 'Place order', selector: '#original-order', depth: 1, submits: true, frameChain: [],
+        metadata: { name: 'Place order', documentUrl: 'https://www.bestbuy.com/checkout' } },
+    ] };
   let capturedPages = 0;
   const cards = new DaemonCardStore({ filePath: join(root, 'cards.json'), cvvHandling: () => 'stored', secrets: {
     async get(key) { return secrets.get(key) ?? null; }, async set(key, value) { secrets.set(key, value); }, async delete(key) { secrets.delete(key); },
@@ -65,9 +72,10 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
         notifier: channelBackedPaymentNotifier(config, { async deliver(request) { request.assertCurrent?.(); return 'synthetic-delivery'; } }, replies),
         seam: (() => {
           const seam = { cardFieldGuard: new CardMaterialRedactor(), armSubmitApproval: async () => {},
-            async capturePageConnection(sessionId: string, pageId: string, owner: { readonly assertCurrent?: (() => void) | undefined }) {
+            async captureCheckoutRecovery(sessionId: string, pageId: string, refs: readonly string[], owner: { readonly assertCurrent?: (() => void) | undefined }) {
               owner.assertCurrent?.(); expect(sessionId).toBe('session'); expect(pageId).toBe('page'); capturedPages++;
-              return originalBrowser;
+              expect(refs).toEqual(['card', 'submit']);
+              return { connection: originalBrowser, controls: originalControls };
             }, driverFor: () => ({
             identity: () => ({ sessionId: 'session', pageId: 'page' }), async url() { return 'https://www.bestbuy.com/checkout'; },
             async verifyTerms() { throw new Error('This detached fixture is cancelled at its window'); },
@@ -105,6 +113,7 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   expect(saved.principalId).toBe(helper.describeAuthenticatedPrincipal(paired.token).principalId);
   expect(saved.host.authority.tokenId).toBe(paired.id);
   expect(capturedPages).toBe(1); expect(saved.host.browser).toEqual(originalBrowser);
+  expect(saved.host.browserControls).toEqual(originalControls);
   expect(JSON.stringify(acknowledged.body)).not.toContain(originalBrowser.endpoint);
   if (!saved.host.continuation) throw new Error('Native admission did not retain its issued grant');
   expect(pairing.readNativeContinuation(saved.host.continuation)).toEqual(saved.host.authority);

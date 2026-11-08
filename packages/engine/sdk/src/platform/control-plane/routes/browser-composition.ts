@@ -66,7 +66,7 @@ import type {
 } from '../../payments/browser-checkout-driver.js';
 import type { CheckoutPageDriver } from '../../payments/checkout-page.js';
 import type { OwnerApproval } from '../../browser/index.js';
-import type { BrowserPageConnection } from '../../browser/index.js';
+import type { BrowserPageConnection, BrowserCheckoutRecovery } from '../../browser/index.js';
 import type { BrowserProvisionLifetime } from '../../browser/browser-failure-reading.js';
 import type { BrowserGatewayService } from './browser.js';
 
@@ -152,6 +152,8 @@ export interface BrowserCheckoutSeam {
   driverFor(sessionId: string, pageId: string): CheckoutPageDriver;
   /** Private host facts for encrypted continuation storage, never public status. */
   capturePageConnection?(sessionId: string, pageId: string, owner: BrowserProvisionLifetime): Promise<BrowserPageConnection | null>;
+  /** Original selected control identities and connection, retained together. */
+  captureCheckoutRecovery?(sessionId: string, pageId: string, refs: readonly string[], owner: BrowserProvisionLifetime): Promise<BrowserCheckoutRecovery | null>;
   /**
    * Arms the owner's approval for ONE outward submit, directly on the engine
    * this seam's driver runs against.
@@ -265,6 +267,11 @@ export function composeDaemonBrowser(
         const engine = await built.engineFor();
         owner.signal?.throwIfAborted(); owner.assertCurrent?.();
         return engine.capturePageConnection({ sessionId, pageId }, owner);
+      },
+      captureCheckoutRecovery: async (sessionId, pageId, refs, owner) => {
+        const engine = await built.engineFor();
+        owner.signal?.throwIfAborted(); owner.assertCurrent?.();
+        return engine.captureCheckoutRecovery({ sessionId, pageId }, refs, owner);
       },
     });
   }

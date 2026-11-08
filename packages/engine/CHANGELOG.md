@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Retain the selected checkout control identities, frame selectors and native
+  identity metadata with encrypted browser recovery facts, excluding entered
+  values. Native snapshots are immutable; JSON copies cannot mint their source
+  provenance. Concurrent snapshot reads keep distinct allocated IDs. Actual
+  control restoration and resumed payment windows remain unfinished.
+
 - Retain the original discovered browser WebSocket, native tab/context and
   document-loader observations inside encrypted checkout facts. Use the actual
   browser or Node-host page mapping and drain protocol reads through admission

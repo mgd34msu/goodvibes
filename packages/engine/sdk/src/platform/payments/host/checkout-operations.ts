@@ -22,15 +22,17 @@ import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.
 import { capturePaymentContinuation } from './continuation-binding.js';
 import { PaymentReplyWindowError } from '../reply-inbox.js';
 import { captureBrowserPageConnection, type BrowserPageConnection } from '../../browser/browser-page-connection-data.js';
+import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from '../../browser/browser-checkout-recovery-data.js';
 
 export interface DetachedCheckoutSource {
   readonly principalId: string;
   readonly assertCurrent: () => void;
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
-  readonly recoveryFacts?: PaymentRequestHostFacts | undefined;
+  readonly recoveryFacts?: Pick<PaymentRequestHostFacts, 'authority' | 'configuration'> | undefined;
   readonly issueContinuation?: ((operationId: string, assertCurrent: () => void) => NativeContinuationGrant) | undefined;
   readonly revokeContinuation?: ((grant: NativeContinuationGrant) => void | Promise<void>) | undefined;
   readonly capturePageConnection?: ((input: BeginCheckoutInput, owner: DetachedCheckoutOwner) => Promise<BrowserPageConnection | null>) | undefined;
+  readonly captureBrowserRecovery?: ((input: BeginCheckoutInput, owner: DetachedCheckoutOwner) => Promise<BrowserCheckoutRecovery | null>) | undefined;
 }
 export interface DetachedCheckoutOwner {
   readonly signal: AbortSignal;
@@ -88,9 +90,9 @@ export class CheckoutOperations {
     // a later background tick. Native source factories already freeze theirs.
     source = Object.freeze({ principalId: source.principalId, assertCurrent: source.assertCurrent.bind(source),
       taintEvidence: source.taintEvidence === undefined ? undefined : captureOwnedJson(source.taintEvidence) as RetainedTaintEvidence,
-      recoveryFacts: source.recoveryFacts === undefined ? undefined : captureOwnedJson(source.recoveryFacts) as PaymentRequestHostFacts,
+      recoveryFacts: source.recoveryFacts === undefined ? undefined : captureOwnedJson(source.recoveryFacts) as Pick<PaymentRequestHostFacts, 'authority' | 'configuration'>,
       issueContinuation: source.issueContinuation?.bind(source), revokeContinuation: source.revokeContinuation?.bind(source),
-      capturePageConnection: source.capturePageConnection?.bind(source) });
+      capturePageConnection: source.capturePageConnection?.bind(source), captureBrowserRecovery: source.captureBrowserRecovery?.bind(source) });
     if (source.issueContinuation && !source.revokeContinuation) throw new PaymentOperationStoreError('unavailable');
     const current = () => {
       if (this.closed) throw new CheckoutOwnershipError();
@@ -111,14 +113,19 @@ export class CheckoutOperations {
       preparing();
       if (this.requests) {
         if (!source.taintEvidence || !source.recoveryFacts) throw new PaymentOperationStoreError('unavailable');
-        const observed = source.capturePageConnection
+        const recovery = source.captureBrowserRecovery
+          ? await source.captureBrowserRecovery(captured, { signal: active.abort.signal, assertCurrent: preparing }) : null;
+        preparing();
+        const originalRecovery = recovery === null ? null : captureBrowserCheckoutRecovery(recovery);
+        const observed = source.captureBrowserRecovery ? originalRecovery?.connection ?? null : source.capturePageConnection
           ? await source.capturePageConnection(captured, { signal: active.abort.signal, assertCurrent: preparing }) : null;
         preparing();
         const browser = observed === null ? null : captureBrowserPageConnection(observed);
         await this.requests.retain({ version: 1, purchaseId: id, operationId: operation.operationId, principalId: source.principalId,
           input: captured, evidence: source.taintEvidence,
-          host: { ...source.recoveryFacts,
-            ...(active.continuation ? { continuation: active.continuation } : {}), ...(browser ? { browser } : {}) } }, preparing);
+          host: { authority: source.recoveryFacts.authority, configuration: source.recoveryFacts.configuration,
+            ...(active.continuation ? { continuation: active.continuation } : {}), ...(browser ? { browser } : {}),
+            ...(originalRecovery ? { browserControls: originalRecovery.controls } : {}) } }, preparing);
         active.protectedRequest = true;
       }
       preparing();

@@ -34,6 +34,8 @@ export type {
 export { BrowserEngine, UntrustedEffectError } from './browser-engine.js';
 export type { BrowserActionLifetime, BrowserEngineOptions, BrowserExtractField, BrowserTarget } from './browser-engine.js';
 export type { BrowserPageConnection } from './browser-page-connection-data.js';
+export type { BrowserControlSnapshot } from './browser-control-snapshot-data.js';
+export type { BrowserCheckoutRecovery } from './browser-checkout-recovery-data.js';
 export { looksLikeCredentialPage } from './browser-engine-contract.js';
 
 export {

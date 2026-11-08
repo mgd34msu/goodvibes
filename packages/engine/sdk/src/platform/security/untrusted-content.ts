@@ -458,8 +458,14 @@ export async function assessRetainedOutwardContent(
   options: TaintOptions = {},
 ): Promise<OutwardContentAssessment> {
   if (options.signal?.aborted) throw new JudgmentError('aborted', 'the judgment call was cancelled');
+  return assessEvidence(captureRetainedTaintEvidence(evidence), content, options);
+}
+
+/** Storage/host handoff validation only. Parsing source facts cannot mint an
+ * owner, grant, browser session or execution lifetime. */
+export function captureRetainedTaintEvidence(value: unknown): RetainedTaintEvidence {
   let captured: RetainedTaintEvidence;
-  try { captured = captureOwnedJson(evidence) as RetainedTaintEvidence; }
+  try { captured = captureOwnedJson(value) as RetainedTaintEvidence; }
   catch { throw new JudgmentError('invalid-request', 'the retained untrusted-source evidence is invalid'); }
   if (!captured || typeof captured !== 'object' || !Array.isArray(captured.sources)
     || Object.keys(captured).some(key => !['sources', 'complete', 'missing', 'truncated', 'evicted', 'revision'].includes(key))
@@ -472,7 +478,7 @@ export async function assessRetainedOutwardContent(
       || Object.keys(source).some(key => !['surface', 'origin', 'text'].includes(key)))) {
     throw new JudgmentError('invalid-request', 'the retained untrusted-source evidence is invalid');
   }
-  return assessEvidence(captured, content, options);
+  return captured;
 }
 
 async function assessEvidence(

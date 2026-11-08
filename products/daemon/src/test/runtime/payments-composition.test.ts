@@ -1,18 +1,43 @@
-import { expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
-import { GatewayMethodCatalog, type GatewayMethodInvocation } from '@goodvibes-jev/engine/sdk/platform/control-plane';
-import { ATTACHED_PAYMENTS_METHOD_IDS, CardMaterialRedactor, DurableCheckoutJournal, PaymentReplyInboxClosedError, parseCurrencyCode, ownerSuppliedText, type CheckoutPageDriver, type InFlightCheckout, type PurchaseRecord } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { GatewayMethodCatalog } from '@goodvibes-jev/engine/sdk/platform/control-plane';
+import { ATTACHED_PAYMENTS_METHOD_IDS, CardMaterialRedactor, DurableCheckoutJournal, ProtectedPaymentRequests, PaymentReplyInboxClosedError, parseCurrencyCode, ownerSuppliedText, type CheckoutPageDriver, type InFlightCheckout, type PurchaseRecord } from '@goodvibes-jev/engine/sdk/platform/payments';
+import { PairingTokenManager } from '@goodvibes-jev/engine/sdk/platform/pairing';
+import { readPaymentWindowStatus } from '@goodvibes-jev/engine/sdk/platform/payments/browser';
+import { resetProcessUntrustedContentLedgerForTests } from '@goodvibes-jev/engine/sdk/platform/security';
+import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../../../../../packages/engine/sdk/src/platform/daemon/control-plane.js';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import { createPaymentsServices } from '../../runtime/payments-composition.js';
 import { createBrowserCheckoutSeamHolder } from '../../runtime/browser-checkout-seam-holder.js';
 import { createShellPathService } from '../../runtime/index.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
+const callers = new WeakMap<GatewayMethodCatalog, (id: string, body: unknown) => Promise<Record<string, unknown>>>();
+beforeEach(resetProcessUntrustedContentLedgerForTests);
+afterEach(resetProcessUntrustedContentLedgerForTests);
+async function until(check: () => boolean | Promise<boolean>) {
+  const deadline = Date.now() + 2000;
+  while (!await check()) {
+    if (Date.now() > deadline) throw new Error('Actual product payment operation did not settle');
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
+}
+
 function fixture(catalog = new GatewayMethodCatalog()) {
   const root = makeOwnedTempDir('daemon-payments');
+  const pairing = new PairingTokenManager(join(root, 'pairing.json')), paired = pairing.mint({ name: 'Synthetic product payment owner' });
+  const dispatcher = new DaemonControlPlaneHelper({ gatewayMethods: catalog, pairingTokens: pairing, authToken: () => 'synthetic-unused-shared',
+    userAuth: { validateSession: () => null } } as unknown as DaemonControlPlaneContext);
+  callers.set(catalog, async (methodId, body) => {
+    const result = await dispatcher.invokeGatewayMethodCall({ methodId, body, authToken: paired.token,
+      context: { ...dispatcher.describeAuthenticatedPrincipal(paired.token), explicitUserRequest: true } });
+    if (result.status !== 200) throw Object.assign(new Error('Fixture gateway refusal'), { status: result.status, body: result.body });
+    if (!result.body || typeof result.body !== 'object' || Array.isArray(result.body)) throw new Error('Expected object response');
+    return result.body as Record<string, unknown>;
+  });
   const values: Record<string, unknown> = { 'payments.enabled': true, 'payments.budget.dailyItem': 100, 'payments.budget.dailyOverage': 100, 'payments.budget.perPurchaseCeiling': 100, 'payments.notifyChannels': 'telegram', 'payments.cvvHandling': 'stored' };
   for (const [key, value] of Object.entries({ name: 'Fixture owner', line1: '1 Fixture Street', city: 'Fixture City', region: 'TS', postalCode: '00000', country: 'US' })) values[`payments.shippingAddress.${key}`] = value;
   const secrets = new Map<string, string>();
@@ -36,7 +61,8 @@ function fixture(catalog = new GatewayMethodCatalog()) {
 }
 
 function invoke(catalog: GatewayMethodCatalog, id: string, body: unknown = {}) {
-  return catalog.invoke(id, { context: { principalId: 'fixture-owner', scopes: ['write:payments'], metadata: { explicitUserRequest: true } }, isAuthorized: scopes => scopes?.every(scope => scope === 'write:payments') ?? true, body } satisfies GatewayMethodInvocation) as Promise<Record<string, unknown>>;
+  const call = callers.get(catalog); if (!call) throw new Error('Missing actual paired dispatcher');
+  return call(id, body);
 }
 
 test('real product payments register on the existing catalog and read live owner limits/leadership', async () => {
@@ -108,10 +134,6 @@ test('the composed notifier waits on the returned ingress inbox and owner veto s
     async submitOrder() { outward.push('submit'); return { url: 'https://www.bestbuy.com/done', orderId: null, verified: false }; },
   };
   f.browser.set({ cardFieldGuard: new CardMaterialRedactor(), driverFor: () => driver, armSubmitApproval: async () => {} });
-  let opened!: () => void;
-  const window = new Promise<void>((resolve) => { opened = resolve; });
-  const originalWait = f.services.paymentReplies.waitForAnswer.bind(f.services.paymentReplies);
-  const wait = spyOn(f.services.paymentReplies, 'waitForAnswer').mockImplementation((input) => { const pending = originalWait(input); opened(); return pending; });
   try {
     await f.services.ready;
     const card = await f.services.cards.create({ label: 'Fixture-only card', kind: 'virtual', number: '4111111111111111', expiryMonth: 1, expiryYear: 2030, cvv: '123', cardholderName: 'Fixture owner', issuerCapMinorUnits: null });
@@ -121,20 +143,21 @@ test('the composed notifier waits on the returned ingress inbox and owner veto s
     expect(readFileSync(metadataPath, 'utf8')).not.toContain('4111111111111111');
     const identity = { merchantDomain: 'bestbuy.com', item: 'Fixture item' };
     await invoke(f.catalog, 'payments.checkout.approve', { ...identity, amount: '11.00', confirm: true });
-    const purchase = invoke(f.catalog, 'payments.checkout.begin', {
-      ...identity, requestedMax: '11.00', sessionId: 'fixture-session', pageId: 'fixture-page', checkoutUrl: 'https://www.bestbuy.com/checkout', cardId: card.id,
+    const purchase = await invoke(f.catalog, 'payments.checkout.begin', {
+      ...identity, requestId: 'product-owner-veto', requestedMax: '11.00', sessionId: 'fixture-session', pageId: 'fixture-page', checkoutUrl: 'https://www.bestbuy.com/checkout', cardId: card.id,
       requestedLines: [{ label: 'Fixture item', quantity: 1 }], lines: [{ label: 'Fixture item', quantity: '1', unitPrice: '$10.00' }],
       shippingOptions: [{ label: 'Standard', cost: '$0.00' }], cardFields: [{ field: 'number', ref: 'fixture-card' }], placeOrderTarget: 'fixture-submit',
     });
-    void purchase.catch(() => {});
-    await Promise.race([window, purchase.then((result) => { throw new Error(`Checkout never opened a reply window: ${JSON.stringify(result)}`); })]);
+    expect(purchase).toMatchObject({ outcome: 'accepted', purchaseId: 'product-owner-veto' });
+    await until(() => f.services.paymentReplies.inspect().length === 1);
     expect(f.services.paymentReplies.pending).toBe(1);
     expect(f.deliveries).toHaveLength(1);
     expect(await f.services.paymentReplies.offer('telegram', 'stop')).toEqual({ consumed: true, answer: 'object' });
-    expect(await purchase).toMatchObject({ outcome: 'cancelled' });
+    await until(async () => readPaymentWindowStatus(await invoke(f.catalog, 'payments.purchase.status')).operations[0]?.state === 'cancelled');
+    const requestRoot = join(f.root, 'home', '.goodvibes', 'tui', 'control-plane', 'payments-requests');
+    await until(() => !existsSync(join(requestRoot, `${Buffer.from('product-owner-veto').toString('base64url')}.json`)));
     expect(outward).toEqual([]);
   } finally {
-    wait.mockRestore();
     await f.services.close();
     installJudgmentPort(previous);
   }
@@ -217,14 +240,14 @@ test('real product close drains boot recovery delivery and cannot stamp a retire
 });
 
 function beginBody(cardId: string) {
-  return { merchantDomain: 'bestbuy.com', item: 'Fixture item', requestedMax: '11.00', sessionId: 'fixture-session', pageId: 'fixture-page',
+  return { requestId: 'product-owned-checkout', merchantDomain: 'bestbuy.com', item: 'Fixture item', requestedMax: '11.00', sessionId: 'fixture-session', pageId: 'fixture-page',
     checkoutUrl: 'https://www.bestbuy.com/checkout', cardId, requestedLines: [{ label: 'Fixture item', quantity: 1 }],
     lines: [{ label: 'Fixture item', quantity: '1', unitPrice: '$10.00' }], shippingOptions: [{ label: 'Standard', cost: '$0.00' }],
     cardFields: [{ field: 'number', ref: 'fixture-card' }], placeOrderTarget: 'fixture-submit' };
 }
 
 test.each(['preflight', 'submit'] as const)('actual product close retains an admitted %s operation until it drains', async phase => {
-  const f = fixture(), entered = barrier(), gate = barrier(), window = barrier();
+  const f = fixture(), entered = barrier(), gate = barrier();
   const previous = installJudgmentPort(fixturePort()), effects: string[] = [];
   const driver: CheckoutPageDriver = {
     identity: () => ({ sessionId: 'fixture-session', pageId: 'fixture-page' }),
@@ -239,8 +262,6 @@ test.each(['preflight', 'submit'] as const)('actual product close retains an adm
     async submitOrder() { effects.push('submit'); entered.release(); await gate.pending; throw new Error('Unknown merchant outcome'); },
   };
   f.browser.set({ cardFieldGuard: new CardMaterialRedactor(), driverFor: () => driver, armSubmitApproval: async () => {} });
-  const originalWait = f.services.paymentReplies.waitForAnswer.bind(f.services.paymentReplies);
-  const wait = spyOn(f.services.paymentReplies, 'waitForAnswer').mockImplementation(input => { const pending = originalWait(input); window.release(); return pending; });
   let restoreMetadata: (() => void) | undefined, pending: Promise<Record<string, unknown>> | undefined;
   try {
     await f.services.ready;
@@ -252,28 +273,40 @@ test.each(['preflight', 'submit'] as const)('actual product close retains an adm
       restoreMetadata = () => metadata.mockRestore();
     }
     pending = invoke(f.catalog, 'payments.checkout.begin', beginBody(card.id));
-    const handled = pending.catch(error => error);
+    expect(await pending).toMatchObject({ outcome: 'accepted', purchaseId: 'product-owned-checkout' });
+    const status = readPaymentWindowStatus(await invoke(f.catalog, 'payments.purchase.status'));
+    const operation = status.operations[0]; if (!operation) throw new Error('Missing admitted product operation');
+    const requestRoot = join(f.root, 'home', '.goodvibes', 'tui', 'control-plane', 'payments-requests');
+    const saved = await new ProtectedPaymentRequests(requestRoot).read('product-owned-checkout', operation.operationId, () => {});
+    expect(saved.input.item).toBe('Fixture item'); expect(saved.input.requestedMax).toBe('11.00');
+    expect(saved.host.authority.kind).toBe('pairing-token');
+    const privatePath = join(requestRoot, `${Buffer.from('product-owned-checkout').toString('base64url')}.json`);
+    expect(readFileSync(privatePath, 'utf8')).not.toContain('Fixture item');
     if (phase === 'submit') {
-      await Promise.race([window.pending, pending.then(result => { throw new Error(`No payment window: ${JSON.stringify(result)}`); })]);
+      await until(() => f.services.paymentReplies.inspect().length === 1);
       const selected = f.services.paymentReplies.inspect()[0];
       if (!selected) throw new Error('Expected an actual pending payment window');
       f.services.paymentReplies.answer({ purchaseId: selected.purchaseId, windowId: selected.windowId, action: 'approve' });
     }
-    await Promise.race([entered.pending, pending.then(() => { throw new Error('Expected suspended payment operation'); })]);
+    await entered.pending;
     const closing = f.services.close(); let drained = false; void closing.then(() => { drained = true; });
     await Promise.resolve(); await Promise.resolve(); expect(drained).toBe(false);
     for (const id of ATTACHED_PAYMENTS_METHOD_IDS) expect(f.catalog.hasHandler(id)).toBe(false);
-    gate.release(); await handled; await closing;
-    if (phase === 'preflight') { expect(effects).toEqual([]); expect(f.services.budget.state().reservations).toEqual([]); }
+    gate.release(); await closing;
+    if (phase === 'preflight') {
+      expect(effects).toEqual([]); expect(f.services.budget.state().reservations).toEqual([]);
+      expect(existsSync(privatePath)).toBe(false);
+    }
     else {
       expect(effects).toContain('submit'); expect(f.services.budget.state().reservations[0]?.retainUntilSettled).toBe(true);
       expect((await new DurableCheckoutJournal(journalPath(f)).list())[0]?.phase).toBe('submit-pending');
+      expect(existsSync(privatePath)).toBe(true);
     }
   } finally {
     gate.release();
     const closing = f.services.close();
     await Promise.allSettled(pending ? [pending, closing] : [closing]);
-    restoreMetadata?.(); wait.mockRestore(); installJudgmentPort(previous);
+    restoreMetadata?.(); installJudgmentPort(previous);
   }
 });
 

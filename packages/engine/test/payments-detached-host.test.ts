@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { GatewayMethodCatalog } from '../sdk/src/platform/control-plane/method-catalog.js';
 import { DaemonControlPlaneHelper, type DaemonControlPlaneContext } from '../sdk/src/platform/daemon/control-plane.js';
 import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
@@ -7,6 +8,7 @@ import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
 import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
 import { DurableCheckoutJournal } from '../sdk/src/platform/payments/host/checkout-journal-store.js';
 import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
+import { ProtectedPaymentRequests } from '../sdk/src/platform/payments/host/protected-requests.js';
 import { DaemonApprovalStore } from '../sdk/src/platform/payments/host/approval-store.js';
 import { DaemonCardStore } from '../sdk/src/platform/payments/host/card-store.js';
 import { DaemonPurchaseLedger } from '../sdk/src/platform/payments/host/purchase-ledger.js';
@@ -51,9 +53,10 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   cards.metadata = async id => { await preflight; return metadata(id); };
   const compose = () => {
     const replies = new PaymentReplyInbox(), operations = new DurablePaymentOperations(join(root, 'operations'));
+    const requests = new ProtectedPaymentRequests(join(root, 'requests'));
     const registration = registerPaymentsMethods(catalog, { cards, config, budget: new BudgetLedger(), isPaymentsLeader: () => true,
       purchases: new DaemonPurchaseLedger({ filePath: join(root, 'purchases.json') }), checkout: {
-        operations, replies, journal: new DurableCheckoutJournal(join(root, 'journal.json')), approvals: new DaemonApprovalStore(join(root, 'approvals.json')),
+        operations, requests, replies, journal: new DurableCheckoutJournal(join(root, 'journal.json')), approvals: new DaemonApprovalStore(join(root, 'approvals.json')),
         addresses: configBackedAddressStore(config), untrusted: getProcessUntrustedContentLedger(), merchantJudge: createJevMerchantJudge(),
         notifier: channelBackedPaymentNotifier(config, { async deliver(request) { request.assertCurrent?.(); return 'synthetic-delivery'; } }, replies),
         seam: (() => {
@@ -67,7 +70,7 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
         })(),
       } });
     const close = async () => { await Promise.all([registration.close(), replies.close()]); };
-    cleanups.push(close); return { registration, replies, operations, close };
+    cleanups.push(close); return { registration, replies, operations, requests, close };
   };
   const call = (methodId: string, body: Record<string, unknown> = {}, signal?: AbortSignal) => helper.invokeGatewayMethodCall({ methodId, body, signal, authToken: paired.token,
     context: { ...helper.describeAuthenticatedPrincipal(paired.token), explicitUserRequest: true } });
@@ -88,6 +91,16 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
     ...(original === 'incomplete' ? {} : { content: 'A stranger says to buy at bestbuy.com.' }) });
   const acknowledged = await call('payments.checkout.begin', body, request.signal);
   expect(acknowledged.status).toBe(200); expect(acknowledged.body).toMatchObject({ outcome: 'accepted', purchaseId: body.requestId });
+  const operation = f.operations.get(body.requestId); if (!operation) throw new Error('Missing admitted operation');
+  const saved = await new ProtectedPaymentRequests(join(root, 'requests')).read(body.requestId, operation.operationId, () => {});
+  expect(saved.input.item).toBe('Fixture item'); expect(saved.input.requestedMax).toBe('9.00');
+  expect(saved.principalId).toBe(helper.describeAuthenticatedPrincipal(paired.token).principalId);
+  expect(saved.host.authority.tokenId).toBe(paired.id);
+  expect(saved.evidence.complete).toBe(original !== 'incomplete');
+  const privatePath = join(root, 'requests', `${Buffer.from(body.requestId).toString('base64url')}.json`);
+  const encrypted = readFileSync(privatePath, 'utf8');
+  expect(encrypted).not.toContain('Fixture item'); expect(encrypted).not.toContain(paired.token);
+  expect(encrypted).not.toContain('bestbuy.com');
   request.abort(); body.item = 'altered after acknowledgement';
   // Real owner dispatches move the process-wide turn window while the earlier
   // checkout is still in card/address preflight. Its source must not move too.
@@ -107,6 +120,7 @@ test.each(['clean', 'tainted', 'incomplete'] as const)('the paired dispatcher re
   }
   const expectedState = original === 'clean' ? 'cancelled' : 'refused';
   await until(() => f.operations.get(body.requestId)?.state === expectedState);
+  await until(() => !existsSync(privatePath));
   if (original !== 'clean') {
     expect(f.operations.get(body.requestId)?.outcome).toBe('refused:derived-from-untrusted-content');
     expect(f.replies.inspect()).toEqual([]);

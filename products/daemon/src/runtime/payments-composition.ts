@@ -30,6 +30,7 @@ import {
   DurableBudgetLedger,
   DurableCheckoutJournal,
   DurablePaymentOperations,
+  ProtectedPaymentRequests,
   channelBackedPaymentNotifier,
   configBackedAddressStore,
   registerPaymentsMethods,
@@ -148,6 +149,7 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
     // lands here before the flow proceeds, so a crash in the one ambiguous
     // window leaves a record a restart can disclose instead of nothing.
     operations: new DurablePaymentOperations(controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-operations')),
+    requests: new ProtectedPaymentRequests(controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-requests')),
     journal: new DurableCheckoutJournal(
       controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-checkout-journal.json'),
     ),

@@ -5,6 +5,8 @@ import { HandlerError, type HandlerContextEnvelope } from './handler-plumbing.js
 import type { PaymentsHandlerDeps } from './register.js';
 import type { BrowserCheckoutSeam } from '../../control-plane/routes/browser-composition.js';
 import { retainTaintEvidence } from '../../security/untrusted-content.js';
+import type { PaymentsServiceConfig } from '../payments-gateway-service.js';
+import type { NativePairedSnapshot } from '../../security/http-auth.js';
 
 function frame(context: HandlerContextEnvelope) {
   return { principalId: context.principalId, principalKind: context.principalKind, admin: context.admin,
@@ -75,5 +77,6 @@ function detachedSource(deps: PaymentsHandlerDeps, seam: BrowserCheckoutSeam,
     } catch { throw new HandlerError('The original paired checkout owner, payment settings or browser changed. Inspect this purchase before trying again.', 'FAILED_PRECONDITION', 409); }
   };
   assertCurrent();
-  return Object.freeze({ principalId, assertCurrent, taintEvidence });
+  return Object.freeze({ principalId, assertCurrent, taintEvidence,
+    recoveryFacts: Object.freeze({ authority: expected as NativePairedSnapshot, configuration: config as PaymentsServiceConfig }) });
 }

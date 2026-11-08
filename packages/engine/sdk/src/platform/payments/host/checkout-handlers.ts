@@ -8,6 +8,7 @@ import { OwnedWork } from '../../utils/owned-work.js';
 import { CheckoutOperations, type DetachedCheckoutOwner, type DetachedCheckoutSource } from './checkout-operations.js';
 import { PaymentOperationStoreError, checkoutRequestId, type DurablePaymentOperations } from './operation-store.js';
 import type { BeginCheckoutInput } from '../payments-gateway-service.js';
+import { ProtectedPaymentRequestError, type PaymentRequestStore } from './protected-requests.js';
 /**
  * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
  *
@@ -95,6 +96,8 @@ export interface CheckoutComposition {
    */
   readonly journal: CheckoutJournal;
   readonly operations: DurablePaymentOperations;
+  /** Native composition stores original facts before acknowledging admission. */
+  readonly requests?: PaymentRequestStore | undefined;
 }
 
 function invalid(field: string, requirement: string): HandlerError {
@@ -358,7 +361,7 @@ export class CheckoutServiceHolder {
     private readonly journal: CheckoutJournal,
   ) {
     this.operations = new CheckoutOperations(deps.checkout.operations, journal, deps.purchases,
-      (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now);
+      (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now, deps.checkout.requests);
     this.registry = new CheckoutRegistry({ list: () => journal.list(), remove: id => journal.remove(id),
       put: async record => { await journal.put(record); this.operations.progress(record); } });
     this.recovery = new CheckoutRecovery({ registry: this.registry, journal,
@@ -612,13 +615,13 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
       const source = retainDetachedCheckout(deps, seam, context);
       const admission = retainCheckoutInvocation(deps, seam, context);
       deps.purchases.assertAvailable();
-      const operation = holder.admit(id, input, source, admission.assertCurrent, () => consumeCheckoutApproval(deps.checkout.approvals, input));
+      const operation = await holder.admit(id, input, source, admission.assertCurrent, () => consumeCheckoutApproval(deps.checkout.approvals, input));
       return { outcome: 'accepted', purchaseId: operation.purchaseId, reason: null, merchantOrderId: null,
         totalMinorUnits: null, currency: null, shippingTierUsed: null, steppedDown: false, challengeStep: null };
     } catch (error) {
       if (error instanceof HandlerError) throw error;
       if (error instanceof PaymentOperationStoreError && error.kind === 'invalid') throw new HandlerError(error.message, 'INVALID_ARGUMENT', 400);
-      if (error instanceof PaymentOperationStoreError || error instanceof PaymentPurchaseLedgerError || error instanceof PaymentCheckoutJournalUnavailableError) {
+      if (error instanceof PaymentOperationStoreError || error instanceof PaymentPurchaseLedgerError || error instanceof PaymentCheckoutJournalUnavailableError || error instanceof ProtectedPaymentRequestError) {
         throw new HandlerError(error.message, error instanceof PaymentOperationStoreError && error.kind === 'exists' ? 'ALREADY_EXISTS' : 'FAILED_PRECONDITION', 409);
       }
       throw new HandlerError('This checkout could not be admitted. Read the original purchase status before trying again.', 'INTERNAL_ERROR', 500);

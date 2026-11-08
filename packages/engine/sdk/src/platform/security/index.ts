@@ -33,6 +33,7 @@ export {
   labelUntrustedContent,
   originOf,
   retainTaintEvidence,
+  captureRetainedTaintEvidence,
   resetProcessUntrustedContentLedgerForTests,
   surfaceHasCommandAuthority,
 } from './untrusted-content.js';

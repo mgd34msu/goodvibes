@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DurablePaymentOperations, PaymentOperationStoreError } from '../sdk/src/platform/payments/host/operation-store.js';
@@ -10,6 +10,9 @@ import { MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-reg
 import type { BeginCheckoutInput, PaymentBeginResult } from '../sdk/src/platform/payments/payments-gateway-service.js';
 import type { PaymentOperationView } from '../sdk/src/platform/payments/operation-view.js';
 import { configureDecisionModelPolicy } from '../sdk/src/platform/runtime/decision-policy.js';
+import { ProtectedPaymentRequests, type PaymentRequestStore } from '../sdk/src/platform/payments/host/protected-requests.js';
+import { protectedPaymentRequest } from './helpers/protected-payment-request.ts';
+import { parseCurrencyCode, ownerSuppliedText } from '../sdk/src/platform/payments/types.js';
 
 const roots: string[] = [], cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -90,12 +93,12 @@ test('durable acknowledgement survives request abort, uses a root-owned context 
   });
   cleanup.push(async () => { gate.release(); await operations.close(); }); await operations.recover();
   const body = { ...structuredClone(input) };
-  const accepted = context.run('request-only', () => operations.admit('request', body, { principalId: 'pairing:owner', assertCurrent() {} }, () => request.signal.throwIfAborted(), () => { admitted++; }));
+  const accepted = await context.run('request-only', () => operations.admit('request', body, { principalId: 'pairing:owner', assertCurrent() {} }, () => request.signal.throwIfAborted(), () => { admitted++; }));
   expect(accepted.state).toBe('accepted'); expect(store.get('request')).toEqual(accepted);
   request.abort(); body.item = 'changed after acknowledgement';
   await entered.wait;
   expect(inherited).toBeUndefined(); expect(captured?.item).toBe('owner item'); expect(executions).toBe(1);
-  expect(() => operations.admit('request', { ...input, item: 'changed retry' }, { principalId: 'pairing:owner', assertCurrent() {} }, () => {}, () => { admitted++; })).toThrow(PaymentOperationStoreError);
+  await expect(operations.admit('request', { ...input, item: 'changed retry' }, { principalId: 'pairing:owner', assertCurrent() {} }, () => {}, () => { admitted++; })).rejects.toBeInstanceOf(PaymentOperationStoreError);
   expect(admitted).toBe(1);
   expect(() => operations.cancel('request', 'different-operation')).toThrow(PaymentOperationStoreError);
   expect(operations.cancel('request', accepted.operationId)).toEqual({ purchaseId: 'request', operationId: accepted.operationId, accepted: true, mayHaveSubmitted: false });
@@ -114,4 +117,101 @@ test('restart status cannot downgrade known submit-pending evidence when its jou
   const operations = new CheckoutOperations(store, new MemoryCheckoutJournal(), new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }), async (_input, id) => { executions++; return refusal(id); });
   cleanup.push(() => operations.close()); await operations.recover();
   expect(store.get('original-checkout')?.state).toBe('uncertain'); expect(executions).toBe(0);
+});
+
+test('admission waits for durable original facts and binds original storage methods and request values', async () => {
+  const path = directory(), store = new DurablePaymentOperations(join(path, 'operations'));
+  const requests = new ProtectedPaymentRequests(join(path, 'requests')), original = protectedPaymentRequest('durable-admission');
+  const retained = barrier(), releaseStorage = barrier(), entered = barrier(), releaseExecutor = barrier();
+  cleanup.push(releaseStorage.release, releaseExecutor.release, configureDecisionModelPolicy(() => 'Default - On'));
+  let acknowledgements = 0, executions = 0, sourceChecks = 0, removals = 0;
+  const wrapper: PaymentRequestStore = {
+    async retain(value, current) { await requests.retain(value, current); retained.release(); await releaseStorage.wait; },
+    read: requests.read.bind(requests),
+    async remove(id, operationId, current) { removals++; await requests.remove(id, operationId, current); },
+  };
+  const operations = new CheckoutOperations(store, new MemoryCheckoutJournal(), new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }), async (owned, id, owner) => {
+    executions++; expect(owned.item).toBe(original.input.item); expect(owner.taintEvidence).toEqual(original.evidence);
+    entered.release(); await releaseExecutor.wait; owner.assertCurrent(); return refusal(id);
+  }, Date.now, wrapper);
+  cleanup.push(async () => { releaseStorage.release(); releaseExecutor.release(); await operations.close(); });
+  await operations.recover();
+  const body = structuredClone(original.input), source = { principalId: original.principalId, taintEvidence: structuredClone(original.evidence),
+    recoveryFacts: structuredClone(original.host), assertCurrent() { sourceChecks++; } };
+  const pending = operations.admit(original.purchaseId, body, source, () => {}, () => {}).then(value => { acknowledgements++; return value; });
+  await retained.wait;
+  expect(acknowledgements).toBe(0); expect(executions).toBe(0);
+  const accepted = store.get(original.purchaseId); if (!accepted) throw new Error('Expected retained operation');
+  expect(new DurablePaymentOperations(join(path, 'operations')).recover(original.purchaseId)).toBeNull();
+  const saved = await new ProtectedPaymentRequests(join(path, 'requests')).read(original.purchaseId, accepted.operationId, () => {});
+  expect(saved.input.item).toBe(original.input.item); expect(saved.evidence).toEqual(original.evidence);
+  body.item = 'changed during persistence'; source.assertCurrent = () => { throw new Error('replacement callback'); };
+  wrapper.retain = async () => { throw new Error('replacement retain'); }; wrapper.remove = async () => { throw new Error('replacement remove'); };
+  releaseStorage.release(); await pending; await entered.wait;
+  expect(acknowledgements).toBe(1); expect(executions).toBe(1); expect(sourceChecks).toBeGreaterThan(0);
+  releaseExecutor.release(); await operations.close();
+  expect(removals).toBe(1);
+  expect(existsSync(join(path, 'requests', `${Buffer.from(original.purchaseId).toString('base64url')}.json`))).toBe(false);
+});
+
+test.each(['cancel', 'close', 'request-abort'] as const)('%s during durable preparation drains storage and never launches the checkout', async stop => {
+  const path = directory(), store = new DurablePaymentOperations(join(path, 'operations')), requests = new ProtectedPaymentRequests(join(path, 'requests'));
+  const original = protectedPaymentRequest('pending-original'), retained = barrier(), release = barrier(), request = new AbortController();
+  cleanup.push(release.release, configureDecisionModelPolicy(() => 'Default - On'));
+  let executions = 0, acknowledge = false;
+  const operations = new CheckoutOperations(store, new MemoryCheckoutJournal(), new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') }), async (_owned, id) => { executions++; return refusal(id); }, Date.now, {
+    async retain(value, current) { await requests.retain(value, current); retained.release(); await release.wait; },
+    read: requests.read.bind(requests), remove: requests.remove.bind(requests),
+  });
+  cleanup.push(async () => { release.release(); await operations.close(); }); await operations.recover();
+  const pending = operations.admit(original.purchaseId, original.input,
+    { principalId: original.principalId, assertCurrent() {}, taintEvidence: original.evidence, recoveryFacts: original.host },
+    () => request.signal.throwIfAborted(), () => {}).then(() => { acknowledge = true; return null; }, error => error as unknown);
+  await retained.wait;
+  const accepted = store.get(original.purchaseId); if (!accepted) throw new Error('Missing original operation');
+  let drained = false, closing: Promise<void> | undefined;
+  if (stop === 'cancel') operations.cancel(original.purchaseId, accepted.operationId);
+  else if (stop === 'request-abort') request.abort(new Error('request gone during admission'));
+  else { closing = operations.close().then(() => { drained = true; }); }
+  await Promise.resolve(); expect(drained).toBe(false); expect(acknowledge).toBe(false);
+  expect(new DurablePaymentOperations(join(path, 'operations')).recover(original.purchaseId)).toBeNull();
+  release.release(); expect(await pending).not.toBeNull(); await closing;
+  expect(executions).toBe(0); expect(acknowledge).toBe(false);
+  expect(store.get(original.purchaseId)?.state).toBe(stop === 'request-abort' ? 'failed' : 'cancelled');
+  expect(existsSync(join(path, 'requests', `${Buffer.from(original.purchaseId).toString('base64url')}.json`))).toBe(false);
+});
+
+test.each(['unknown', 'submitted-unverified'] as const)('a %s merchant submission retains its original encrypted facts after executor drainage', async outcome => {
+  const path = directory(), store = new DurablePaymentOperations(join(path, 'operations')), requests = new ProtectedPaymentRequests(join(path, 'requests'));
+  const original = protectedPaymentRequest('unknown-submission'), entered = barrier(), release = barrier();
+  const journal = new MemoryCheckoutJournal(), currency = parseCurrencyCode('USD'), item = ownerSuppliedText(original.input.item, 'owner-direct');
+  const purchases = new DaemonPurchaseLedger({ filePath: join(path, 'purchases.json') });
+  if (!currency || !item) throw new Error('Invalid fixture');
+  cleanup.push(release.release, configureDecisionModelPolicy(() => 'Default - On'));
+  const operations = new CheckoutOperations(store, journal, purchases, async (_owned, id) => {
+    // Actual journal publication is the progress source; uncertainty must not
+    // become a generic safe failure when the executor then loses its response.
+    const record = { purchaseId: id, phase: 'submit-pending' as const, totalMinorUnits: 1000, currency, item,
+      sessionId: original.input.sessionId, pageId: original.input.pageId, merchantDomain: original.input.merchantDomain,
+      cardId: original.input.cardId, startedAtMs: Date.now(), updatedAtMs: Date.now(), draw: null, reservationId: null,
+      shippingTierRequested: 'normal' as const, shippingTierUsed: 'normal' as const, stepDown: null };
+    await journal.put(record); operations.progress(record);
+    entered.release(); await release.wait;
+    if (outcome === 'submitted-unverified') {
+      await purchases.record({ purchaseId: id, atUtc: '2026-11-08T00:00:00Z', dayKey: '2026-11-08', timezone: 'UTC',
+        merchantDomain: original.input.merchantDomain, item, currency, itemMinorUnits: 1000, taxMinorUnits: 0,
+        feesMinorUnits: 0, shippingMinorUnits: 0, totalMinorUnits: 1000, shippingTierRequested: 'normal', shippingTierUsed: 'normal',
+        steppedDown: false, itemPoolDraw: 1000, overagePoolDraw: 0, tolerancePoolDraw: 0, cardLast4: '1111',
+        windowKind: 'approval', windowOutcome: 'approved', answeredBy: 'operator', outcome,
+        refusalReason: null, merchantOrderId: null, refundedAt: null, merchantRecognised: true, merchantQualifier: 'major-retailer', merchantDiscovered: false });
+    }
+    throw new Error('merchant confirmation unavailable');
+  }, Date.now, requests);
+  cleanup.push(async () => { release.release(); await operations.close(); }); await operations.recover();
+  const accepted = await operations.admit(original.purchaseId, original.input,
+    { principalId: original.principalId, assertCurrent() {}, taintEvidence: original.evidence, recoveryFacts: original.host }, () => {}, () => {});
+  await entered.wait; release.release(); await operations.close();
+  expect(store.get(original.purchaseId)?.state).toBe(outcome === 'unknown' ? 'uncertain' : 'completed');
+  const saved = await new ProtectedPaymentRequests(join(path, 'requests')).read(original.purchaseId, accepted.operationId, () => {});
+  expect(saved.input.item).toBe(original.input.item);
 });

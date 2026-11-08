@@ -67,4 +67,6 @@ export {
 export type { CheckoutComposition, PaymentsHandlerDeps, PaymentsRegistration } from './register.js';
 
 export { DurablePaymentOperations, PaymentOperationStoreError } from './operation-store.js';
+export { ProtectedPaymentRequests, ProtectedPaymentRequestError } from './protected-requests.js';
+export type { ProtectedPaymentRequest, PaymentRequestHostFacts, PaymentRequestStore } from './protected-requests.js';
 export type { PaymentOperationWriter, PaymentRecoveryLease } from './operation-store.js';

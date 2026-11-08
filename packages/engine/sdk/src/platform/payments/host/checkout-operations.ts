@@ -17,11 +17,13 @@ import { isLivePaymentOperation, type PaymentOperationView, type PaymentOperatio
 import { DurablePaymentOperations, PaymentOperationStoreError, checkoutRequestId, type PaymentOperationWriter } from './operation-store.js';
 import type { DaemonPurchaseLedger } from './purchase-ledger.js';
 import type { RetainedTaintEvidence } from '../../security/untrusted-content.js';
+import type { PaymentRequestHostFacts, PaymentRequestStore } from './protected-requests.js';
 
 export interface DetachedCheckoutSource {
   readonly principalId: string;
   readonly assertCurrent: () => void;
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
+  readonly recoveryFacts?: PaymentRequestHostFacts | undefined;
 }
 export interface DetachedCheckoutOwner {
   readonly signal: AbortSignal;
@@ -32,6 +34,7 @@ interface ActiveOperation {
   readonly writer: PaymentOperationWriter;
   readonly abort: AbortController;
   readonly source: DetachedCheckoutSource;
+  protectedRequest: boolean;
 }
 export class CheckoutOperations {
   // Constructed with the registration, before request dispatch. Background
@@ -43,14 +46,26 @@ export class CheckoutOperations {
   private closed = false;
   private recovered = false;
   private readonly reserved = new Set<string>();
+  private readonly requests: Pick<PaymentRequestStore, 'retain' | 'remove'> | undefined;
   private closing: Promise<void> | undefined;
   constructor(private readonly store: DurablePaymentOperations, private readonly journal: CheckoutJournal,
     private readonly purchases: DaemonPurchaseLedger,
     private readonly execute: (input: BeginCheckoutInput, id: string, owner: DetachedCheckoutOwner) => Promise<PaymentBeginResult>,
-    private readonly now: () => number = Date.now) {}
+    private readonly now: () => number = Date.now,
+    requests?: PaymentRequestStore) {
+    // Retain the original host methods, rather than consulting a mutable
+    // embed wrapper again after admission or during asynchronous cleanup.
+    this.requests = requests ? Object.freeze({ retain: requests.retain.bind(requests), remove: requests.remove.bind(requests) }) : undefined;
+  }
 
   admit(id: string, input: BeginCheckoutInput, source: DetachedCheckoutSource, admissionCurrent: () => void,
-    consumeApproval: () => void): PaymentOperationView {
+    consumeApproval: () => void): Promise<PaymentOperationView> {
+    if (this.closed) return Promise.reject(new CheckoutOwnershipError());
+    return this.work.run(() => this.prepareAdmission(id, input, source, admissionCurrent, consumeApproval));
+  }
+
+  private async prepareAdmission(id: string, input: BeginCheckoutInput, source: DetachedCheckoutSource, admissionCurrent: () => void,
+    consumeApproval: () => void): Promise<PaymentOperationView> {
     checkoutRequestId(id);
     if (this.closed) throw new CheckoutOwnershipError();
     if (!this.recovered || this.errors.length > 0) throw new PaymentOperationStoreError('unavailable');
@@ -64,7 +79,8 @@ export class CheckoutOperations {
     // embed mutating its source wrapper cannot replace evidence or a guard on
     // a later background tick. Native source factories already freeze theirs.
     source = Object.freeze({ principalId: source.principalId, assertCurrent: source.assertCurrent.bind(source),
-      taintEvidence: source.taintEvidence === undefined ? undefined : captureOwnedJson(source.taintEvidence) as RetainedTaintEvidence });
+      taintEvidence: source.taintEvidence === undefined ? undefined : captureOwnedJson(source.taintEvidence) as RetainedTaintEvidence,
+      recoveryFacts: source.recoveryFacts === undefined ? undefined : captureOwnedJson(source.recoveryFacts) as PaymentRequestHostFacts });
     const current = () => {
       if (this.closed) throw new CheckoutOwnershipError();
       source.assertCurrent(); admissionCurrent();
@@ -75,15 +91,36 @@ export class CheckoutOperations {
     const operation: PaymentOperationView = Object.freeze({ purchaseId: id, operationId: `payment-operation:${opaqueUuid()}`,
       state: 'accepted', phase: null, createdAtMs: now, updatedAtMs: now, outcome: null, totalMinorUnits: null, currency: null });
     const writer = this.store.create(operation, source.principalId, current);
-    // Launch has a separate scope containing no request signal/context, body
-    // wrapper, admission callback or approval-spending closure.
-    this.launch(captured, writer, source);
-    return operation;
+    const active: ActiveOperation = { writer, source, abort: new AbortController(), protectedRequest: false };
+    this.active.set(id, active);
+    let launched = false;
+    try {
+      const preparing = () => { current(); active.abort.signal.throwIfAborted(); writer.assertCurrent(); };
+      if (this.requests) {
+        if (!source.taintEvidence || !source.recoveryFacts) throw new PaymentOperationStoreError('unavailable');
+        await this.requests.retain({ version: 1, purchaseId: id, operationId: operation.operationId, principalId: source.principalId,
+          input: captured, evidence: source.taintEvidence, host: source.recoveryFacts }, preparing);
+        active.protectedRequest = true;
+      }
+      preparing();
+      // Only now can admission acknowledge durable original facts. Launch has
+      // no request signal/context, admission callback or approval-spend closure.
+      this.launch(captured, active); launched = true;
+      return operation;
+    } catch (error) {
+      await this.settleFailure(active, error);
+      throw error;
+    } finally {
+      if (!launched) {
+        try { await this.releaseProtectedRequest(active); }
+        catch (error) { this.errors.push(error); throw error; }
+        finally { this.active.delete(id); writer.release(); }
+      }
+    }
   }
 
-  private launch(input: BeginCheckoutInput, writer: PaymentOperationWriter, source: DetachedCheckoutSource): void {
-    const operation: ActiveOperation = { writer, source, abort: new AbortController() };
-    this.active.set(writer.purchaseId, operation);
+  private launch(input: BeginCheckoutInput, operation: ActiveOperation): void {
+    const { writer } = operation;
     this.execution.runInAsyncScope(() => {
       const pending = this.work.run(async () => {
         try {
@@ -93,8 +130,8 @@ export class CheckoutOperations {
           });
         } catch (error) { await this.settleFailure(operation, error); }
         finally {
-          this.active.delete(writer.purchaseId);
-          writer.release();
+          try { await this.releaseProtectedRequest(operation); }
+          finally { this.active.delete(writer.purchaseId); writer.release(); }
         }
       });
       void pending.catch(error => {
@@ -102,6 +139,16 @@ export class CheckoutOperations {
         try { logger.error('Purchase operation did not settle its metadata cleanly. Inspect its original payment evidence.'); } catch { /* Preserve owned settlement failure. */ }
       });
     });
+  }
+  private async releaseProtectedRequest(operation: ActiveOperation): Promise<void> {
+    const { writer } = operation;
+    if (!this.requests || !operation.protectedRequest) return;
+    const status = writer.read();
+    const settled = ['refused', 'cancelled', 'failed'].includes(status.state)
+      || status.state === 'completed' && (status.outcome === 'purchased' || status.outcome === 'refunded');
+    if (!settled) return;
+    await this.requests.remove(writer.purchaseId, status.operationId, () => writer.assertCurrent());
+    operation.protectedRequest = false;
   }
   private current(operation: ActiveOperation): void {
     if (this.closed || this.active.get(operation.writer.purchaseId) !== operation) throw new CheckoutOwnershipError();

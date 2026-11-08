@@ -905,6 +905,19 @@ The wait itself is in memory, owned and drained by the payment registration.
 Operation status and checkout phases are durable; restart does not reconstruct
 the browser execution or automatically submit the order.
 
+Before the native daemon acknowledges admission, it also durably saves the
+original checkout input, source evidence, paired identity and payment settings
+in `payments-requests`. These records are encrypted with a separate local keyfile
+and contain no pairing bearer or card secret. Back up the directory together
+with its `.key`; replacing or losing that key does not create a fresh readable
+store. Public operation status continues to omit request bodies and page text.
+Cancellation during this save prevents execution and waits for storage cleanup.
+Confirmed purchases and known pre-submit refusals/cancellations remove their
+protected request. Unknown and unverified submissions retain it for reconciliation.
+The saved facts do not authorize execution: restart continuation still needs
+the original paired authority and a valid browser/page continuation, and remains
+unfinished.
+
 Each wait now carries its exact `purchaseId`, rendered notice, deadline and
 owning cancellation signal. The notifier does not keep a shared last notice;
 concurrent purchases cannot overwrite the text used to interpret another

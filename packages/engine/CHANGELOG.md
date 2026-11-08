@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Save the original native checkout request and source evidence in a separate
+  encrypted store before acknowledging admission. Own and drain preparation
+  through cancellation, retain the original storage callbacks, and clean up
+  settled requests while keeping uncertain/unverified submission evidence.
+  Saved facts confer no execution authority; restart continuation remains open.
+
 - Reuse one immutable gateway scope snapshot while registrations are unchanged.
   Live continuation guards no longer rebuild and hash the complete catalog on
   every read. Registration changes invalidate it after the durable revocation

@@ -1,162 +1,113 @@
-/**
- * checkout-journal-store.ts, the in-flight checkout journal, durable across a
- * restart.
- *
- * ── The defect this closes ────────────────────────────────────────────────
- *
- * The composition used to hand `PaymentsGatewayServiceImpl` the SDK's own
- * `MemoryCheckoutJournal`, documented "durable across nothing". The phase
- * ladder in checkout-registry.ts exists for exactly one ambiguous moment: a
- * crash between the `submit-pending` flush and the merchant's response. With
- * an in-memory journal that flush kept nothing, so a restart could never say
- * "this purchase may already have been submitted, do not resubmit it". This
- * file is the durable journal that record was waiting for.
- *
- * ── The contract this implements ──────────────────────────────────────────
- *
- * The SDK's `CheckoutJournal` (checkout-registry.ts): `put` must not return
- * until the record would survive a power cut, `remove` drops one by
- * purchaseId, `list` returns what is held. `put` here writes through
- * `atomicWriteFileSync` (a synchronous rename-into-place) before resolving,
- * which is the flush the `submit-pending` guarantee rides on; a `put` whose
- * write fails THROWS, because a journal that reports durable-and-was-not
- * turns that guarantee into a comment.
- *
- * `remove` is the one deliberate asymmetry: its write failure is logged and
- * swallowed rather than thrown. By the time `remove` runs the checkout is
- * finished or abandoned; failing the caller would turn a completed purchase's
- * report into an error over a cleanup write, and the stale record it leaves
- * on disk fails in the safe direction, a restart discloses a checkout that
- * needs checking rather than forgetting one that does. The in-memory removal
- * stands either way, and the next successful `put`/`remove` rewrites the file
- * without the stale record.
- *
- * ── Unknown fields ride along untouched ───────────────────────────────────
- *
- * Records are persisted and reloaded as the objects they arrive as, not
- * projected through this module's idea of the record shape. Only
- * `purchaseId` (the removal key) is checked at load; every other field,
- * including fields added by an SDK this build has never seen, round-trips
- * byte-for-byte. The repin that teaches
- * the SDK to recover these records must find everything its writer put here,
- * not everything this file knew to keep.
- *
- * ── Corruption is a warning, not a crash ──────────────────────────────────
- *
- * Same conventions as `DurableBudgetLedger` (budget-store.ts): a missing file
- * starts empty silently; a file that exists but cannot be parsed or does not
- * hold this shape is logged as a warning naming the file, and the journal
- * starts empty rather than taking the daemon down. Entries without a string
- * `purchaseId` are dropped with a warning, since nothing could ever remove
- * them.
+/** Durable checkout evidence. Only a missing file means an unused journal.
+ * Damaged, unsupported or externally replaced state disables this owner without
+ * replacing the original file. Unknown JSON fields survive supported records.
+ * Writes publish in memory only after file and directory durability succeeds.
+ * A failed write has an uncertain disk outcome, so this owner cannot continue
+ * from an assumed old state. Reopening reads the actual committed file.
  */
-import { existsSync, readFileSync } from 'node:fs';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
+import { lstatSync } from 'node:fs';
+import { readFileObservation, type FileObservation } from '../../utils/file-observation.js';
 import { logger } from '../../utils/logger.js';
+import { captureCheckoutRecord } from '../checkout-record.js';
 import type { CheckoutJournal, InFlightCheckout } from '../checkout-registry.js';
 
 const JOURNAL_FILE_VERSION = 1;
+const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 
-interface JournalFile {
-  readonly version: number;
-  readonly records: readonly Record<string, unknown>[];
+export class PaymentCheckoutJournalUnavailableError extends Error {
+  override readonly name = 'PaymentCheckoutJournalUnavailableError';
+  constructor() { super('The checkout journal is unavailable. Repair or restore the original payment state and inspect pending purchases before retrying.'); }
 }
 
-/** The two fields this module actually reads; everything else is opaque cargo. */
-function hasJournalKeys(value: unknown): value is Record<string, unknown> & { purchaseId: string } {
-  return typeof value === 'object'
-    && value !== null
-    && !Array.isArray(value)
-    && typeof (value as Record<string, unknown>)['purchaseId'] === 'string';
-}
-
-/** Read the persisted records, keyed by purchaseId, or empty for "start empty". */
-function loadInitialRecords(filePath: string): Map<string, Record<string, unknown>> {
-  const records = new Map<string, Record<string, unknown>>();
-  if (!existsSync(filePath)) return records;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(filePath, 'utf-8'));
-  } catch (error) {
-    logger.warn(
-      'Checkout journal file could not be read; starting with no in-flight checkouts rather than guessing. '
-      + 'If a purchase was mid-submit when this daemon last stopped, check that merchant\'s order history by hand.',
-      { filePath, error: error instanceof Error ? error.message : String(error) },
-    );
-    return records;
-  }
-  if (
-    typeof parsed !== 'object'
-    || parsed === null
-    || !Array.isArray((parsed as Partial<JournalFile>).records)
-  ) {
-    logger.warn(
-      'Checkout journal file does not hold the expected shape; starting with no in-flight checkouts rather than guessing.',
-      { filePath },
-    );
-    return records;
-  }
-  const rows = (parsed as JournalFile).records;
-  for (const row of rows) {
-    if (hasJournalKeys(row)) {
-      records.set(row.purchaseId, row);
-    }
-  }
-  if (records.size !== rows.length) {
-    logger.warn(
-      'Checkout journal file held entries with no purchaseId; those entries were dropped rather than trusted, '
-      + 'since nothing could ever remove them.',
-      { filePath },
-    );
-  }
-  return records;
-}
-
-/**
- * The durable `CheckoutJournal` this daemon composes. See the module header
- * for the contract and the conventions.
- */
 export class DurableCheckoutJournal implements CheckoutJournal {
-  private readonly records: Map<string, Record<string, unknown>>;
+  private records = new Map<string, InFlightCheckout>();
+  private observed: FileObservation | null = null;
+  private unavailable = false;
 
   constructor(private readonly filePath: string) {
-    this.records = loadInitialRecords(filePath);
+    try { lstatSync(filePath); }
+    catch (error) { if (!missing(error)) this.disable(); return; }
+    try {
+      this.observed = readFileObservation(filePath);
+      const file: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(this.observed.bytes));
+      if (file === null || typeof file !== 'object' || Array.isArray(file) || !('version' in file)
+        || file.version !== JOURNAL_FILE_VERSION || !('records' in file) || !Array.isArray(file.records)) throw new Error();
+      for (const value of file.records) {
+        const row = captureCheckoutRecord(value);
+        if (row === null || this.records.has(row.purchaseId)) throw new Error();
+        this.records.set(row.purchaseId, row);
+      }
+    } catch { this.disable(); }
   }
 
-  /** Durable before it resolves; throws when the write does not land. */
+  private disable(): void {
+    if (!this.unavailable) logger.warn('Checkout journal is unreadable, unsupported or changed. Checkout operations are disabled; the original evidence was not discarded.', { filePath: this.filePath });
+    this.unavailable = true;
+  }
+
+  private assertAvailable(): void {
+    if (this.unavailable) throw new PaymentCheckoutJournalUnavailableError();
+  }
+
+  /** Capture the full supported record before accepting borrowed caller data. */
   async put(record: InFlightCheckout): Promise<void> {
-    const previous = this.records.get(record.purchaseId);
-    this.records.set(record.purchaseId, record as unknown as Record<string, unknown>);
-    try {
-      this.persist();
-    } catch (error) {
-      if (previous === undefined) this.records.delete(record.purchaseId);
-      else this.records.set(record.purchaseId, previous);
-      throw error;
-    }
+    this.assertAvailable();
+    let owned: InFlightCheckout | null;
+    try { owned = captureCheckoutRecord(record); }
+    catch { throw new PaymentCheckoutJournalUnavailableError(); }
+    if (owned === null) throw new PaymentCheckoutJournalUnavailableError();
+    const next = new Map(this.records);
+    next.set(owned.purchaseId, owned);
+    this.persist(next);
+    this.records = next;
   }
 
-  /** Removes in memory always; a failed cleanup write is logged, never thrown. See the header. */
+  /** A failed removal keeps the record owned and reports the failure. */
   async remove(purchaseId: string): Promise<void> {
-    if (!this.records.delete(purchaseId)) return;
-    try {
-      this.persist();
-    } catch (error) {
-      logger.warn(
-        'Checkout journal could not be rewritten after removing a finished checkout. The stale record stays on '
-        + 'disk until the next journal write lands; at worst a restart reports a checkout that needs checking '
-        + 'when it was already complete, never the reverse.',
-        { filePath: this.filePath, purchaseId, error: error instanceof Error ? error.message : String(error) },
-      );
-    }
+    this.assertAvailable();
+    if (!this.records.has(purchaseId)) { this.assertFileCurrent(); return; }
+    const next = new Map(this.records);
+    next.delete(purchaseId);
+    this.persist(next);
+    this.records = next;
   }
 
   async list(): Promise<readonly InFlightCheckout[]> {
-    return [...this.records.values()] as unknown as readonly InFlightCheckout[];
+    this.assertAvailable();
+    this.assertFileCurrent();
+    return Object.freeze([...this.records.values()]);
   }
 
-  private persist(): void {
-    const contents: JournalFile = { version: JOURNAL_FILE_VERSION, records: [...this.records.values()] };
-    atomicWriteFileSync(this.filePath, `${JSON.stringify(contents, null, 2)}\n`, { mode: 0o600, mkdirp: true });
+  /** Detect replacement by another store or operator. This is a restriction on
+   * this owner, not a cross-process writer lease or permission to rebind state.
+   */
+  private assertFileCurrent(): void {
+    try {
+      if (this.observed === null) {
+        try { lstatSync(this.filePath); }
+        catch (error) { if (missing(error)) return; throw error; }
+        throw new Error();
+      }
+      const current = readFileObservation(this.filePath);
+      if (current.physical !== this.observed.physical || !current.bytes.equals(this.observed.bytes)) throw new Error();
+    } catch {
+      this.disable();
+      throw new PaymentCheckoutJournalUnavailableError();
+    }
+  }
+
+  private persist(records: ReadonlyMap<string, InFlightCheckout>): void {
+    this.assertFileCurrent();
+    const contents = `${JSON.stringify({ version: JOURNAL_FILE_VERSION, records: [...records.values()] }, null, 2)}\n`;
+    try {
+      atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true });
+      const current = readFileObservation(this.filePath);
+      if (!current.bytes.equals(Buffer.from(contents, 'utf-8'))) throw new Error();
+      this.observed = current;
+    } catch {
+      this.disable();
+      throw new PaymentCheckoutJournalUnavailableError();
+    }
   }
 }

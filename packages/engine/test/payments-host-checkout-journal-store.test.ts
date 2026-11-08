@@ -5,14 +5,15 @@
  * restart say "this purchase may already have been submitted"), fields this
  * build has never heard of must round-trip untouched (the 2.0.20 repin's
  * recovery reads what its writer put here, not what this file knew to keep),
- * and a damaged file must warn and start empty rather than take the daemon
- * down or invent state.
+ * and damaged evidence must refuse checkout storage without being discarded
+ * or taking down construction of unrelated daemon capabilities.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, symlinkSync, linkSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test } from 'bun:test';
 import type { InFlightCheckout } from '../sdk/src/platform/payments/checkout-registry.js';
-import { DurableCheckoutJournal } from '../sdk/src/platform/payments/host/checkout-journal-store.js';
+import { DurableCheckoutJournal, PaymentCheckoutJournalUnavailableError } from '../sdk/src/platform/payments/host/checkout-journal-store.js';
+import { CheckoutRegistry } from '../sdk/src/platform/payments/checkout-registry.js';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 function record(overrides: Partial<InFlightCheckout> = {}): InFlightCheckout {
@@ -93,9 +94,7 @@ describe('DurableCheckoutJournal: durable before put resolves', () => {
 
 describe('DurableCheckoutJournal: unknown fields are opaque cargo', () => {
   test('fields this build has never seen round-trip untouched through a restart', async () => {
-    // The shape the 2.0.20 repin may add (a deliveries field is the named
-    // candidate), simulated as any extra keys: the journal must persist and
-    // reload them without knowing what they are.
+    // Future compatible metadata survives validation of the known record.
     const withUnknown = {
       ...record(),
       deliveries: [{ carrier: 'ups', trackingNumber: '1Z999', deliveredAt: null }],
@@ -114,37 +113,113 @@ describe('DurableCheckoutJournal: unknown fields are opaque cargo', () => {
   });
 });
 
-describe('DurableCheckoutJournal: corruption warns and starts empty', () => {
-  test('a file that is not JSON starts empty rather than throwing', async () => {
-    writeFileSync(filePath, 'not json at all {', 'utf-8');
+describe('DurableCheckoutJournal: damaged evidence is preserved and unavailable', () => {
+  test.each([
+    'not json at all {',
+    JSON.stringify({ version: 1, records: 'not-an-array' }),
+    JSON.stringify({ version: 2, records: [record()] }),
+    JSON.stringify({ records: [record()] }),
+    JSON.stringify({ version: 1, records: [record(), { phase: 'submit-pending', noId: true }] }),
+    JSON.stringify({ version: 1, records: [record(), record()] }),
+    JSON.stringify({ version: 1, records: [record({ phase: 'unknown' as InFlightCheckout['phase'] })] }),
+    JSON.stringify({ version: 1, records: [record({ totalMinorUnits: -1 })] }),
+    JSON.stringify({ version: 1, records: [record({ updatedAtMs: -1 })] }),
+    JSON.stringify({ version: 1, records: [record({ windowDeliveries: [{ channel: 'telegram', delivered: true, backfillable: false }, { channel: 'telegram', delivered: true, backfillable: false }] })] }),
+  ])('refuses a damaged or unsupported journal without overwriting it: %#', async contents => {
+    writeFileSync(filePath, contents);
+    // Construction remains available to the rest of the daemon.
     const journal = new DurableCheckoutJournal(filePath);
-    expect(await journal.list()).toHaveLength(0);
-    // Still usable: the next put overwrites the damaged file.
-    await journal.put(record());
-    expect((await new DurableCheckoutJournal(filePath).list())).toHaveLength(1);
+    await expect(journal.list()).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    await expect(journal.put(record())).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    await expect(journal.remove('pur-journal-1')).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    expect(readFileSync(filePath, 'utf-8')).toBe(contents);
   });
 
-  test('a file holding the wrong shape starts empty rather than guessing', async () => {
-    writeFileSync(filePath, JSON.stringify({ version: 1, records: 'not-an-array' }), 'utf-8');
+  test('invalid UTF8 does not silently substitute characters in persisted identities', async () => {
+    const bytes = Buffer.concat([Buffer.from('{"version":1,"records":['), Buffer.from([0xff]), Buffer.from(']}')]);
+    writeFileSync(filePath, bytes);
     const journal = new DurableCheckoutJournal(filePath);
-    expect(await journal.list()).toHaveLength(0);
+    await expect(journal.list()).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    expect(readFileSync(filePath)).toEqual(bytes);
   });
 
-  test('entries without a purchaseId are dropped; the rest are kept', async () => {
-    writeFileSync(filePath, JSON.stringify({
-      version: 1,
-      records: [record(), { phase: 'submit-pending', noId: true }],
-    }), 'utf-8');
+  test.each(['symlink', 'hardlink'] as const)('does not adopt a %s as private checkout evidence', async kind => {
+    const source = join(dir, 'original.json');
+    writeFileSync(source, JSON.stringify({ version: 1, records: [record()] }));
+    if (kind === 'symlink') symlinkSync(source, filePath); else linkSync(source, filePath);
+    const original = readFileSync(source);
     const journal = new DurableCheckoutJournal(filePath);
-    const listed = await journal.list();
-    expect(listed).toHaveLength(1);
-    expect(listed[0]!.purchaseId).toBe('pur-journal-1');
+    await expect(journal.put(record({ phase: 'submitted' }))).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    expect(readFileSync(source)).toEqual(original);
   });
 
   test('a missing file is the ordinary first boot: empty, no file created until a put', async () => {
     const journal = new DurableCheckoutJournal(filePath);
     expect(await journal.list()).toHaveLength(0);
     expect(existsSync(filePath)).toBe(false);
+  });
+});
+
+describe('DurableCheckoutJournal: publication and original file ownership', () => {
+  test('borrowed values and listed nested evidence cannot mutate the next durable write', async () => {
+    const journal = new DurableCheckoutJournal(filePath);
+    const borrowed = { ...record(), windowDeliveries: [{ channel: 'telegram' as const, delivered: true, backfillable: true }],
+      draw: { itemMinorUnits: 5000, overageMinorUnits: 578, toleranceMinorUnits: 0, totalMinorUnits: 5578 } };
+    await journal.put(borrowed);
+    borrowed.windowDeliveries[0]!.delivered = false; borrowed.draw.itemMinorUnits = 0;
+    const listed = await journal.list();
+    expect(() => Object.assign(listed[0]!.draw!, { itemMinorUnits: 1 })).toThrow();
+    expect(() => Object.assign(listed[0]!.windowDeliveries![0]!, { delivered: false })).toThrow();
+    await journal.put(record({ purchaseId: 'second', pageId: 'second' }));
+    const restored = await new DurableCheckoutJournal(filePath).list();
+    expect(restored.find(row => row.purchaseId === borrowed.purchaseId)).toMatchObject({
+      draw: { itemMinorUnits: 5000 }, windowDeliveries: [{ delivered: true }],
+    });
+  });
+
+  test.each(['put', 'remove'] as const)('a failed %s reports failure, preserves evidence and retires the uncertain writer', async operation => {
+    // The original basename fits the filesystem; the atomic writer's longer
+    // sibling name does not. Exercise real write failure without global mocks.
+    const path = join(dir, 'j'.repeat(240));
+    const original = JSON.stringify({ version: 1, records: [record()] });
+    writeFileSync(path, original);
+    const journal = new DurableCheckoutJournal(path);
+    const mutation = operation === 'put' ? journal.put(record({ phase: 'submitted' })) : journal.remove('pur-journal-1');
+    await expect(mutation).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    await expect(journal.list()).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    expect(readFileSync(path, 'utf-8')).toBe(original);
+    expect(await new DurableCheckoutJournal(path).list()).toEqual([record()]);
+  });
+
+  test('a stale owner cannot overwrite a newer committed phase', async () => {
+    const first = new DurableCheckoutJournal(filePath); await first.put(record({ phase: 'arming-payment' }));
+    const stale = new DurableCheckoutJournal(filePath);
+    await first.put(record());
+    await expect(stale.remove('pur-journal-1')).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    expect((await new DurableCheckoutJournal(filePath).list())[0]!.phase).toBe('submit-pending');
+  });
+
+  test('deleting a previously observed file does not turn it into first boot', async () => {
+    const journal = new DurableCheckoutJournal(filePath); await journal.put(record());
+    unlinkSync(filePath);
+    await expect(journal.list()).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    await expect(journal.put(record())).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    expect(existsSync(filePath)).toBe(false);
+  });
+
+  test('failed durable removal keeps the actual registry page owner instead of admitting another checkout', async () => {
+    const path = join(dir, 'r'.repeat(240));
+    let journal = new DurableCheckoutJournal(filePath);
+    const retained = record();
+    const evidence = { put: (row: InFlightCheckout) => journal.put(row), remove: (id: string) => journal.remove(id), list: () => journal.list() };
+    const registry = new CheckoutRegistry(evidence);
+    await registry.open(retained);
+    // Move the existing evidence to a valid basename for which the next atomic
+    // sibling write fails. The storage port reopens that actual same record.
+    renameSync(filePath, path); journal = new DurableCheckoutJournal(path);
+    await expect(registry.close(retained.purchaseId)).rejects.toBeInstanceOf(PaymentCheckoutJournalUnavailableError);
+    expect(registry.current(retained.sessionId, retained.pageId)?.purchaseId).toBe(retained.purchaseId);
+    await expect(registry.open(record({ purchaseId: 'second' }))).rejects.toThrow('already in flight');
   });
 });
 

@@ -34,7 +34,7 @@ export { DurableBudgetLedger } from './budget-store.js';
 export { DaemonApprovalStore } from './approval-store.js';
 export type { ApprovalTakeHit, ApprovalTakeMiss } from './approval-store.js';
 
-export { DurableCheckoutJournal } from './checkout-journal-store.js';
+export { DurableCheckoutJournal, PaymentCheckoutJournalUnavailableError } from './checkout-journal-store.js';
 
 export { CHECKOUT_APPROVAL_ACTION, checkoutApprovalContent } from './checkout-handlers.js';
 

@@ -833,6 +833,14 @@ page until removal finishes. Reservation IDs are unique among live holds, and
 a full reservation table refuses new work rather than evicting another
 purchase's hold.
 
+Only a missing checkout journal means there are no stored checkouts. Damaged
+JSON, invalid records, duplicate purchase IDs, unsupported versions or a changed
+file disable journal operations without replacing the evidence. Restore or
+repair the original payment state and inspect pending merchant orders before
+restarting checkout. A failed removal is reported and retains the live page
+owner. Any uncertain storage write retires that journal instance; reopening
+reads the actual durable file rather than assuming which write landed.
+
 Card entry retains that exact published purchase record and rechecks it after
 page lookup, link interpretation, card lookup and browser initialization. The
 original cancellation signal and stored-address guard reach the browser batch

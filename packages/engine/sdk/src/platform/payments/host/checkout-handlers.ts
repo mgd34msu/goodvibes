@@ -1,6 +1,7 @@
 import { PostalAddressHeldError } from '../../config/postal-address.js';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { retainCheckoutInvocation } from './checkout-invocation.js';
+import { PaymentCheckoutJournalUnavailableError } from './checkout-journal-store.js';
 import type { CheckoutOperationOwnership } from '../checkout-ownership.js';
 /**
  * checkout-handlers.ts, `payments.checkout.begin` / `payments.checkout.fillCard`.
@@ -647,7 +648,7 @@ export function checkoutBeginHandler(deps: PaymentsHandlerDeps, holder: Checkout
       // `checkoutFillCardHandler` gives `FillCardRefusal` below. Anything else
       // is discarded: the failing call had the card in its arguments, and an
       // error string is a read path like any other.
-      if (error instanceof CheckoutRegistryError) {
+      if (error instanceof CheckoutRegistryError || error instanceof PaymentCheckoutJournalUnavailableError) {
         throw new HandlerError(error.message, 'FAILED_PRECONDITION', 409);
       }
       void error;

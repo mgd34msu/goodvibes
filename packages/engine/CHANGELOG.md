@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Preserve damaged or unsupported checkout journals instead of discarding pending
+  purchases. Validate stored recovery identities, phases and amounts, refuse stale
+  file owners, and report failed removals while retaining the purchase page.
+
 - Retain original checkout inputs and current transport/payment/page ownership
   through asynchronous readings and execution. Stop new parallel readings on
   failure, drain admitted siblings, release known pre-submit holds and preserve

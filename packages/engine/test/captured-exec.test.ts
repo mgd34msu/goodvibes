@@ -1,6 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { closeSync, openSync, ftruncateSync, chmodSync, statSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, openSync, ftruncateSync, chmodSync, statSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { admitCapturedExecDependency } from '../sdk/src/platform/tools/exec/captured-exec-dependencies.js';
@@ -41,7 +41,7 @@ function git(root: string, ...args: string[]): void {
   const result = spawnSync('git', ['-C', root, ...args]);
   if (result.status !== 0) throw new Error(result.stderr.toString());
 }
-async function fixture(filter: (path: string) => boolean | Promise<boolean> = () => true, prefix = 'captured-exec-test-'): Promise<CapturedExecAuthority & { owner: string }> {
+async function fixture(filter: (path: string) => boolean | Promise<boolean> = () => true, prefix = 'captured-exec-test-', mutable = true): Promise<CapturedExecAuthority & { owner: string }> {
   const owner = mkdtempSync(join(tmpdir(), prefix)); roots.push(owner);
   git(owner, 'init', '-q'); git(owner, 'config', 'user.name', 'Fixture'); git(owner, 'config', 'user.email', 'fixture@example.invalid');
   writeFileSync(join(owner, 'input.txt'), 'captured-fixture\n');
@@ -51,11 +51,33 @@ async function fixture(filter: (path: string) => boolean | Promise<boolean> = ()
   const root = contractInputPath(inputSnapshot);
   git(owner, 'worktree', 'add', '--no-checkout', '-b', `input/${inputSnapshot.id}`, root, inputSnapshot.inputCommit);
   await materializeContractInput(inputSnapshot, root);
-  const authority = await createContractInputAuthority({ projectRoot: owner, inputSnapshot } as Contract, root, { mutable: true, branch: `input/${inputSnapshot.id}` });
+  const authority = await createContractInputAuthority({ projectRoot: owner, inputSnapshot } as Contract, root, { mutable, branch: `input/${inputSnapshot.id}` });
   ownedAuthorities.add(authority);
   return { authority, root, owner, readAccessFilter: async (path) => filter(path) };
 }
 const run = (binding: CapturedExecAuthority, command: string, signal?: AbortSignal) => runCapturedCommand(binding, command, {}, binding.root, 5000, signal);
+
+test.skipIf(!supported)('read-only execution retains no unused output bundle and releases its input bytes', async () => {
+  const retainedDescriptors = () => readdirSync('/proc/self/fd').filter(name => {
+    try { return readlinkSync(`/proc/self/fd/${name}`).includes('/captured-input-bytes-'); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
+  }).length;
+  const before = retainedDescriptors(), observed: number[] = [];
+  let started = false;
+  const binding = await fixture(() => {
+    if (started) observed.push(retainedDescriptors());
+    return true;
+  }, 'captured-exec-readonly-test-', false);
+  const result = await runCapturedCommand(binding,
+    'if (printf changed > input.txt) 2>/dev/null; then exit 1; fi; cat input.txt', {}, binding.root, 5000,
+    undefined, 'disabled', {}, { onStarted: () => { started = true; observed.push(retainedDescriptors()); } });
+  expect(result.success).toBe(true);
+  expect(result.stdout).toBe('captured-fixture\n');
+  expect(readFileSync(join(binding.root, 'input.txt'), 'utf8')).toBe('captured-fixture\n');
+  expect(observed.length).toBeGreaterThan(1);
+  expect(observed.every(count => count === before + 1)).toBe(true);
+  expect(retainedDescriptors()).toBe(before);
+});
 
 async function publicationFixture() {
   const binding = await fixture(), host = join(binding.root, 'input.txt'), added = join(binding.root, 'added.bin');

@@ -1,5 +1,5 @@
 import { checkCapturedInputsInBatches } from './captured-exec-validation.js';
-import { RetainedFileBytes, type RetainedFileSlice } from '../../utils/retained-file-bytes.js';
+import { RetainedFileBytes, type RetainedFileCapture, type RetainedFileSlice } from '../../utils/retained-file-bytes.js';
 import { projectCapturedExecBunRuntime, type CapturedExecBunRuntimeInput } from './captured-bun-runtime-input.js';
 import { resolveProcessCapturedBunRuntimeExecutable } from '../../runtime/captured-bun-runtime.js';
 import { collectCommandNodes } from '../../runtime/permissions/normalization/ast.js';
@@ -462,49 +462,56 @@ export async function runCapturedCommand(
     const changes = new Map<string, { path: string; bytes: RetainedFileSlice; mode: number }>();
     const present = new Set<string>();
     const directories = new Map<string, number>();
-    const retainedOutputs = await RetainedFileBytes.capture(async capture => {
-      const inspect = async (dir: string): Promise<boolean> => {
-        let retained = false;
-        const entries = await readdir(join(projection, dir), { withFileTypes: true });
-        const visit = async (entry: (typeof entries)[number], current: AbortSignal = operationSignal): Promise<void> => {
-          const rel = join(dir, entry.name);
-          const target = join(root, rel);
-          if (dependencies.mounts.some((mount) => mount.target === target)) return;
-          const reserved = CONTRACT_INPUT_EXCLUSIONS.find(name => name === entry.name);
-          if (reserved !== undefined) throw new ReservedCapturedOutput(reserved);
-          await authorize(target, current);
-          paths.add(target);
-          const stat = await lstat(join(projection, rel));
-          if (stat.isDirectory()) {
-            const children = await inspect(rel);
-            if (!originalDirectories.has(rel) && !children && dependencies.mounts.some((mount) => within(target, mount.target))) return;
-            directories.set(rel, stat.mode & 0o777);
-            retained = true;
-          }
-          else if (stat.isFile() && !stat.isSymbolicLink()) {
-            if (candidateRelative === rel && stat.nlink !== 1) throw new Error('repair candidate is a hardlink');
-            const path = join(projection, rel);
-            present.add(rel);
-            retained = true;
+    const inspect = async (dir: string, capture?: RetainedFileCapture): Promise<boolean> => {
+      let retained = false;
+      const entries = await readdir(join(projection, dir), { withFileTypes: true });
+      const visit = async (entry: (typeof entries)[number], current: AbortSignal = operationSignal): Promise<void> => {
+        const rel = join(dir, entry.name);
+        const target = join(root, rel);
+        if (dependencies.mounts.some((mount) => mount.target === target)) return;
+        const reserved = CONTRACT_INPUT_EXCLUSIONS.find(name => name === entry.name);
+        if (reserved !== undefined) throw new ReservedCapturedOutput(reserved);
+        await authorize(target, current);
+        paths.add(target);
+        const stat = await lstat(join(projection, rel));
+        if (stat.isDirectory()) {
+          const children = await inspect(rel, capture);
+          if (!originalDirectories.has(rel) && !children && dependencies.mounts.some((mount) => within(target, mount.target))) return;
+          directories.set(rel, stat.mode & 0o777);
+          retained = true;
+        }
+        else if (stat.isFile() && !stat.isSymbolicLink()) {
+          if (candidateRelative === rel && stat.nlink !== 1) throw new Error('repair candidate is a hardlink');
+          const path = join(projection, rel);
+          present.add(rel);
+          retained = true;
+          if (capture) {
             const previous = originals.get(rel);
             if (!previous || previous.mode !== (stat.mode & 0o777) || !await originalByteOwner.matchesFile(previous.bytes, path, current)) {
               const bytes = await capture.capture(path, current);
               changes.set(rel, { path, bytes, mode: stat.mode & 0o777 });
             }
-          } else throw new Error('captured output contains an alias or special file');
-        };
-        for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
-        await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
-        return retained;
+          }
+        } else throw new Error('captured output contains an alias or special file');
       };
+      for (const entry of entries.filter(entry => entry.isDirectory())) await visit(entry);
+      await checkCapturedInputsInBatches(entries.filter(entry => !entry.isDirectory()), visit, operationSignal);
+      return retained;
+    };
+    // Read-only commands and repair candidates still inspect all output paths,
+    // but never publish them. Retain output payload only for actual publication.
+    if (!candidate && contractInputAuthorityMutable(binding.authority)) {
+      const retainedOutputs = await RetainedFileBytes.capture(async capture => {
+        await withContractInputReadBatch(binding.authority, () => inspect('', capture));
+      }, operationSignal);
+      outputBytes = retainedOutputs.files;
+    } else {
       await withContractInputReadBatch(binding.authority, () => inspect(''));
-    }, operationSignal);
-    const outputByteOwner = retainedOutputs.files;
-    outputBytes = outputByteOwner;
+    }
     await check();
     untilPattern?.assertCurrent();
-    if (!candidate && contractInputAuthorityMutable(binding.authority))
-      await publishCapturedProjection(binding, { originals: originalByteOwner, changes: outputByteOwner }, originals, originalDirectories, present, directories, changes, combined, observer.publicationLease, observer.beforePublish);
+    if (outputBytes)
+      await publishCapturedProjection(binding, { originals: originalByteOwner, changes: outputBytes }, originals, originalDirectories, present, directories, changes, combined, observer.publicationLease, observer.beforePublish);
     await check();
     if (candidate && candidateRelative) {
       assertCapturedPublicationOwner(observer.publicationLease!, binding.authority);

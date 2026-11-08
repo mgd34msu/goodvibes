@@ -817,6 +817,14 @@ Known cancellation or reply failure before submission releases the reservation
 and closes that checkout record. The separate `submit-pending` recovery rule
 continues to retain an uncertain submission and never retries it automatically.
 
+The registry reserves exact session/page and purchase identities while writing
+the journal. Card-fill readers see a phase only after its write completes; a
+failed phase write keeps the last durable phase. A failed initial open releases
+its page reservation and that attempt's newly held budget. Closing retains the
+page until removal finishes. Reservation IDs are unique among live holds, and
+a full reservation table refuses new work rather than evicting another
+purchase's hold.
+
 `ApprovalBroker` itself does now re-arm restored timers on `start()`
 (`rearmRestoredTimers()`, added to close exactly the restart gap this section
 used to describe), so a *tool-permission* approval built on the broker is

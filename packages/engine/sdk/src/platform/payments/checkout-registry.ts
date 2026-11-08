@@ -136,6 +136,19 @@ export class CheckoutRegistryError extends Error {
   }
 }
 
+/** Retain owned records: neither a caller nor a journal may later retarget a
+ * purchase/page or mutate the budget and window evidence visible to a fill. */
+function ownCheckout(record: InFlightCheckout): InFlightCheckout {
+  return Object.freeze({ ...record,
+    draw: record.draw === null ? null : Object.freeze({ ...record.draw }),
+    stepDown: record.stepDown === null ? null : Object.freeze({ ...record.stepDown }),
+    ...(record.windowDeliveries === undefined ? {} : {
+      windowDeliveries: Object.freeze(record.windowDeliveries.map(delivery => Object.freeze({ ...delivery }))),
+    }),
+  });
+}
+
+
 /**
  * The live map of page → purchase, backed by a journal.
  *
@@ -144,83 +157,112 @@ export class CheckoutRegistryError extends Error {
  * interleave their fills and their submits, and the cheapest way to guarantee
  * that cannot happen is to make it unrepresentable.
  */
+
 export class CheckoutRegistry {
-  private readonly byPage = new Map<string, InFlightCheckout>();
+  readonly #byPage = new Map<string, Map<string, InFlightCheckout>>();
+  readonly #byPurchase = new Map<string, InFlightCheckout>();
+  readonly #writing = new Set<string>();
 
   constructor(private readonly journal: CheckoutJournal) {}
 
-  private static key(sessionId: string, pageId: string): string {
-    return `${sessionId}:${pageId}`;
+  private assertWritable(purchaseId: string): void {
+    if (this.#writing.has(purchaseId)) throw new CheckoutRegistryError(
+      'This purchase has a journal write in progress.', 'Wait for the current checkout operation to finish.');
+  }
+
+  private forget(record: InFlightCheckout): void {
+    const pages = this.#byPage.get(record.sessionId);
+    if (pages?.get(record.pageId) === record) {
+      pages.delete(record.pageId);
+      if (pages.size === 0) this.#byPage.delete(record.sessionId);
+    }
+    if (this.#byPurchase.get(record.purchaseId) === record) this.#byPurchase.delete(record.purchaseId);
   }
 
   async open(record: InFlightCheckout): Promise<InFlightCheckout> {
-    const key = CheckoutRegistry.key(record.sessionId, record.pageId);
-    const existing = this.byPage.get(key);
+    const owned = ownCheckout(record);
+    this.assertWritable(owned.purchaseId);
+    const pages = this.#byPage.get(owned.sessionId) ?? new Map<string, InFlightCheckout>();
+    const existing = pages.get(owned.pageId);
     if (existing !== undefined) {
       throw new CheckoutRegistryError(
         `A purchase is already in flight on this page (${existing.purchaseId}).`,
         'Finish or abandon that purchase before starting another on the same page.',
       );
     }
-    this.byPage.set(key, record);
-    await this.journal.put(record);
-    return record;
+    if (this.#byPurchase.has(owned.purchaseId)) throw new CheckoutRegistryError(
+      'This purchase is already in flight on another page.', 'Use the original purchase and page.');
+    // Reserve both exact identities before yielding, but current() cannot grant
+    // a fill against an unflushed record. Recovery also skips this owned write.
+    this.#byPage.set(owned.sessionId, pages);
+    pages.set(owned.pageId, owned);
+    this.#byPurchase.set(owned.purchaseId, owned);
+    this.#writing.add(owned.purchaseId);
+    try {
+      await this.journal.put(owned);
+      return owned;
+    } catch (error) {
+      this.forget(owned);
+      throw error;
+    } finally { this.#writing.delete(owned.purchaseId); }
   }
 
-  /** The checkout in flight on this page, or null. */
+  /** The durably published checkout on this exact page, or null while changing. */
   current(sessionId: string, pageId: string): InFlightCheckout | null {
-    return this.byPage.get(CheckoutRegistry.key(sessionId, pageId)) ?? null;
+    const record = this.#byPage.get(sessionId)?.get(pageId);
+    return record === undefined || this.#writing.has(record.purchaseId) ? null : record;
   }
 
-  /**
-   * Move a checkout to a new phase, flushing before returning.
-   *
-   * The flush is what makes `submit-pending` mean anything, so it is not
-   * conditional on the phase: making it conditional would put the guarantee one
-   * edit away from a caller that passed the wrong flag.
-   */
+  /** Flush every phase before publishing it to card-fill or submission readers.
+   * A failed write leaves the last durable phase intact. Concurrent writers
+   * refuse rather than let an older write overwrite a later phase/close. */
   async advance(
     purchaseId: string,
     phase: CheckoutPhase,
     patch: Partial<Omit<InFlightCheckout, 'purchaseId' | 'sessionId' | 'pageId' | 'phase'>> = {},
     nowMs: number = Date.now(),
   ): Promise<InFlightCheckout> {
-    const found = [...this.byPage.entries()].find(([, record]) => record.purchaseId === purchaseId);
-    if (found === undefined) {
+    this.assertWritable(purchaseId);
+    const record = this.#byPurchase.get(purchaseId);
+    if (record === undefined) {
       throw new CheckoutRegistryError(
         `No purchase with id ${purchaseId} is in flight.`,
         'Start a checkout before advancing it.',
       );
     }
-    const [key, record] = found;
-    const next: InFlightCheckout = { ...record, ...patch, phase, updatedAtMs: nowMs };
-    this.byPage.set(key, next);
-    await this.journal.put(next);
-    return next;
+    const pages = this.#byPage.get(record.sessionId);
+    if (pages === undefined || pages.get(record.pageId) !== record) throw new CheckoutRegistryError(
+      'The purchase page owner is unavailable.', 'Inspect the purchase before trying again.');
+    const next = ownCheckout({ ...record, ...patch,
+      purchaseId: record.purchaseId, sessionId: record.sessionId, pageId: record.pageId,
+      phase, updatedAtMs: nowMs });
+    this.#writing.add(purchaseId);
+    try {
+      await this.journal.put(next);
+      this.#byPurchase.set(purchaseId, next);
+      pages.set(record.pageId, next);
+      return next;
+    } finally { this.#writing.delete(purchaseId); }
   }
 
-  /** Remove a finished or abandoned checkout from the live map and the journal. */
+  /** Keep the page reserved until removal finishes; a failed removal keeps its owner. */
   async close(purchaseId: string): Promise<void> {
-    const found = [...this.byPage.entries()].find(([, record]) => record.purchaseId === purchaseId);
-    if (found !== undefined) this.byPage.delete(found[0]);
-    await this.journal.remove(purchaseId);
+    this.assertWritable(purchaseId);
+    const record = this.#byPurchase.get(purchaseId);
+    this.#writing.add(purchaseId);
+    try {
+      await this.journal.remove(purchaseId);
+      if (record !== undefined) this.forget(record);
+    } finally { this.#writing.delete(purchaseId); }
   }
 
-  /**
-   * Every checkout still in flight, for a restart to reason about.
-   *
-   * Records live in this process (present in the page map) are NOT
-   * interrupted, they are running, and are skipped. Without this filter a
-   * recovery sweep started while a checkout executes would settle the live
-   * purchase as interrupted, release its reservation mid-flight, and delete
-   * the registry entry out from under it.
-   */
+  /** Journal entries already owned by this process, including pending durable
+   * writes, are never interrupted purchases for a recovery sweep to release. */
   async interrupted(): Promise<readonly { record: InFlightCheckout; verdict: InterruptedVerdict }[]> {
     const records = await this.journal.list();
-    const liveIds = new Set([...this.byPage.values()].map((record) => record.purchaseId));
     return records
-      .filter((record) => !liveIds.has(record.purchaseId))
-      .map((record) => ({ record, verdict: verdictFor(record.phase) }));
+      .filter(record => !this.#byPurchase.has(record.purchaseId) && !this.#writing.has(record.purchaseId))
+      .map(record => ({ record, verdict: verdictFor(record.phase) }));
   }
 }
 

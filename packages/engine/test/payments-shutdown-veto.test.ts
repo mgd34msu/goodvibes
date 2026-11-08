@@ -4,7 +4,7 @@ import { JudgmentError } from '@goodvibes-jev/judgment';
 import { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
 import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
 import { runCheckout, type CheckoutFlowDeps } from '../sdk/src/platform/payments/checkout-flow.js';
-import { CheckoutRegistry, MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
+import { CheckoutRegistry, MemoryCheckoutJournal, type CheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
 import { BudgetLedger } from '../sdk/src/platform/payments/budget.js';
 import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
 import { parseCurrencyCode, unsafeOwnerSuppliedTextForTests } from '../sdk/src/platform/payments/types.js';
@@ -13,11 +13,10 @@ import { usePaymentsReadings } from './helpers/payments-readings.ts';
 
 usePaymentsReadings();
 
-function checkoutFixture(signal?: AbortSignal) {
+function checkoutFixture(signal?: AbortSignal, journal: CheckoutJournal = new MemoryCheckoutJournal()) {
   const currency = parseCurrencyCode('USD');
   if (currency === null) throw new Error('Invalid fixture currency');
   const inbox = new PaymentReplyInbox();
-  const journal = new MemoryCheckoutJournal();
   const registry = new CheckoutRegistry(journal);
   const outward: string[] = [];
   const delivered: string[] = [];
@@ -122,4 +121,21 @@ test('decision-model exhaustion while reading an owner veto cannot later buy on 
     await inbox.close();
     if (replaced) installJudgmentPort(previous);
   }
+});
+
+
+test('failure to journal the initial checkout releases only its hold and never sends a notice or reads a card', async () => {
+  const journal: CheckoutJournal = {
+    async put() { throw new Error('Fixture journal could not flush'); },
+    async remove() { throw new Error('A failed open must not close another purchase'); },
+    async list() { return []; },
+  };
+  const { inbox, outward, delivered, deps, purchase } = checkoutFixture(undefined, journal);
+  try {
+    await expect(purchase).rejects.toThrow('Fixture journal could not flush');
+    expect(outward).toEqual([]);
+    expect(delivered).toEqual([]);
+    expect(deps.ledger.snapshot(deps.limits, Date.now(), deps.timezone).item.remaining).toBe(10_000);
+    expect(deps.ledger.state().reservations).toHaveLength(0);
+  } finally { await inbox.close(); }
 });

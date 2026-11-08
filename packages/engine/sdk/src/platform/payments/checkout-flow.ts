@@ -381,6 +381,7 @@ export async function runCheckout(
   const reservationLimits = decision.kind === 'needs-approval'
     ? admitApprovedItemOverdraw(deps.limits, draw.itemMinorUnits, pools.item.remaining)
     : deps.limits;
+  const identity = driver.identity();
   const reservation = ledger.reserve({
     id: request.purchaseId,
     itemMinorUnits: draw.itemMinorUnits,
@@ -397,25 +398,31 @@ export async function runCheckout(
     );
   }
 
-  const identity = driver.identity();
-  await registry.open({
-    purchaseId: request.purchaseId,
-    sessionId: identity.sessionId,
-    pageId: identity.pageId,
-    merchantDomain,
-    cardId: request.cardId,
-    item: request.item,
-    currency: checkout.currency,
-    phase: 'deciding',
-    startedAtMs: now(),
-    updatedAtMs: now(),
-    draw,
-    reservationId: reservation.id,
-    shippingTierRequested: request.preferredTier,
-    shippingTierUsed: shipping.tier,
-    stepDown,
-    totalMinorUnits: draw.totalMinorUnits,
-  });
+  try {
+    await registry.open({
+      purchaseId: request.purchaseId,
+      sessionId: identity.sessionId,
+      pageId: identity.pageId,
+      merchantDomain,
+      cardId: request.cardId,
+      item: request.item,
+      currency: checkout.currency,
+      phase: 'deciding',
+      startedAtMs: now(),
+      updatedAtMs: now(),
+      draw,
+      reservationId: reservation.id,
+      shippingTierRequested: request.preferredTier,
+      shippingTierUsed: shipping.tier,
+      stepDown,
+      totalMinorUnits: draw.totalMinorUnits,
+    });
+  } catch (error) {
+    // This attempt never acquired a durably published checkout. Release only
+    // its newly reserved budget; do not close another purchase on this page.
+    ledger.release(reservation.id);
+    throw error;
+  }
 
   /**
    * Give the money back and close the record. Used by every non-buying exit.
@@ -432,8 +439,8 @@ export async function runCheckout(
    * safe default, until the page itself proves they are.
    */
   const release = async (): Promise<void> => {
-    ledger.release(reservation.id);
     await registry.close(request.purchaseId);
+    ledger.release(reservation.id);
   };
 
   // ── The address goes on the order, and it is the one the owner stored ───

@@ -81,7 +81,7 @@ export interface PoolSnapshot {
  */
 export const RESERVATION_TTL_MS = 4 * 60 * 60 * 1000;
 
-/** Hard cap on retained reservations, so a leak cannot grow without bound. */
+/** Refuse new reservations at capacity; never evict another purchase's hold. */
 export const MAX_RESERVATIONS = 256;
 
 export interface BudgetStateSnapshot {
@@ -159,6 +159,10 @@ export class BudgetLedger {
     readonly timezone: string;
     readonly ttlMs?: number;
   }): BudgetReservation | null {
+    // A reservation belongs to one purchase. Never create a second hold with
+    // the same ID: releasing a failed attempt could otherwise release another's.
+    if (this.reservations.some(entry => entry.id === input.id)
+      || this.reservations.length >= MAX_RESERVATIONS) return null;
     const snapshot = this.snapshot(input.limits, input.nowMs, input.timezone);
     if (input.itemMinorUnits > snapshot.item.remaining) return null;
     if (input.overageMinorUnits > snapshot.overage.remaining) return null;
@@ -174,7 +178,6 @@ export class BudgetLedger {
       expiresAtMs: input.nowMs + (input.ttlMs ?? RESERVATION_TTL_MS),
     };
     this.reservations.push(reservation);
-    this.enforceReservationCap();
     return reservation;
   }
 
@@ -238,12 +241,6 @@ export class BudgetLedger {
   prune(nowMs: number): void {
     const cutoff = nowMs - 2 * 24 * 60 * 60 * 1000;
     this.spend = this.spend.filter((record) => record.atMs >= cutoff);
-  }
-
-  private enforceReservationCap(): void {
-    if (this.reservations.length <= MAX_RESERVATIONS) return;
-    this.reservations.sort((left, right) => left.createdAtMs - right.createdAtMs);
-    this.reservations = this.reservations.slice(this.reservations.length - MAX_RESERVATIONS);
   }
 }
 

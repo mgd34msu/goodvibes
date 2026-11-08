@@ -10,6 +10,7 @@
  * orderly stop, and collectReceipts() for the /status payload.
  */
 import { join } from 'node:path';
+import { assertNativeReaderCompatible, NativeDataCompatibilityError } from '../runtime/native-reader-compatibility.js';
 import { observeServiceCommand, runServiceCommand, type ServiceCommandRunner, type ServiceHandoverOutcome } from './service-handover.js';
 import { flushActivityLogSync, logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -402,7 +403,9 @@ export class DaemonLifecycleRuntime {
       result = rollbackKeptPrevious(targets, io, () => {
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
         current();
-        inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io);
+        const previous = inspectDaemonNativeInstallation(execPath, process.platform, process.arch, '.previous', io);
+        if (!previous) throw new Error('Previous native reader is unavailable');
+        assertNativeReaderCompatible(execPath, previous.version, io);
       }, { requireComplete: true, native: true, assertCurrent: () => {
         if (this.stopping || this.rollbackRecovery || this.rollbackApplied) throw new Error('Native rollback no longer belongs to the current lifecycle');
       } });
@@ -427,6 +430,14 @@ export class DaemonLifecycleRuntime {
         this.announceOnStderr(detail);
         flushActivityLogSync();
         return true;
+      }
+      const compatibility = error instanceof UpdateTransactionError ? error.cause : error;
+      if (compatibility instanceof NativeDataCompatibilityError) {
+        const detail = `Automatic rollback refused: ${compatibility.message} Continuing the current build without a rollback.`;
+        try { this.receiptStore().record(detail); } catch { /* The synchronous owner notice still reports the refusal. */ }
+        this.alertOwner(detail);
+        this.announceOnStderr(detail);
+        return false;
       }
       logger.error('DaemonServer: automatic rollback failed; continuing the boot on the current build', {
         failedStarts,

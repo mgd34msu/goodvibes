@@ -12,9 +12,12 @@ import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
 import { assertDaemonNativePayloadBytes, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard } from './daemon-native-cohort.js';
+import { assertNativeReaderCompatible } from './native-reader-compatibility.js';
 export { DAEMON_NATIVE_TARGETS, DAEMON_INSTALLATION_RECEIPT, assertDaemonNativePayloadBytes, inspectDaemonNativeInstallation,
   parseDaemonCiArtifact, parseDaemonInstallationReceipt, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles,
   type DaemonNativeTarget, type DaemonNativePayload, type DaemonArtifactSource, type DaemonCiArtifact, type DaemonInstallationReceipt } from './daemon-native-cohort.js';
+export { createNativeDataWriteOwner, assertNativeReaderCompatible, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from './native-reader-compatibility.js';
+export type { NativeDataFormat, NativeDataWriteOwner, AdmittedNativeDataPublisher } from './native-reader-compatibility.js';
 
 /**
  * The cadence half of the same mechanism, re-exported here so every consumer
@@ -625,6 +628,7 @@ export async function applyVerifiedUpdate(options: ApplyVerifiedUpdateOptions): 
     }
     assertCurrent();
     assertNativeCurrent?.();
+    if (native) assertNativeReaderCompatible(native.execPath, native.version, options.io ?? realUpdateFileIo);
   }, { current: assertCurrent, ...(native || options.native ? { prepareNativeGuard: () => {
     const io = options.io ?? realUpdateFileIo;
     if (!io.readFile || !io.observe) throw new Error('Native daemon staged owner is unavailable');

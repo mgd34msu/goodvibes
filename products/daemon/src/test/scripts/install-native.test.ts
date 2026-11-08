@@ -3,7 +3,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
-import { realUpdateFileIo, UpdateTransactionError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { createNativeDataWriteOwner, NATIVE_READER_REQUIREMENT_FILE, realUpdateFileIo, UpdateTransactionError } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { DAEMON_CI_PAYLOADS, recordDaemonCiArtifact } from '../../../scripts/ci-artifact.ts';
 import { assertNativeInstallHost, installDaemonNative, parseNativeInstallArgs, readDaemonInstallOwner, rollbackDaemonNative, type DaemonInstallOwner } from '../../../scripts/install-native.ts';
 import { makeOwnedTempDir } from '../helpers/owned-temp.ts';
@@ -66,6 +66,23 @@ nativeTest('upgrade, idempotent retry and full kept-previous rollback retain one
   rollbackDaemonNative(f.prefix); expect(state(f.prefix)).toEqual(old);
   rollbackDaemonNative(f.prefix); expect(state(f.prefix)).toEqual(newer);
   expect(transientFiles(f.prefix)).toEqual([]);
+});
+
+nativeTest('offline downgrade and explicit rollback preserve every native file after a retained data write', async () => {
+  const f = await fixture(); const old = { ...first, version: '3.1.1' }; const current = { ...second, version: '3.1.2' };
+  await artifact(f.source, old); await f.install(old);
+  await artifact(f.source, current); await f.install(current);
+  const before = state(f.prefix);
+  createNativeDataWriteOwner({ execPath: join(f.prefix, 'goodvibes-daemon'), version: current.version,
+    assertCurrent: () => { expect(state(f.prefix)).toEqual(before); },
+  }).declare('payment-retained-holds-v2');
+  const floor = readFileSync(join(f.prefix, NATIVE_READER_REQUIREMENT_FILE));
+  expect(() => rollbackDaemonNative(f.prefix)).toThrow('requires GoodVibes 3.1.2');
+  expect(state(f.prefix)).toEqual(before); expect(transientFiles(f.prefix)).toEqual([]);
+  await artifact(f.source, old);
+  await expect(f.install(old)).rejects.toThrow('requires GoodVibes 3.1.2');
+  expect(state(f.prefix)).toEqual(before); expect(transientFiles(f.prefix)).toEqual([]);
+  expect(readFileSync(join(f.prefix, NATIVE_READER_REQUIREMENT_FILE))).toEqual(floor);
 });
 
 nativeTest('changed/missing/symlink source bytes and mismatched expected source identity refuse before prefix writes', async () => {

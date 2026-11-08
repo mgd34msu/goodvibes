@@ -68,6 +68,7 @@ import type { TriggerManager } from '@goodvibes-jev/engine/sdk/platform/triggers
 import type { DaemonBootController, DaemonBootOperations } from './boot-tasks.js';
 
 export interface RuntimeServicesOptions {
+  readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly capturedBunRuntimeExecutable?: string | undefined;
   /**
    * Explicit boot composition, constructed synchronously without starting its

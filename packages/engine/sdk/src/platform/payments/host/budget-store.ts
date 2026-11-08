@@ -9,6 +9,7 @@
  * its on-disk checkout hold remains protected if the process dies first.
  */
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
+import { drainOwned } from '@goodvibes-jev/judgment';
 import { readFileObservation } from '../../utils/file-observation.js';
 import { logger } from '../../utils/logger.js';
 import { BudgetLedger } from '../budget.js';
@@ -142,6 +143,7 @@ export class PaymentBudgetUnavailableError extends Error {
  */
 export class DurableBudgetLedger extends BudgetLedger {
   private readonly filePath: string;
+  private readonly beforeFormatWrite: (() => void) | undefined;
   /**
    * Set when a write to disk failed and was not retried at that moment.
    * Checked at the START of every mutating method below, before its own
@@ -157,12 +159,18 @@ export class DurableBudgetLedger extends BudgetLedger {
    * "now", rather than being pruned out from under a scenario that has nothing
    * to do with retention.
    */
-  constructor(filePath: string, now: () => number = Date.now) {
+  constructor(filePath: string, now: () => number = Date.now, beforeFormatWrite?: () => void) {
     const loaded = loadInitialState(filePath);
     super(loaded.state);
     this.filePath = filePath;
+    this.beforeFormatWrite = beforeFormatWrite;
     this.unavailable = loaded.unavailable === true;
     if (this.unavailable) return;
+    // An existing v2 hold can have been imported from another supported
+    // installation. Admit its reader requirement before exposing accounting,
+    // even when neither migration nor pruning needs to rewrite the file.
+    try { this.declareRetainedHolds(); }
+    catch { this.unavailable = true; return; }
     const before = super.state().spend.length;
     super.prune(now());
     if (loaded.migrate || super.state().spend.length !== before) {
@@ -293,8 +301,18 @@ export class DurableBudgetLedger extends BudgetLedger {
   }
 
   private writeToDisk(): void {
+    // Ordinary spend rows are readable by v1. The incompatible fact is a
+    // hold that must survive expiry/day rollover; publish its reader floor
+    // before that fact can reach disk. Early compatible writes keep rollback.
+    this.declareRetainedHolds();
     const contents: BudgetFile = { version: BUDGET_FILE_VERSION, ...super.state() };
     atomicWriteFileSync(this.filePath, `${JSON.stringify(contents, null, 2)}\n`, { mode: 0o600, mkdirp: true });
     this.persistPending = false;
+  }
+
+  private declareRetainedHolds(): void {
+    if (!super.state().reservations.some(reservation => reservation.retainUntilSettled === true)) return;
+    const declared: unknown = this.beforeFormatWrite?.();
+    if (declared !== undefined) { drainOwned(declared); throw new PaymentBudgetUnavailableError(); }
   }
 }

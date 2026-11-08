@@ -33,7 +33,7 @@ import {
   decideCrashLoopRollback,
 } from '../sdk/src/platform/daemon/boot-rollback.ts';
 import { DaemonLifecycleRuntime, type DaemonLifecycleRuntimeOptions } from '../sdk/src/platform/daemon/facade-lifecycle.ts';
-import { PREVIOUS_FILE_SUFFIX, type UpdateFileIo } from '../sdk/src/platform/runtime/self-update.ts';
+import { PREVIOUS_FILE_SUFFIX, NATIVE_READER_REQUIREMENT_FILE, type UpdateFileIo } from '../sdk/src/platform/runtime/self-update.ts';
 import { fixtureStrings, nativeCohortFixture, nativeMemoryIo } from './_helpers/daemon-native-cohort.ts';
 
 const MARKER = '/state/daemon-lifecycle.json';
@@ -283,6 +283,24 @@ function rollbackHarness(overrides: {
 const ARTIFACT = { version: '2.0.0', execPath: EXEC_PATH };
 
 describe('crash-loop rollback at boot', () => {
+  test('a retained-data reader floor refuses an older healthy cohort and explains the actual reason', () => {
+    const current = nativeCohortFixture({ version: '3.1.2', daemonBytes: 'current-reader' });
+    const previous = nativeCohortFixture({ version: '3.1.1', daemonBytes: 'older-reader' });
+    const floor = join(EXEC_PATH, '..', NATIVE_READER_REQUIREMENT_FILE);
+    const contents = JSON.stringify({ schema: 1, minimumReader: '3.1.2', formats: ['payment-retained-holds-v2'] });
+    const h = rollbackHarness({ artifact: { version: '3.1.2', execPath: EXEC_PATH }, installed: {
+      ...fixtureStrings(current.installation(EXEC_PATH)), ...fixtureStrings(previous.installation(EXEC_PATH, PREVIOUS_FILE_SUFFIX)), [floor]: contents,
+    } });
+    for (let i = 0; i < 4; i++) expect(h.runtime.onStarting()).toBe(false);
+    for (const [path, bytes] of Object.entries(current.installation(EXEC_PATH))) expect(h.files.get(path)).toEqual(bytes);
+    for (const [path, bytes] of Object.entries(previous.installation(EXEC_PATH, PREVIOUS_FILE_SUFFIX))) expect(h.files.get(path)).toEqual(bytes);
+    expect(h.files.get(floor)?.toString()).toBe(contents); expect(h.exits).toEqual([]); expect(h.stops).toEqual([]);
+    expect(h.alerts.join('')).toContain('Saved application data requires GoodVibes 3.1.2');
+    expect(h.stderr.join('')).toContain('Continuing the current build without a rollback');
+    expect(h.receipts().some(row => row.text.includes('Automatic rollback refused'))).toBe(true);
+    h.runtime.onStopping(false);
+  });
+
   test('three failed starts restore files; failed adoption reports incomplete handover without successful exit', async () => {
     const h = rollbackHarness({ artifact: ARTIFACT });
     // Boots 1-3 record a start attempt and never reach a fully-started daemon.

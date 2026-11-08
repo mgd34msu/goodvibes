@@ -40,6 +40,7 @@ import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import type { BrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
 
 export interface PaymentsCompositionOptions {
+  readonly nativeDataWriter?: import('@goodvibes-jev/engine/sdk/platform/runtime/self-update').NativeDataWriteOwner | undefined;
   readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'preparePostalAddress'>>;
   readonly shellPaths: ShellPathService;
   readonly secretsManager: Pick<SecretsManager, 'get' | 'set' | 'delete'>;
@@ -111,6 +112,8 @@ function livePaymentsConfig(configManager: Pick<ConfigManager, 'get'>): Payments
  * ever called.
  */
 export function createPaymentsServices(options: PaymentsCompositionOptions): PaymentsServices {
+  const nativeDataWriter = options.nativeDataWriter;
+  const declareNativeData = nativeDataWriter?.declare.bind(nativeDataWriter);
   const config = livePaymentsConfig(options.configManager);
   const paymentReplies = new PaymentReplyInbox();
   const cards = new DaemonCardStore({
@@ -123,6 +126,8 @@ export function createPaymentsServices(options: PaymentsCompositionOptions): Pay
   });
   const budget = new DurableBudgetLedger(
     controlPlaneStorePath(options.shellPaths, GOODVIBES_DAEMON_SURFACE_ROOT, 'payments-budget.json'),
+    Date.now,
+    declareNativeData ? () => declareNativeData('payment-retained-holds-v2') : undefined,
   );
   const checkout: CheckoutComposition = {
     seam: options.checkoutSeam,

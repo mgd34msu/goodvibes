@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolveInstalledDaemonUpdateArtifact } from '../../daemon/lifecycle.js';
 import { writeNativeInstallationFixture } from '../helpers/native-runtime-provenance.js';
@@ -16,6 +16,7 @@ import { UserAuthManager } from '@goodvibes-jev/engine/sdk/platform/security';
 import { createFeatureFlagManager, deriveFeatureStates, RuntimeEventBus } from '../../runtime/index.js';
 import { createDaemonHost, type DaemonHost, type DaemonHostFactories, type DaemonHostOptions } from '../../runtime/daemon-host.js';
 import { createDaemonBootOperations } from '../../runtime/boot-composition.js';
+import { NATIVE_READER_REQUIREMENT_FILE, assertNativeReaderCompatible, realUpdateFileIo } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.js';
 import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 
@@ -1005,6 +1006,26 @@ test('configured native host forwards only its complete retained installation an
   } }, { updateArtifact: artifact, hasOverriddenHome: false });
   await fx.host.start(); expect(constructed).toBe(1); expect(fx.host.daemon?.isRunning).toBe(true);
   await fx.host.close(); expect(fx.host.daemon?.isRunning).toBe(false);
+});
+
+test('actual native root publishes the imported payment-hold requirement through the full runtime and handler graph', async () => {
+  const native = writeNativeInstallationFixture(makeOwnedTempDir('host-payment-reader-floor'), '3.1.2', process.arch === 'arm64' ? 'arm64' : 'x64');
+  const artifact = resolveInstalledDaemonUpdateArtifact({ isOverridden: false }, native.options);
+  if (!artifact) throw new Error('Native fixture admission missing');
+  const fx = fixture(undefined, { createServer() { return inertNativeHostServer(); } }, { updateArtifact: artifact, hasOverriddenHome: false });
+  const directory = join(fx.homeDirectory, '.goodvibes', 'daemon', 'control-plane'); mkdirSync(directory, { recursive: true });
+  const now = Date.now();
+  writeFileSync(join(directory, 'payments-budget.json'), JSON.stringify({ version: 2, spend: [], reservations: [{
+    id: 'imported-checkout', dayKey: new Date(now).toISOString().slice(0, 10), createdAtMs: now, expiresAtMs: now + 60_000,
+    itemMinorUnits: 1_000, overageMinorUnits: 0, toleranceMinorUnits: 0, retainUntilSettled: true,
+  }] }));
+  const floor = join(native.execPath, '..', NATIVE_READER_REQUIREMENT_FILE);
+  expect(existsSync(floor)).toBe(false);
+  await fx.host.start();
+  expect(JSON.parse(readFileSync(floor, 'utf8'))).toMatchObject({ minimumReader: '3.1.2', formats: ['payment-retained-holds-v2'] });
+  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.1', realUpdateFileIo)).toThrow('requires GoodVibes 3.1.2');
+  await fx.host.close();
+  expect(() => assertNativeReaderCompatible(native.execPath, '3.1.1', realUpdateFileIo)).toThrow('requires GoodVibes 3.1.2');
 });
 
 for (const retirement of ['payload', 'binding'] as const) test(`native ${retirement} retirement during runtime acquisition prevents listener construction and drains the acquired graph`, async () => {

@@ -8,6 +8,8 @@ import type { DaemonBootSnapshot } from './boot-tasks.js';
 import { createHostedSessionOptions } from './hosted-session-composition.js';
 import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOptions } from './services.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
+import { createNativeDataWriteOwner } from '@goodvibes-jev/engine/sdk/platform/runtime/self-update';
+import { drainOwned } from '@goodvibes-jev/judgment';
 
 export interface DaemonHostBinding {
   readonly host?: string;
@@ -66,6 +68,7 @@ const INTERRUPTED = Symbol('daemon host interrupted');
 export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHostFactories = {}): DaemonHost {
   const scope = createAsyncDisposalScope('Daemon host');
   const updateArtifact = options.updateArtifact;
+  const nativeGuard = updateArtifact?.assertCurrent, nativeExecPath = updateArtifact?.execPath, nativeVersion = updateArtifact?.version;
   const hasOverriddenHome = options.hasOverriddenHome;
   const retainedInstallationCurrent = (updateArtifact?.assertStarting ?? updateArtifact?.assertCurrent)?.bind(updateArtifact);
   const assertInstallationCurrent = () => {
@@ -91,6 +94,17 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
 
   const snapshot = (): DaemonHostSnapshot => ({ state, ...(services?.bootTasks ? { boot: services.bootTasks.snapshot() } : {}) });
   const fence = (): void => { if (closed) throw INTERRUPTED; };
+  const nativeDataWriter = updateArtifact && nativeGuard && nativeExecPath && nativeVersion ? createNativeDataWriteOwner(Object.freeze({
+    execPath: nativeExecPath, version: nativeVersion,
+    assertCurrent() {
+      fence();
+      if (options.updateArtifact !== updateArtifact || updateArtifact.assertCurrent !== nativeGuard
+        || updateArtifact.execPath !== nativeExecPath || updateArtifact.version !== nativeVersion) throw new Error('Native data publisher changed');
+      const result: unknown = nativeGuard.call(updateArtifact);
+      if (result !== undefined) { drainOwned(result); throw new Error('Native data publication requires a synchronous installation guard'); }
+      fence();
+    },
+  })) : options.runtime.nativeDataWriter;
   // Never inspect, stringify or retain rejection values from external owners.
   async function bounded(label: string, action: () => void | Promise<void>): Promise<void> {
     try { await action(); } catch {
@@ -129,7 +143,7 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       fence();
       if (typeof options.runtime.inboxFactory !== 'function') throw new Error('Explicit inbox factory required');
       services = await (factories.createRuntime ?? createRuntimeServices)({
-        ...options.runtime, createBootOperations: createDaemonBootOperations,
+        ...options.runtime, nativeDataWriter, createBootOperations: createDaemonBootOperations,
       });
       const runtime = services;
       scope.registry.add('runtime graph', () => bounded('runtime graph close', () => runtime.close()));

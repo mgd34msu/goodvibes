@@ -2404,6 +2404,11 @@
       "types": "./terminal-shell/dist/selection-modal-queue.d.ts",
       "import": "./terminal-shell/dist/selection-modal-queue.js"
     },
+    "./terminal-shell/payment-window-command": {
+      "bun": "./terminal-shell/src/payment-window-command.ts",
+      "types": "./terminal-shell/dist/payment-window-command.d.ts",
+      "import": "./terminal-shell/dist/payment-window-command.js"
+    },
     "./terminal-shell/card-field-prompts": {
       "bun": "./terminal-shell/src/card-field-prompts.ts",
       "types": "./terminal-shell/dist/card-field-prompts.d.ts",

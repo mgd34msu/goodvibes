@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Share terminal selection queues and cancel active/queued picker owners on exit.
+  Expose purchase-window notices and explicit approve/deny/cancel through
+  `/payments pending` in TUI and Agent, retaining the displayed paired host and
+  window reference across the choice.
+
 - Keep selected-item descriptions above continuous option lists in the shared
   terminal UI used by TUI and Agent, including settings, generic pickers,
   slash-command completion, profiles, agent choices and reasoning effort.

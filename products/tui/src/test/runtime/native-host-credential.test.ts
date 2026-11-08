@@ -38,7 +38,7 @@ test('passive missing resolution creates nothing and never borrows global, envir
 
 test('captured exact-origin credentials preserve scope-neutral read resolution and invalidate semantic replacements', async () => {
   const f = fixture(); await seed(f); const initial = resolveNativeHostCredential(f.options);
-  expect(initial).toMatchObject({ available: true, baseUrl: f.host, token: 'synthetic-read-only-token' });
+  expect(initial).toMatchObject({ available: true, baseUrl: f.host, token: 'synthetic-read-only-token', expectedPrincipalId: 'pairing:fixture-token' });
   const path = tuiHostPairingStorePath(f.home); const before = readFileSync(path, 'utf8');
   expect(resolveNativeHostCredential(f.options)).toEqual(initial); expect(readFileSync(path, 'utf8')).toBe(before);
   const changed = JSON.parse(before); changed.records[0].pairing.createdAt++;

@@ -2,11 +2,11 @@
  * shutdown cancels both active and queued owners. Drain on a microtask because
  * input dispatch writes its callback slot back after invoking the chosen action.
  */
-import type { SelectionItem, SelectionResult, SelectionModal } from './selection-modal.js';
+import type { SelectionItem, SelectionResult, SelectionModal, SelectionOpenOptions } from './selection-modal.js';
 
 export type SelectionModalCallback = (result: SelectionResult | null) => void;
 
-export type SelectionOpenOpts = NonNullable<Parameters<SelectionModal['open']>[2]>;
+export type SelectionOpenOpts = SelectionOpenOptions;
 
 export interface PendingSelectionRequest {
   readonly title: string;
@@ -34,6 +34,7 @@ export interface SelectionQueueHost {
   /** Mirrors the callback into the in-flight feed context, when a feed() call is in progress (no-op otherwise). */
   syncFeedSelectionCallback(callback: SelectionModalCallback | null): void;
   modalOpened(name: string): void;
+  modalClosed?(name: string): void;
   requestRender(): void;
 }
 
@@ -41,6 +42,7 @@ export interface SelectionQueueHost {
 export class SelectionModalQueue {
   private readonly pending: PendingSelectionRequest[] = [];
   private active: PendingSelectionRequest | undefined;
+  private readonly cancellations = new Map<PendingSelectionRequest, () => void>();
   private closed = false;
 
   constructor(private readonly host: SelectionQueueHost) {}
@@ -56,16 +58,45 @@ export class SelectionModalQueue {
    * the request is resolved with `null` right away instead of being queued.
    */
   public request(request: PendingSelectionRequest): void {
-    if (this.closed) { request.callback(null); return; }
+    if (this.closed || request.opts?.signal?.aborted) { request.callback(null); return; }
     if (this.active || this.host.selectionModal.active) {
       if (this.pending.length >= MAX_QUEUED_SELECTIONS) {
         request.callback(null);
         return;
       }
       this.pending.push(request);
+      this.watchCancellation(request);
       return;
     }
+    this.watchCancellation(request);
     this.openNow(request);
+  }
+
+  private watchCancellation(request: PendingSelectionRequest): void {
+    const signal = request.opts?.signal;
+    if (!signal) return;
+    const cancel = () => {
+      const index = this.pending.indexOf(request);
+      if (index >= 0) this.pending.splice(index, 1);
+      else if (this.active !== request) return;
+      this.unwatch(request);
+      if (this.active === request) {
+        this.active = undefined;
+        this.host.setSelectionCallback(null);
+        this.host.syncFeedSelectionCallback(null);
+        this.host.selectionModal.close();
+        this.host.modalClosed?.('selection');
+      }
+      try { request.callback(null); }
+      finally { queueMicrotask(() => this.drain()); this.host.requestRender(); }
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    this.cancellations.set(request, () => signal.removeEventListener('abort', cancel));
+  }
+
+  private unwatch(request: PendingSelectionRequest): void {
+    this.cancellations.get(request)?.();
+    this.cancellations.delete(request);
   }
 
   /**
@@ -75,6 +106,7 @@ export class SelectionModalQueue {
   public clear(): void {
     const errors: unknown[] = [];
     for (const request of this.pending.splice(0)) {
+      this.unwatch(request);
       try { request.callback(null); } catch (error) { errors.push(error); }
     }
     if (errors.length) throw new AggregateError(errors, 'Selection callbacks failed during cancellation');
@@ -87,11 +119,13 @@ export class SelectionModalQueue {
     this.closed = true;
     const active = this.active;
     this.active = undefined;
+    if (active) this.unwatch(active);
     const errors: unknown[] = [];
     for (const cleanup of [
       () => this.host.setSelectionCallback(null),
       () => this.host.syncFeedSelectionCallback(null),
       () => this.host.selectionModal.close(),
+      () => this.host.modalClosed?.('selection'),
       () => active?.callback(null),
       () => this.clear(),
     ]) {
@@ -101,18 +135,23 @@ export class SelectionModalQueue {
   }
 
   private openNow(request: PendingSelectionRequest): void {
+    if (request.opts?.signal?.aborted) {
+      this.unwatch(request); request.callback(null); queueMicrotask(() => this.drain()); return;
+    }
     this.active = request;
     const wrapped: SelectionModalCallback = (result) => {
       if (this.closed || this.active !== request) return;
       const terminal = result === null || !['toggle', 'increment', 'decrement'].includes(result.action);
-      if (terminal) this.active = undefined;
+      if (terminal) { this.active = undefined; this.unwatch(request); }
       try { request.callback(result); }
       finally {
         if (terminal && !this.host.selectionModal.active) queueMicrotask(() => this.drain());
       }
     };
     this.host.modalOpened('selection');
+    if (this.active !== request) return;
     this.host.selectionModal.open(request.title, request.items, request.opts);
+    if (this.active !== request) return;
     this.host.setSelectionCallback(wrapped);
     this.host.syncFeedSelectionCallback(wrapped);
     this.host.requestRender();
@@ -133,6 +172,7 @@ export class SelectionModalQueue {
 /** InputHandler's actual field/method shape, satisfies this structurally, no import needed. */
 export interface SelectionQueueOwner {
   readonly selectionModal: Pick<SelectionModal, 'active' | 'open' | 'close'>;
+  readonly modalStack?: string[];
   selectionCallback: SelectionModalCallback | null;
   syncFeedSelectionCallback: ((callback: SelectionModalCallback | null) => void) | null;
   modalOpened(name: string): void;
@@ -153,6 +193,10 @@ export function attachSelectionModalQueue(owner: SelectionQueueOwner): Selection
     setSelectionCallback: (callback) => { owner.selectionCallback = callback; },
     syncFeedSelectionCallback: (callback) => { owner.syncFeedSelectionCallback?.(callback); },
     modalOpened: (name) => owner.modalOpened(name),
+    modalClosed: (name) => {
+      const index = owner.modalStack?.lastIndexOf(name) ?? -1;
+      if (index >= 0) owner.modalStack?.splice(index, 1);
+    },
     requestRender: () => owner.requestRender(),
   });
   const suppliedExitApp = owner.exitApp;

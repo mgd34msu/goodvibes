@@ -8,6 +8,18 @@ Agent, daemon and WebUI components from one monorepo version, then run
 in the application. Decision-model policies and execution permissions are
 separate; see [decision-model policies](../../docs/decision-model-policy.md).
 
+## Purchase approval and veto windows
+
+Type `/payments pending` in the owner terminal to read purchase notices from
+the selected paired daemon. Select a purchase, read its notice and deadline,
+then choose approve/deny or proceed-now/cancel. The menu retains that host and
+window reference; changing the connection requires reopening it. Escape closes
+the local view. An answer already sent may still complete on the host.
+
+This requires a paired administrative credential with `read:payments` and
+`write:payments`. `/payments card` configures card material through masked input;
+`/payments status` shows local card configuration.
+
 ## Native work controls (local Jev implementation)
 
 `/work` discovers the authenticated daemon's native project without legacy

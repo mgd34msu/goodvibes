@@ -23,7 +23,7 @@ export function resolveTuiHostOrigin(config: ConfigManager): string | null {
   return selected === null ? null : canonicalizePairingHost(selected);
 }
 export type NativeHostCredential =
-  | { readonly available: true; readonly baseUrl: string; readonly token: string; readonly identity: string }
+  | { readonly available: true; readonly baseUrl: string; readonly token: string; readonly identity: string; readonly expectedPrincipalId?: string }
   | { readonly available: false; readonly identity: string; readonly reason: string };
 
 /** Passive snapshot only. Native operations never borrow another product's secret,
@@ -52,7 +52,7 @@ export function resolveNativeHostCredential(options: NativeHostCredentialOptions
     const identity = observation.observe([home, enabled, selected, baseUrl, pairing], owner);
     if (!enabled) return { available: false, identity, reason: 'Selected daemon is disabled.' };
     if (!baseUrl) return { available: false, identity, reason: 'Select an exact HTTP(S) daemon origin without a path, query, fragment or user information.' };
-    if (pairing?.status === 'paired') return { available: true, baseUrl, token: pairing.token, identity };
+    if (pairing?.status === 'paired') return { available: true, baseUrl, token: pairing.token, identity, expectedPrincipalId: `pairing:${pairing.tokenId}` };
     if (pairing?.status === 'unknown') return { available: false, identity, reason: 'A TUI host pairing outcome is unknown. Inspect this host before further action; no credential fallback or automatic remint is allowed.' };
     if (pairing?.status === 'unavailable') return { available: false, identity, reason: 'The TUI host credential store could not be read safely. Native work is unavailable.' };
     return { available: false, identity, reason: 'No TUI credential is bound to this exact daemon origin. Run goodvibes host pair --bootstrap-shared to review pairing, then use --apply in an owner terminal.' };

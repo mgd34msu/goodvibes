@@ -5,7 +5,7 @@ import { attachSelectionModalQueue, type SelectionModalCallback } from '../termi
 function fixture() {
   let exits = 0;
   const owner = { selectionModal: new SelectionModal(), selectionCallback: null as SelectionModalCallback | null,
-    syncFeedSelectionCallback: null, modalOpened() {}, requestRender() {}, exitApp() { exits++; } };
+    syncFeedSelectionCallback: null, modalStack: [] as string[], modalOpened(name: string) { this.modalStack.push(name); }, requestRender() {}, exitApp() { exits++; } };
   const queue = attachSelectionModalQueue(owner);
   return { owner, queue, exits: () => exits };
 }
@@ -62,4 +62,34 @@ test('adjustment callbacks retain ownership; a terminal answer can synchronously
   owner.selectionCallback?.({ item: { id: 'next', label: 'Next' }, action: 'select' });
   await Promise.resolve();
   expect(results).toEqual(['increment', 'select', 'next']);
+});
+
+test('retiring a queued request does not close another picker; retiring the active request advances FIFO', async () => {
+  const { owner, queue } = fixture();
+  const active = new AbortController(), queued = new AbortController();
+  const cancelled: string[] = [];
+  queue.request({ title: 'First', items: [], opts: { signal: active.signal }, callback: () => cancelled.push('first') });
+  queue.request({ title: 'Retired', items: [], opts: { signal: queued.signal }, callback: () => cancelled.push('retired') });
+  queue.request({ title: 'Last', items: [], opts: undefined, callback: () => cancelled.push('last') });
+  queued.abort();
+  expect(cancelled).toEqual(['retired']);
+  expect(owner.selectionModal.title).toBe('First');
+  expect(queue.size).toBe(1);
+  active.abort(); await Promise.resolve();
+  expect(cancelled).toEqual(['retired', 'first']);
+  expect(owner.selectionModal.title).toBe('Last');
+  expect(owner.modalStack).toEqual(['selection']);
+  owner.exitApp();
+  expect(owner.modalStack).toEqual([]);
+  expect(cancelled).toEqual(['retired', 'first', 'last']);
+});
+
+test('cancellation from an open hook cannot republish an already retired callback', () => {
+  const { owner } = fixture(); const abort = new AbortController();
+  owner.modalOpened = () => abort.abort();
+  const queue = attachSelectionModalQueue(owner); let cancelled = 0;
+  queue.request({ title: 'Cancelled', items: [], opts: { signal: abort.signal }, callback: () => cancelled++ });
+  expect(cancelled).toBe(1);
+  expect(owner.selectionModal.active).toBe(false);
+  expect(owner.selectionCallback).toBeNull();
 });

@@ -28,8 +28,9 @@ export async function readHostPairingResponse(response: Response): Promise<unkno
     } finally { reader.releaseLock(); }
 }
 
-/** The live authority required by native intake, not the coarse authMode label. */
-export function isNativePairedPrincipal(auth: OperatorMethodOutput<'control.auth.current'>, expectedPrincipalId?: string | undefined): auth is OperatorMethodOutput<'control.auth.current'> & {
+/** Live paired operator authority, with operation-specific scopes. authMode
+ * alone also describes shared bootstrap credentials and cannot prove pairing. */
+export function isPairedOperatorPrincipal(auth: OperatorMethodOutput<'control.auth.current'>, scopes: readonly string[], expectedPrincipalId?: string | undefined): auth is OperatorMethodOutput<'control.auth.current'> & {
     readonly principalId: string;
 } {
     return auth.authenticated === true && auth.admin === true && auth.principalKind === 'token'
@@ -37,5 +38,10 @@ export function isNativePairedPrincipal(auth: OperatorMethodOutput<'control.auth
         && auth.principalId !== 'shared-token'
         && (expectedPrincipalId === undefined || auth.principalId === expectedPrincipalId)
         && Array.isArray(auth.scopes)
-        && ['read:work-ledger', 'write:work-ledger'].every(scope => auth.scopes.includes('*') || auth.scopes.includes(scope));
+        && scopes.every(scope => auth.scopes.includes('*') || auth.scopes.includes(scope));
+}
+
+/** The live authority required by native intake. */
+export function isNativePairedPrincipal(auth: OperatorMethodOutput<'control.auth.current'>, expectedPrincipalId?: string | undefined): auth is OperatorMethodOutput<'control.auth.current'> & { readonly principalId: string } {
+    return isPairedOperatorPrincipal(auth, ['read:work-ledger', 'write:work-ledger'], expectedPrincipalId);
 }

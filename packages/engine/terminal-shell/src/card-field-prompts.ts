@@ -89,6 +89,7 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
   readonly promptFields: (context: Context, fields: readonly CardField[], index: number) => void;
   readonly status: (context: Context) => string[];
   readonly address?: ((context: Context, kind: 'billing' | 'shipping') => void) | undefined;
+  readonly pending?: ((context: Context) => Promise<void>) | undefined;
   readonly description: string;
   readonly usage: string;
   readonly argsHint: string;
@@ -105,8 +106,9 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
     context.print(policy.announcement);
     policy.promptFields(context, CARD_SECRET_FIELDS, 0);
   }
-  function runPaymentsCommand(args: readonly string[], context: Context): void {
+  function runPaymentsCommand(args: readonly string[], context: Context): void | Promise<void> {
     const sub = (args[0] ?? '').toLowerCase();
+    if (sub === 'pending' && policy.pending) return policy.pending(context);
     if (!sub || sub === 'status') {
       context.print(policy.status(context).join('\n'));
       return;
@@ -124,7 +126,7 @@ export function createPaymentCardCommands<Context extends CardPromptContext>(pol
       policy.address(context, kind);
       return;
     }
-    context.print('Usage: /payments [' + (policy.address ? 'card|address <billing|shipping>|status' : 'card|status') + ']');
+    context.print('Usage: /payments [' + (policy.address ? 'card|address <billing|shipping>|status' : 'card|status') + (policy.pending ? '|pending' : '') + ']');
   }
   function registerPaymentCardCommands(registry: Pick<import('./command-registry.js').TerminalCommandRegistry<Context>, 'register'>): void {
     registry.register({

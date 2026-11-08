@@ -26,6 +26,19 @@ export interface SelectionResult {
   step?: number;
 }
 
+/** Options shared by the widget, terminal input owners and queued requests. */
+export interface SelectionOpenOptions {
+  customItem?: ((query: string) => SelectionItem | null) | undefined;
+  preSelectId?: string | undefined;
+  allowSearch?: boolean | undefined;
+  customActions?: Map<string, SelectionAction> | undefined;
+  primaryVerbLabel?: string | undefined;
+  /** Live preview of the highlighted row. */
+  onHighlight?: ((item: SelectionItem | null) => void) | undefined;
+  /** Input owners cancel the exact queued/displayed picker with this signal. */
+  signal?: AbortSignal | undefined;
+}
+
 export class SelectionModal {
   public active = false;
   public title = '';
@@ -55,18 +68,7 @@ export class SelectionModal {
   open(
     title: string,
     items: SelectionItem[],
-    opts?: {
-      customItem?: ((query: string) => SelectionItem | null) | undefined;
-      preSelectId?: string;
-      allowSearch?: boolean;
-      customActions?: Map<string, SelectionAction>;
-      primaryVerbLabel?: string;
-      /**
-       * Called with the highlighted row right after open and whenever the
-       * cursor lands on a different row (move, search). Used for live preview.
-       */
-      onHighlight?: (item: SelectionItem | null) => void;
-    }
+    opts?: SelectionOpenOptions
   ): void {
     this.title = title;
     this.items = items;
@@ -203,16 +205,8 @@ export class SelectionModal {
 
 /** Shared modal opener; products retain the composition that presents it. */
 export type OpenSelection = (
-    title: string,
-    items: SelectionItem[],
-    opts: {
-      customItem?: ((query: string) => SelectionItem | null) | undefined;
-      preSelectId?: string | undefined;
-      allowSearch?: boolean | undefined;
-      customActions?: Map<string, SelectionAction>;
-      primaryVerbLabel?: string | undefined;
-      /** Live preview: called whenever the highlighted row changes. */
-      onHighlight?: (item: SelectionItem | null) => void;
-    } | undefined,
-    callback: (result: SelectionResult | null) => void,
-  ) => void;
+  title: string,
+  items: SelectionItem[],
+  opts: SelectionOpenOptions | undefined,
+  callback: (result: SelectionResult | null) => void,
+) => void;

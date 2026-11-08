@@ -1671,10 +1671,22 @@ for an approval and proceed-now/cancel controls for a veto. The view refreshes
 the actual windows and drops stale account/connection data when the client
 identity changes. Answer requests require a paired owner connection.
 
-TUI and Agent terminal window controls remain unfinished. Their existing
-ordinary tool-permission cards answer a different broker; they do not answer
-payment windows. Full operation status across disconnect/restart and a detached
-checkout start also remain unfinished (§8.6).
+In TUI and Agent, type **`/payments pending`** in the owner terminal. Select a
+purchase to read its notice and deadline, then choose approve/deny or
+proceed-now/cancel. Refresh reads the same selected host. Escape closes the local
+view; it does not veto a purchase or undo an answer already sent. Typed answers
+are sent once, with the displayed purchase and window reference. An expired or
+replaced window requires a fresh view.
+
+The terminals retain the original paired host and live payment principal for
+the view. Changing host, credentials or configuration retires it. TUI requires
+its saved host-bound pairing; Agent uses its selected-host credential policy
+and verifies a paired administrative principal with payment scopes. Model and
+nested slash-command invocations cannot open the owner answer flow. Ordinary
+tool-permission cards continue to answer their own broker.
+
+Full operation status across disconnect/restart and a detached checkout start
+remain unfinished (§8.6).
 
 ### 10.4 The master switch is a plain config key, not the SDK's flag registry
 

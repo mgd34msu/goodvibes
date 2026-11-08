@@ -38,7 +38,7 @@ import { FilePickerModal } from './file-picker.ts';
 import { ModelPickerModal } from './model-picker.ts';
 import { SelectionModal } from './selection-modal.ts';
 import { attachSelectionModalQueue, type SelectionModalQueue } from '@goodvibes-jev/engine/terminal-shell/selection-modal-queue';
-import type { SelectionResult, SelectionAction } from './selection-modal.ts';
+import type { SelectionResult, SelectionOpenOptions } from './selection-modal.ts';
 import { SearchManager } from './search.ts';
 import { InputHistory } from './input-history.ts';
 import type { ConversationManager } from '../core/conversation';
@@ -303,15 +303,7 @@ export class InputHandler extends TerminalInputHandlerState {
   public openSelection(
     title: string,
     items: import('./selection-modal.ts').SelectionItem[],
-    opts:
-      | {
-          preSelectId?: string;
-          allowSearch?: boolean;
-          primaryVerbLabel?: string;
-          customActions?: Map<string, SelectionAction>;
-          onHighlight?: (item: import('./selection-modal.ts').SelectionItem | null) => void;
-        }
-      | undefined,
+    opts: SelectionOpenOptions | undefined,
     callback: SelectionModalCallback,
   ): void {
     this.selectionQueue.request({ title, items, opts, callback });

@@ -62,6 +62,7 @@ import { createCardFieldPrompter, CARD_SECRET_FIELDS } from '@goodvibes-jev/engi
 
 import type { CommandContext } from '../command-registry.ts';
 import { persistSecretBackedConfigValue } from '../../config/secret-config.ts';
+import { openPendingPaymentWindows } from './payments-pending.ts';
 
 import '@goodvibes-jev/engine/sdk/platform/payments';
 import '../payments-config.ts';
@@ -84,6 +85,7 @@ function renderCardStatus(ctx: CommandContext): string[] {
   }
   lines.push('');
   lines.push('Run /payments card to enter or replace the card (masked input, chained prompts).');
+  lines.push('Run /payments pending to review and answer purchase approval/veto windows on the selected paired host.');
   lines.push(
     'Billing/shipping address, budgets, windows and the rest of the payment capability are ordinary config values: set them via /config payments or the Settings > Payments category.',
   );
@@ -120,7 +122,8 @@ export const { startCardEntryFlow, runPaymentsCommand, registerPaymentCardComman
   announcement: `Entering ${CARD_SECRET_FIELDS.length} card field(s): masked; Esc to stop at any point.`,
   promptFields: promptCardFields,
   status: renderCardStatus,
-  description: 'Payment card on file for daemon-initiated purchases (card entry is masked input)',
-  usage: '/payments [card]',
-  argsHint: '[card]',
+  pending: openPendingPaymentWindows,
+  description: 'Payment card setup and pending purchase approval/veto windows',
+  usage: '/payments [card|status|pending]',
+  argsHint: '[card|status|pending]',
 });

@@ -66,7 +66,7 @@ import { AutocompleteEngine } from './autocomplete.ts';
 import { FilePickerModal } from './file-picker.ts';
 import { ModelPickerModal } from './model-picker.ts';
 import { SelectionModal } from './selection-modal.ts';
-import type { SelectionResult, SelectionAction } from './selection-modal.ts';
+import type { SelectionResult, SelectionOpenOptions } from './selection-modal.ts';
 import { SearchManager } from './search.ts';
 import { InputHistory } from './input-history.ts';
 import type { ConversationManager } from '../core/conversation';
@@ -357,15 +357,7 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public openSelection(
     title: string,
     items: import('./selection-modal.ts').SelectionItem[],
-    opts:
-      | {
-          preSelectId?: string;
-          allowSearch?: boolean;
-          customActions?: Map<string, SelectionAction>;
-          primaryVerbLabel?: string;
-          onHighlight?: (item: import('./selection-modal.ts').SelectionItem | null) => void;
-        }
-      | undefined,
+    opts: SelectionOpenOptions | undefined,
     callback: SelectionModalCallback,
   ): void {
     this.selectionQueue.request({ title, items, opts, callback });

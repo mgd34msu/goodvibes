@@ -44,6 +44,10 @@
 - Persist cron staggering phases for automation jobs and knowledge schedules,
   preserve pending due times during migration, and share concurrent load migration.
 
+- Compare complete owned SQL values in expected-readset fallbacks and compare
+  live activation/compensation evidence directly. Metadata insertion order does
+  not require a new reading for otherwise unchanged knowledge content.
+
 ### SDK changes
 
 - `getNextAutomationOccurrence` reads an optional persisted `staggerPhase` from

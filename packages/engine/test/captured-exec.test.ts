@@ -13,7 +13,11 @@ import { runCapturedCommand, probeCapturedExecAvailability, type CapturedExecAut
 import { formatResult } from '../sdk/src/platform/tools/exec/result-format.js';
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
+afterEach(() => {
+  try { for (const authority of ownedAuthorities) revokeContractInputAuthority(authority); }
+  finally { ownedAuthorities.clear(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }
+});
 const availability = await probeCapturedExecAvailability();
 const supported = availability.available;
 
@@ -42,6 +46,7 @@ async function fixture(filter: (path: string) => boolean | Promise<boolean> = ()
   git(owner, 'worktree', 'add', '--no-checkout', '-b', `input/${inputSnapshot.id}`, root, inputSnapshot.inputCommit);
   await materializeContractInput(inputSnapshot, root);
   const authority = await createContractInputAuthority({ projectRoot: owner, inputSnapshot } as Contract, root, { mutable: true, branch: `input/${inputSnapshot.id}` });
+  ownedAuthorities.add(authority);
   return { authority, root, owner, readAccessFilter: async (path) => filter(path) };
 }
 const run = (binding: CapturedExecAuthority, command: string, signal?: AbortSignal) => runCapturedCommand(binding, command, {}, binding.root, 5000, signal);

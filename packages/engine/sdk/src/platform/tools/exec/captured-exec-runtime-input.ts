@@ -1,14 +1,14 @@
-import { fileContentDigest } from '../../utils/file-content.js';
+import { RetainedFileBytes, type RetainedFileSlice } from '../../utils/retained-file-bytes.js';
 import { checkCapturedInputsInBatches } from './captured-exec-validation.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 /** Trusted runtime declarations are separate from model arguments and project dependencies. */
 import { accessSync, constants, existsSync, lstatSync, realpathSync } from 'node:fs';
-import { access, chmod, copyFile, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
+import { access, chmod, lstat, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { assertContractInputAuthority, contractInputAuthorityRoot, registerContractInputReadAssertion, withContractInputReadBatch } from '../../contract/input-authority.js';
+import { assertContractInputAuthority, contractInputAuthorityRoot, registerContractInputReadAssertion, registerContractInputCleanup, withContractInputReadBatch } from '../../contract/input-authority.js';
 import type { CapturedExecAuthority } from './captured-exec.js';
 
-type Binding = Pick<CapturedExecAuthority, 'authority' | 'root' | 'readAccessFilter' | 'signal'>;
+type Binding = Pick<CapturedExecAuthority, 'authority' | 'root' | 'readAccessFilter' | 'signal' | 'retainInputResource'>;
 export interface CapturedExecNodeRuntimeDeclaration {
   readonly nodeExecutable: string;
   readonly npmExecutable: string;
@@ -17,7 +17,7 @@ export interface CapturedExecNodeRuntimeDeclaration {
 export interface CapturedExecNodeRuntimeInput { readonly kind: 'captured-exec-node-runtime' }
 const TARGET = '/captured-runtime/node';
 const states = new WeakMap<CapturedExecNodeRuntimeInput, {
-  binding: Binding; files: readonly { path: string; source: string; digest: string; mode: number }[]; check: (signal?: AbortSignal) => Promise<void>;
+  binding: Binding; retained: RetainedFileBytes; files: readonly { path: string; source: string; bytes: RetainedFileSlice; mode: number }[]; check: (signal?: AbortSignal) => Promise<void>;
 }>();
 const identity = (s: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint; mode: bigint }): string =>
   `${s.dev}:${s.ino}:${s.size}:${s.mtimeNs}:${s.ctimeNs}:${s.mode}`;
@@ -112,7 +112,7 @@ export async function admitCapturedExecNodeRuntime(
   if (npm !== join(packageRoot, 'bin/npm-cli.js') || npx !== join(packageRoot, 'bin/npx-cli.js'))
     throw new Error('Node runtime npm/npx must belong to the same declared npm package');
   const reads: { source: string; canonical: string; alias: string; identity: string }[] = [];
-  const files: { path: string; source: string; digest: string; mode: number }[] = [];
+  const files: { path: string; source: string; bytes: RetainedFileSlice; mode: number }[] = [];
   const checkRead = async (read: typeof reads[number], signal: AbortSignal | undefined = binding.signal): Promise<void> => {
     signal?.throwIfAborted();
     if (contractInputAuthorityRoot(binding.authority) !== resolve(binding.root)) throw new Error('Node runtime authority changed');
@@ -130,47 +130,56 @@ export async function admitCapturedExecNodeRuntime(
       await assertContractInputAuthority(binding.authority, binding.root, signal);
     });
   };
-  const visit = async (source: string, path: string, root: string): Promise<void> => {
-    const aliasStat = await lstat(source);
-    const canonical = await realpath(source);
-    if (!within(root, canonical)) throw new Error('Node runtime paths and symlinks may not escape the declared package');
-    const stat = await lstat(canonical, { bigint: true });
-    // npm ships .bin aliases to its bundled files. Capture their authorized
-    // bytes under the alias path; directory links remain unsupported. Both the
-    // alias and canonical identity are rechecked before execution.
-    if (aliasStat.isSymbolicLink() && !stat.isFile()) throw new Error('Node runtime directory symlinks are unsupported');
-    const read = { source, canonical, alias: join(TARGET, path), identity: identity(stat) };
-    await checkRead(read);
-    reads.push(read);
-    if (stat.isDirectory()) {
-      for (const entry of await readdir(canonical)) await visit(join(source, entry), join(path, entry), root);
-    } else if (stat.isFile()) {
-      const digest = await fileContentDigest(canonical, binding.signal);
+  const retained = await RetainedFileBytes.capture(async capture => {
+    const visit = async (source: string, path: string, root: string): Promise<void> => {
+      const aliasStat = await lstat(source);
+      const canonical = await realpath(source);
+      if (!within(root, canonical)) throw new Error('Node runtime paths and symlinks may not escape the declared package');
+      const stat = await lstat(canonical, { bigint: true });
+      // npm ships .bin aliases to its bundled files. Capture their authorized
+      // bytes under the alias path; directory links remain unsupported. Both the
+      // alias and canonical identity are rechecked before execution.
+      if (aliasStat.isSymbolicLink() && !stat.isFile()) throw new Error('Node runtime directory symlinks are unsupported');
+      const read = { source, canonical, alias: join(TARGET, path), identity: identity(stat) };
       await checkRead(read);
-      files.push({ path, source: canonical, digest, mode: Number(stat.mode & 0o777n) });
-    } else throw new Error('Node runtime special file is unsupported');
-  };
-  // Pin command aliases as well as their canonical payloads.
-  for (const [source, canonical, alias] of [
-    [declared.nodeExecutable, node, '/captured-runtime/bin/node'],
-    [declared.npmExecutable, npm, '/captured-runtime/bin/npm'],
-    [declared.npxExecutable, npx, '/captured-runtime/bin/npx'],
-  ] as const) {
-    const read = { source, canonical, alias, identity: identity(await lstat(canonical, { bigint: true })) };
-    await checkRead(read); reads.push(read);
-  }
-  await visit(node, 'bin/node', node);
-  // npm's implementation and bundled runtime dependencies only: no global config,
-  // user npmrc, cache, docs, man pages or sibling globally installed packages.
-  for (const part of ['package.json', 'index.js', 'bin', 'lib', 'node_modules'])
-    await visit(join(packageRoot, part), join('lib/node_modules/npm', part), packageRoot);
-  const metadata = JSON.parse(await readFile(files.find((file) => file.path === 'lib/node_modules/npm/package.json')!.source, 'utf8')) as { name?: string };
-  if (metadata.name !== 'npm') throw new Error('Declared runtime package is not npm');
-  await check();
-  const token = Object.freeze({ kind: 'captured-exec-node-runtime' as const });
-  states.set(token, { binding, files, check });
-  registerContractInputReadAssertion(binding.authority, check);
-  return token;
+      reads.push(read);
+      if (stat.isDirectory()) {
+        for (const entry of await readdir(canonical)) await visit(join(source, entry), join(path, entry), root);
+      } else if (stat.isFile()) {
+        const bytes = await capture.capture(canonical, binding.signal);
+        await checkRead(read);
+        files.push({ path, source: canonical, bytes, mode: Number(stat.mode & 0o777n) });
+      } else throw new Error('Node runtime special file is unsupported');
+    };
+    // Pin command aliases as well as their canonical payloads.
+    for (const [source, canonical, alias] of [
+      [declared.nodeExecutable, node, '/captured-runtime/bin/node'],
+      [declared.npmExecutable, npm, '/captured-runtime/bin/npm'],
+      [declared.npxExecutable, npx, '/captured-runtime/bin/npx'],
+    ] as const) {
+      const read = { source, canonical, alias, identity: identity(await lstat(canonical, { bigint: true })) };
+      await checkRead(read); reads.push(read);
+    }
+    await visit(node, 'bin/node', node);
+    // npm's implementation and bundled runtime dependencies only: no global config,
+    // user npmrc, cache, docs, man pages or sibling globally installed packages.
+    for (const part of ['package.json', 'index.js', 'bin', 'lib', 'node_modules'])
+      await visit(join(packageRoot, part), join('lib/node_modules/npm', part), packageRoot);
+    const metadata = JSON.parse(await readFile(files.find((file) => file.path === 'lib/node_modules/npm/package.json')!.source, 'utf8')) as { name?: string };
+    if (metadata.name !== 'npm') throw new Error('Declared runtime package is not npm');
+    await check();
+  }, binding.signal);
+  let published = false;
+  try {
+    await check();
+    const token = Object.freeze({ kind: 'captured-exec-node-runtime' as const });
+    states.set(token, { binding, retained: retained.files, files, check });
+    registerContractInputReadAssertion(binding.authority, check);
+    const dispose = registerContractInputCleanup(binding.authority, () => retained.files.close());
+    try { binding.retainInputResource?.(dispose); } catch (error) { dispose(); throw error; }
+    published = true;
+    return token;
+  } finally { if (!published) retained.files.close(); }
 }
 
 /** Replace only the existing OS command aliases, never mount another runtime tree. */
@@ -217,8 +226,8 @@ export async function projectCapturedExecNodeRuntime(binding: CapturedExecAuthor
     const path = join(staged, file.path);
     await mkdir(dirname(path), { recursive: true });
     signal?.throwIfAborted();
-    await copyFile(file.source, path, constants.COPYFILE_EXCL);
-    if (await fileContentDigest(path, signal) !== file.digest) throw new Error('Node runtime input changed during projection');
+    await state.retained.copyTo(file.bytes, path, file.mode, signal);
+    if (!await state.retained.matchesFile(file.bytes, path, signal)) throw new Error('Node runtime input changed during projection');
     signal?.throwIfAborted();
     await chmod(path, file.mode);
   }

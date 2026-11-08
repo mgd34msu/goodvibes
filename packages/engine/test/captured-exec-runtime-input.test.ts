@@ -21,7 +21,11 @@ import { FileStateCache } from '../sdk/src/platform/state/file-cache.js';
 import { useToolReadings } from './_helpers/tool-readings.js';
 useToolReadings();
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
+afterEach(() => {
+  try { for (const authority of ownedAuthorities) revokeContractInputAuthority(authority); }
+  finally { ownedAuthorities.clear(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }
+});
 const availability = await probeCapturedExecAvailability();
 const supported = availability.available;
 
@@ -51,6 +55,7 @@ async function fixture(filter: (path: string) => boolean | Promise<boolean> = ()
   await materializeContractInput(inputSnapshot, root);
   const contract = { projectRoot: owner, inputSnapshot } as Contract;
   const authority = await createContractInputAuthority(contract, root, { mutable: true, branch: `input/${inputSnapshot.id}` });
+  ownedAuthorities.add(authority);
   return { authority, root, owner, contract, readAccessFilter: async (path) => filter(path) };
 }
 const run = (binding: CapturedExecAuthority, command: string, signal?: AbortSignal) => runCapturedCommand(binding, command, {}, binding.root, 5000, signal);

@@ -10,13 +10,15 @@ import { PassThrough } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { captureContractInput, contractInputPath, materializeContractInput } from '../sdk/src/platform/contract/input-snapshot.js';
-import { createContractInputAuthority, revokeContractInputAuthority } from '../sdk/src/platform/contract/input-authority.js';
+import { createContractInputAuthority, revokeContractInputAuthority, registerContractInputCleanup } from '../sdk/src/platform/contract/input-authority.js';
+import { RetainedFileBytes } from '../sdk/src/platform/utils/retained-file-bytes.js';
 import type { Contract } from '../sdk/src/platform/contract/types.js';
-import { createCapturedExecBunRuntimeAdmission } from '../sdk/src/platform/tools/exec/captured-bun-runtime-input.js';
+import { createCapturedExecBunRuntimeAdmission, projectCapturedExecBunRuntime } from '../sdk/src/platform/tools/exec/captured-bun-runtime-input.js';
 import { runCapturedCommand, type CapturedExecAuthority } from '../sdk/src/platform/tools/exec/captured-exec.js';
 
 const hostExistsSync = syncFs.existsSync;
 const roots: string[] = [];
+const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
 const restorers = new Set<() => void>();
 function ownRestore(restore: () => void): () => void {
   let restored = false;
@@ -36,6 +38,10 @@ afterEach(async () => {
   for (const cleanup of [...pendingCleanups].reverse()) {
     try { await cleanup(); } catch (error) { errors.push(error); }
   }
+  for (const authority of ownedAuthorities) {
+    try { revokeContractInputAuthority(authority); } catch (error) { errors.push(error); }
+  }
+  ownedAuthorities.clear();
   for (const restore of [...restorers].reverse()) {
     try { restore(); } catch (error) { errors.push(error); }
   }
@@ -44,7 +50,7 @@ afterEach(async () => {
   }
   if (errors.length > 0) throw new AggregateError(errors, 'Synthetic Bun fixture cleanup failed');
 });
-async function fixture(filter: (path: string) => boolean | Promise<boolean> = () => true) {
+async function fixture(filter: (path: string) => boolean | Promise<boolean> = () => true, signal?: AbortSignal) {
   const dir = mkdtempSync(join(tmpdir(), 'captured-direct-bun-unit-')); roots.push(dir);
   const owner = join(dir, 'owner'); mkdirSync(owner);
   for (const args of [['init', '-q'], ['config', 'user.name', 'Fixture'], ['config', 'user.email', 'fixture@example.invalid']]) {
@@ -57,7 +63,8 @@ async function fixture(filter: (path: string) => boolean | Promise<boolean> = ()
   const worktree = childProcess.spawnSync('git', ['-C', owner, 'worktree', 'add', '--no-checkout', '-b', `input/${inputSnapshot.id}`, root, inputSnapshot.inputCommit]);
   if (worktree.status !== 0) throw new Error(worktree.stderr.toString());
   await materializeContractInput(inputSnapshot, root);
-  const authority = await createContractInputAuthority({ projectRoot: owner, inputSnapshot } as Contract, root, { mutable: true, branch: `input/${inputSnapshot.id}` });
+  const authority = await createContractInputAuthority({ projectRoot: owner, inputSnapshot } as Contract, root, { signal, mutable: true, branch: `input/${inputSnapshot.id}` });
+  ownedAuthorities.add(authority);
   const source = join(dir, 'declared-bun'); copyFileSync('/bin/true', source); chmodSync(source, 0o755);
   return { dir, source, binding: { authority, root, readAccessFilter: async (path: string) => filter(path) } satisfies CapturedExecAuthority };
 }
@@ -90,6 +97,65 @@ function boundary(onCommand?: () => void, aliases: ReadonlySet<string> = new Set
   return { launches, restore: () => { restoreSpawn(); restoreSync(); restorePresence(); } };
 }
 const run = (binding: CapturedExecAuthority, signal?: AbortSignal) => runCapturedCommand(binding, 'bun test', {}, binding.root, 5000, signal);
+
+test('input revocation disposes all registered bytes even when a sibling cleanup fails', async () => {
+  const f = await fixture();
+  const retained = await RetainedFileBytes.capture(writer => writer.capture(f.source));
+  let cleanups = 0;
+  registerContractInputCleanup(f.binding.authority, () => { throw new Error('synthetic cleanup failure'); });
+  registerContractInputCleanup(f.binding.authority, () => { cleanups++; retained.files.close(); });
+  expect(() => revokeContractInputAuthority(f.binding.authority)).toThrow('resource cleanup failed');
+  expect(cleanups).toBe(1);
+  revokeContractInputAuthority(f.binding.authority);
+  expect(cleanups).toBe(1);
+  await expect(retained.files.copyTo(retained.value, join(f.dir, 'after-close'), 0o755)).rejects.toThrow('unavailable');
+});
+
+test('authority cancellation closes snapshots without requiring another permission check', async () => {
+  const controller = new AbortController(), f = await fixture(() => true, controller.signal);
+  const retained = await RetainedFileBytes.capture(writer => writer.capture(f.source));
+  registerContractInputCleanup(f.binding.authority, () => retained.files.close());
+  controller.abort();
+  await expect(retained.files.copyTo(retained.value, join(f.dir, 'after-abort'), 0o755)).rejects.toThrow('unavailable');
+});
+
+test('the actual run owner can retire an admitted Bun snapshot before the shared input authority ends', async () => {
+  const f = await fixture(), mock = boundary();
+  const resources: (() => void)[] = [];
+  const binding = { ...f.binding, retainInputResource: (dispose: () => void) => { resources.push(dispose); } };
+  try {
+    const bunRuntimeInput = await createCapturedExecBunRuntimeAdmission(binding, { bunExecutable: f.source })();
+    expect(resources).toHaveLength(1);
+    for (const dispose of resources) dispose();
+    const result = await run({ ...binding, bunRuntimeInput });
+    expect(result.denied).toBe(true);
+    expect(mock.launches).toHaveLength(1); // Admission probe only.
+  } finally { for (const dispose of resources) dispose(); mock.restore(); }
+});
+
+for (const phase of ['admission', 'projection'] as const) test(`changed staged Bun bytes fail ${phase} against the original retained bytes`, async () => {
+  const f = await fixture(), mock = boundary();
+  const copy = RetainedFileBytes.prototype.copyTo;
+  const tap = spyOn(RetainedFileBytes.prototype, 'copyTo').mockImplementation(async function(this: RetainedFileBytes, ...args) {
+    await Reflect.apply(copy, this, args);
+    if (phase === 'admission' ? args[1].includes('captured-bun-admission-') : args[1].endsWith('/bun-runtime')) {
+      const bytes = readFileSync(args[1]);
+      bytes[bytes.length - 1] = bytes[bytes.length - 1] === 0 ? 1 : 0;
+      writeFileSync(args[1], bytes);
+    }
+  });
+  try {
+    const admit = createCapturedExecBunRuntimeAdmission(f.binding, { bunExecutable: f.source });
+    if (phase === 'admission') {
+      await expect(admit()).rejects.toThrow('changed during admission');
+      expect(mock.launches).toHaveLength(0);
+    } else {
+      const token = await admit(), temporary = join(f.dir, 'projection'); mkdirSync(temporary);
+      await expect(projectCapturedExecBunRuntime({ ...f.binding, bunRuntimeInput: token }, temporary)).rejects.toThrow('changed during projection');
+      expect(mock.launches).toHaveLength(1);
+    }
+  } finally { tap.mockRestore(); mock.restore(); }
+});
 
 test('direct Bun exec consumes its pinned admission without a prior REPL or validator', async () => {
   const f = await fixture(); const mock = boundary();

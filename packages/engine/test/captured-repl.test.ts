@@ -18,7 +18,11 @@ import { useToolReadings } from './_helpers/tool-readings.js';
 
 useToolReadings([], [['REFUSED_REPL_ACTION', { catastrophic: true }]]);
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
+afterEach(() => {
+  try { for (const authority of ownedAuthorities) revokeContractInputAuthority(authority); }
+  finally { ownedAuthorities.clear(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }
+});
 const availability = await probeCapturedExecAvailability();
 if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability.available)
   throw new Error('required captured REPL containment backend is unavailable');
@@ -154,6 +158,7 @@ test.skipIf(!availability.available)('Jev does not veto contained REPL evaluatio
 test.skipIf(!availability.available)('concurrent same-root authorities keep their own permissions and fresh evaluation state', async () => {
   const f = await fixture();
   const authority = await createContractInputAuthority(f.contract, f.root, { mutable: true, branch: `input/${f.contract.inputSnapshot!.id}` });
+  ownedAuthorities.add(authority);
   const filter = async (path: string) => !path.endsWith('allowed.ts');
   const second = capturedInputTool(createCapturedReplTool({ ...f.binding, authority, readAccessFilter: filter }), authority, f.root, filter, undefined);
   const [firstResult, secondResult] = await Promise.all([
@@ -170,6 +175,7 @@ test.skipIf(!availability.available)('a resumed authority gets a fresh binding w
   expect((await f.tool.execute({ mode: 'eval', expression: 'globalThis.previousRun = 42; previousRun' })).success).toBe(true);
   revokeContractInputAuthority(f.binding.authority);
   const authority = await createContractInputAuthority(f.contract, f.root, { mutable: true, branch: `input/${f.contract.inputSnapshot!.id}` });
+  ownedAuthorities.add(authority);
   const next = capturedInputTool(createCapturedReplTool({ ...f.binding, authority }), authority, f.root, f.binding.readAccessFilter, undefined);
   await expect(f.tool.execute({ mode: 'eval', expression: '"OLD_RUN"' })).rejects.toThrow('revoked');
   const result = await next.execute({ mode: 'eval', expression: 'typeof previousRun' });
@@ -248,6 +254,7 @@ test('same-root authorities and resumed bindings cannot select a previous journa
   const forged = createCapturedReplTool(f.binding, undefined, { kind: 'captured-repl-history' });
   expect((await forged.execute({ mode: 'history' })).success).toBe(false);
   const authority = await createContractInputAuthority(f.contract, f.root, { mutable: true, branch: `input/${f.contract.inputSnapshot!.id}` });
+  ownedAuthorities.add(authority);
   const other = createCapturedReplTool({ ...f.binding, authority });
   const mismatched = createCapturedReplTool({ ...f.binding, authority }, undefined, f.historyOwner);
   expect((await mismatched.execute({ mode: 'history' })).success).toBe(false);

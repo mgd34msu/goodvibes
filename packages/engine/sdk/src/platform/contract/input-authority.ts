@@ -16,6 +16,7 @@ import {
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { checkCapturedInputsInBatches } from '../tools/exec/captured-exec-validation.js';
+import { logger } from '../utils/logger.js';
 
 /** Only tokens minted in this module are accepted; serialization cannot create one. */
 export interface ContractInputAuthority {
@@ -46,6 +47,8 @@ interface Authority {
   revoked: boolean;
   readonly reads: Set<string>;
   readonly readAssertions: Set<() => Promise<void>>;
+  readonly cleanups: Set<() => void>;
+  removeAbortListeners: () => void;
 }
 const readBatches = new AsyncLocalStorage<ReadonlyMap<ContractInputAuthority, { active: boolean }>>();
 const inReadBatch = (token: ContractInputAuthority): boolean => readBatches.getStore()?.get(token)?.active === true;
@@ -123,7 +126,7 @@ export async function createContractInputAuthority(
   await assertView();
   assertAdmission(admission);
   const token = Object.freeze({ kind: 'contract-input-authority' as const });
-  authorities.set(token, {
+  const state: Authority = {
     admission,
     root: view,
     identity: identity(stat),
@@ -136,7 +139,21 @@ export async function createContractInputAuthority(
     revoked: false,
     reads: new Set(),
     readAssertions: new Set(),
-  });
+    cleanups: new Set(),
+    removeAbortListeners: () => {},
+  };
+  authorities.set(token, state);
+  const signals = [...new Set([options.signal, admission.signal].filter((value): value is AbortSignal => value !== undefined))];
+  const retired = () => {
+    try { revokeContractInputAuthority(token); }
+    catch { logger.warn('Captured input cleanup failed after cancellation'); }
+  };
+  state.removeAbortListeners = () => { for (const signal of signals) signal.removeEventListener('abort', retired); };
+  for (const signal of signals) signal.addEventListener('abort', retired, { once: true });
+  if (signals.some(signal => signal.aborted)) {
+    revokeContractInputAuthority(token);
+    for (const signal of signals) signal.throwIfAborted();
+  }
   capturedRoots.add(view);
   return token;
 }
@@ -153,7 +170,34 @@ export function bindContractInputAuthority<T extends object>(target: T, token: C
 }
 export function revokeContractInputAuthority(token: ContractInputAuthority): void {
   const state = authorities.get(token);
-  if (state) state.revoked = true;
+  if (!state || state.revoked) return;
+  state.revoked = true;
+  state.removeAbortListeners();
+  state.readAssertions.clear(); state.reads.clear();
+  const errors: unknown[] = [];
+  for (const cleanup of state.cleanups) {
+    try { cleanup(); } catch (error) { errors.push(error); }
+  }
+  state.cleanups.clear();
+  if (errors.length) throw new AggregateError(errors, 'Captured input resource cleanup failed');
+}
+
+/** Transfer a construction-owned resource only while this input owner is live.
+ * The caller still owns disposal if registration throws. Revoke/cancellation
+ * disposes every registered resource, including when another disposer fails.
+ */
+export function registerContractInputCleanup(token: ContractInputAuthority, cleanup: () => void): () => void {
+  if (typeof cleanup !== 'function') throw new Error('Captured input cleanup must be construction-owned code');
+  const state = stateOf(token);
+  let active = true;
+  const dispose = () => {
+    if (!active) return;
+    active = false;
+    state.cleanups.delete(dispose);
+    cleanup();
+  };
+  state.cleanups.add(dispose);
+  return dispose;
 }
 
 export function markCapturedInputPath(path: string): void {

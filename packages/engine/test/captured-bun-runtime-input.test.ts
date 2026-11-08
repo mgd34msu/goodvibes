@@ -11,7 +11,11 @@ import { createCapturedExecBunRuntimeAdmission } from '../sdk/src/platform/tools
 import { probeCapturedExecAvailability, runCapturedCommand, type CapturedExecAuthority } from '../sdk/src/platform/tools/exec/captured-exec.js';
 
 const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const ownedAuthorities = new Set<Parameters<typeof revokeContractInputAuthority>[0]>();
+afterEach(() => {
+  try { for (const authority of ownedAuthorities) revokeContractInputAuthority(authority); }
+  finally { ownedAuthorities.clear(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); }
+});
 const availability = await probeCapturedExecAvailability();
 if (process.env.GOODVIBES_TEST_REQUIRE_EXEC_CONTAINMENT === '1' && !availability.available)
   throw new Error('required Bun runtime admission containment backend is unavailable');
@@ -28,6 +32,7 @@ async function fixture(filter: (path: string) => boolean | Promise<boolean> = ()
   git(owner, 'worktree', 'add', '--no-checkout', '-b', `input/${inputSnapshot.id}`, root, inputSnapshot.inputCommit);
   await materializeContractInput(inputSnapshot, root);
   const authority = await createContractInputAuthority({ projectRoot: owner, inputSnapshot } as Contract, root, { mutable: true, branch: `input/${inputSnapshot.id}` });
+  ownedAuthorities.add(authority);
   return { dir, owner, binding: { authority, root, readAccessFilter: async (path: string) => filter(path) } satisfies CapturedExecAuthority };
 }
 

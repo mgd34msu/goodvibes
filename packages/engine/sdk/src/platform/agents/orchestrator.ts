@@ -735,6 +735,22 @@ export class AgentOrchestrator {
     if (autonomousSource && (!originalPermissionManager?.admitAutonomous || !originalPermissionManager.autonomousPreparation))
       throw new Error('Native contract member requires the shared autonomous permission owner');
     const processManager = this.toolDeps?.processManager;
+    const inputResources = new Set<() => void>();
+    let inputsRetired = false;
+    const retainInputResource = (dispose: () => void): void => {
+      if (inputsRetired) { dispose(); throw new Error('Captured runtime input owner ended'); }
+      inputResources.add(dispose);
+    };
+    const disposeInputs = () => {
+      if (inputsRetired) return;
+      inputsRetired = true;
+      const errors: unknown[] = [];
+      for (const dispose of inputResources) {
+        try { dispose(); } catch (error) { errors.push(error); }
+      }
+      inputResources.clear();
+      if (errors.length) throw new AggregateError(errors, 'Captured runtime input cleanup failed');
+    };
     let runSettlement: Promise<void> | undefined;
     const beforeRunSettlement = authority && capturedReplHistory ? () => {
       if (runSettlement) return runSettlement;
@@ -742,8 +758,11 @@ export class AgentOrchestrator {
       runSettlement = retained.promise;
       try {
         disposeCapturedReplHistory(capturedReplHistory);
-        retained.resolve(processManager?.stopOwnedBoundaries(authority));
-      } catch (failure) { retained.reject(failure); }
+        retained.resolve(Promise.resolve(processManager?.stopOwnedBoundaries(authority)).finally(disposeInputs));
+      } catch (failure) {
+        try { disposeInputs(); } catch (cleanup) { retained.reject(new AggregateError([failure, cleanup], 'Captured run cleanup failed')); return runSettlement; }
+        retained.reject(failure);
+      }
       return runSettlement;
     } : undefined;
     const contractHooks = this.toolDeps?.contractHooks;
@@ -754,145 +773,151 @@ export class AgentOrchestrator {
       : undefined;
     const configManager = this.toolDeps?.configManager;
     const homeDirectory = configManager?.getHomeDirectory() ?? undefined;
-    const dependency =
-      authority && needsCapturedExec
-        ? await admitCapturedExecDependency(
-            { authority, root: cwd, readAccessFilter: ownerReadAccess, signal },
-            {
-              sourceRoot: join(contractInputAuthoritySourceRoot(authority), 'node_modules'),
-              targetRelativePath: 'node_modules',
-            },
-          )
+    try {
+      const dependency =
+        authority && needsCapturedExec
+          ? await admitCapturedExecDependency(
+              { authority, root: cwd, readAccessFilter: ownerReadAccess, signal, retainInputResource },
+              {
+                sourceRoot: join(contractInputAuthoritySourceRoot(authority), 'node_modules'),
+                targetRelativePath: 'node_modules',
+              },
+            )
+          : undefined;
+      const dependencyInputs = Object.freeze(dependency ? [dependency] : []);
+      const nodeRuntimeAdmission = authority && needsCapturedExec
+        ? createCapturedExecNodeRuntimeAdmission({
+            authority, root: cwd, readAccessFilter: ownerReadAccess, signal, retainInputResource,
+          })
         : undefined;
-    const dependencyInputs = Object.freeze(dependency ? [dependency] : []);
-    const nodeRuntimeAdmission = authority && needsCapturedExec
-      ? createCapturedExecNodeRuntimeAdmission({
-          authority, root: cwd, readAccessFilter: ownerReadAccess, signal,
-        })
-      : undefined;
-    const bunRuntimeAdmission = authority && needsCapturedExec
-      ? createCapturedExecBunRuntimeAdmission({ authority, root: cwd, readAccessFilter: ownerReadAccess, signal },
-          this.capturedBunRuntimeExecutable === undefined ? undefined : { bunExecutable: this.capturedBunRuntimeExecutable })
-      : undefined;
-    if (authority) await assertContractInputAuthority(authority, cwd, signal);
-    const capturedRegistry =
-      authority && needsCapturedRegistry
-        ? await admitCapturedRegistryContext(
-            { authority, root: cwd, readAccessFilter: ownerReadAccess, signal },
-            { homeDirectory },
-          )
+      const bunRuntimeAdmission = authority && needsCapturedExec
+        ? createCapturedExecBunRuntimeAdmission({ authority, root: cwd, readAccessFilter: ownerReadAccess, signal, retainInputResource },
+            this.capturedBunRuntimeExecutable === undefined ? undefined : { bunExecutable: this.capturedBunRuntimeExecutable })
         : undefined;
-    if (authority) await assertContractInputAuthority(authority, cwd, signal);
-    // Defensive getter: a config snapshot predating the atRest section must fall
-    // back to the honest default, never throw out of an agent run.
-    const atRestGet = configManager
-      ? (key: string): unknown => {
-          try {
-            return configManager.get(key as ConfigKey);
-          } catch {
-            return undefined;
-          }
-        }
-      : undefined;
-    return {
-      workingDirectory: cwd,
-      journalRoot: authority ? contractInputAuthoritySourceRoot(authority) : this.toolDeps?.workingDirectory ?? cwd,
-      agentManager: this.toolDeps?.agentManager,
-      ...(autonomousSource ? { autonomousSource } : {}),
-      ...(autonomousPort ? { autonomousPort } : {}),
-      ...(authority || autonomousSource
-        ? {
-            beforeProviderRequest: async () => {
-              autonomousSource?.();
-              if (authority) {
-                await withContractInputReadBatch(authority, async () => {
-                  await assertContractInputAuthority(authority, cwd, signal);
-                  await assertContractInputReadAccess(authority, ownerReadAccess, signal);
-                  await assertContractInputReadSet(authority, delivered, ownerReadAccess, signal);
-                });
-              }
-              autonomousSource?.();
-            },
-          }
-        : {}),
-      surfaceRoot: this.toolDeps?.surfaceRoot ?? '',
-      atRestPolicy: resolveAtRestPolicy(atRestGet),
-      ...(configManager ? { configManager } : {}),
-      runtimeBus: this.runtimeBus,
-      featureFlagManager: this.featureFlagManager,
-      emitterContext: (agentId) => this.emitterContext(agentId),
-      emitAgentProgress: (recordId, progress, audience) => this.emitAgentProgress(recordId, progress, audience),
-      emitAgentStarted: (recordId) => this.emitAgentStarted(recordId),
-      emitAgentCancelledEvent: (recordId, reason) => this.emitAgentCancelledEvent(recordId, reason),
-      emitAgentFailedEvent: (recordId, error, durationMs) => this.emitAgentFailedEvent(recordId, error, durationMs),
-      emitAgentCompletedEvent: (recordId, durationMs, output, toolCallsMade, usage) =>
-        this.emitAgentCompletedEvent(recordId, durationMs, output, toolCallsMade, usage),
-      emitStreamDelta: (recordId, content, accumulated) => this.emitStreamDelta(recordId, content, accumulated),
-      registerConversationSource: this.conversationSink
-        ? (agentId, source) => this.conversationSink!.register(agentId, source)
-        : undefined,
-      releaseConversationSource: this.conversationSink
-        ? (agentId) => this.conversationSink!.release(agentId)
-        : undefined,
-      getCancellationSignal: this.cancellationSource ? (agentId) => this.cancellationSource!.get(agentId) : undefined,
-      processManager,
-      messageBus: this.messageBus,
-      knowledgeService: this.toolDeps?.knowledgeService,
-      memoryRegistry: this.toolDeps?.memoryRegistry,
-      codeReadAccessFilter: ownerReadAccess,
-      codeIndex: authority ? createCapturedCodeContext({ authority, root: cwd, readAccessFilter: ownerReadAccess, registry: this.toolDeps?.memoryEmbeddingRegistry, signal }) : this.toolDeps?.codeIndex,
-      isCodeInjectionSettingEnabled: this.toolDeps?.isCodeInjectionSettingEnabled,
-      onToolExecuted:
-        this.toolDeps?.codeIndexReindexScheduler || this.toolDeps?.toolExecutionObserver
-          ? (toolName, args, success) => {
-              if (!authority) this.toolDeps?.codeIndexReindexScheduler?.onToolExecuted(toolName, args, success);
-              this.toolDeps?.toolExecutionObserver?.(toolName, args, success);
+      if (authority) await assertContractInputAuthority(authority, cwd, signal);
+      const capturedRegistry =
+        authority && needsCapturedRegistry
+          ? await admitCapturedRegistryContext(
+              { authority, root: cwd, readAccessFilter: ownerReadAccess, signal },
+              { homeDirectory },
+            )
+          : undefined;
+      if (authority) await assertContractInputAuthority(authority, cwd, signal);
+      // Defensive getter: a config snapshot predating the atRest section must fall
+      // back to the honest default, never throw out of an agent run.
+      const atRestGet = configManager
+        ? (key: string): unknown => {
+            try {
+              return configManager.get(key as ConfigKey);
+            } catch {
+              return undefined;
             }
-          : undefined,
-      contractHooks: authority && contractHooks && processManager
-        ? {
-            onTurnEnd: (record, turn) => {
-              void processManager.waitOwnedBoundaries(authority, signal).then(() => {
-                signal?.throwIfAborted();
-                contractHooks.onTurnEnd(record, turn);
-              }).catch((error: unknown) => {
-                logger.debug('Captured turn check stopped before execution settlement', { error: String(error) });
-              });
-            },
-            holdCompletion: async (record, candidateOutput) => {
-              await processManager.waitOwnedBoundaries(authority, signal);
-              signal?.throwIfAborted();
-              return contractHooks.holdCompletion(record, candidateOutput);
-            },
           }
-        : contractHooks,
-      ...(beforeRunSettlement ? { beforeRunSettlement } : {}),
-      archetypeLoader: this.toolDeps?.archetypeLoader,
-      providerOptimizer: this.toolDeps?.providerOptimizer,
-      providerRegistry: this.toolDeps!.providerRegistry!,
-      ...(this.toolDeps?.permissionManager ? { permissionManager: this.toolDeps.permissionManager } : {}),
-      getFullRegistry: () =>
-        this.getFullRegistry(
-          cwd,
-          authority,
-          signal,
-          runKey,
-          delivered,
-          ownerReadAccess,
-          dependencyInputs,
-          capturedRegistry,
-          processManager,
-          nodeRuntimeAdmission,
-          bunRuntimeAdmission,
-          capturedReplHistory,
-        ),
-      buildScopedRegistry: (allowedNames, fullRegistry, captureAuthority) =>
-        this.buildScopedRegistry(allowedNames, fullRegistry, captureAuthority),
-      resolveProviderForRecord: (providerRegistry, record, currentModel) =>
-        this.resolveProviderForRecord(providerRegistry, record, currentModel),
-      resolveFallbackModelRoutes: (providerRegistry, record, currentModel, primaryRequestedModelId) =>
-        this.resolveFallbackModelRoutes(providerRegistry, record, currentModel, primaryRequestedModelId),
-    };
+        : undefined;
+      return {
+        workingDirectory: cwd,
+        journalRoot: authority ? contractInputAuthoritySourceRoot(authority) : this.toolDeps?.workingDirectory ?? cwd,
+        agentManager: this.toolDeps?.agentManager,
+        ...(autonomousSource ? { autonomousSource } : {}),
+        ...(autonomousPort ? { autonomousPort } : {}),
+        ...(authority || autonomousSource
+          ? {
+              beforeProviderRequest: async () => {
+                autonomousSource?.();
+                if (authority) {
+                  await withContractInputReadBatch(authority, async () => {
+                    await assertContractInputAuthority(authority, cwd, signal);
+                    await assertContractInputReadAccess(authority, ownerReadAccess, signal);
+                    await assertContractInputReadSet(authority, delivered, ownerReadAccess, signal);
+                  });
+                }
+                autonomousSource?.();
+              },
+            }
+          : {}),
+        surfaceRoot: this.toolDeps?.surfaceRoot ?? '',
+        atRestPolicy: resolveAtRestPolicy(atRestGet),
+        ...(configManager ? { configManager } : {}),
+        runtimeBus: this.runtimeBus,
+        featureFlagManager: this.featureFlagManager,
+        emitterContext: (agentId) => this.emitterContext(agentId),
+        emitAgentProgress: (recordId, progress, audience) => this.emitAgentProgress(recordId, progress, audience),
+        emitAgentStarted: (recordId) => this.emitAgentStarted(recordId),
+        emitAgentCancelledEvent: (recordId, reason) => this.emitAgentCancelledEvent(recordId, reason),
+        emitAgentFailedEvent: (recordId, error, durationMs) => this.emitAgentFailedEvent(recordId, error, durationMs),
+        emitAgentCompletedEvent: (recordId, durationMs, output, toolCallsMade, usage) =>
+          this.emitAgentCompletedEvent(recordId, durationMs, output, toolCallsMade, usage),
+        emitStreamDelta: (recordId, content, accumulated) => this.emitStreamDelta(recordId, content, accumulated),
+        registerConversationSource: this.conversationSink
+          ? (agentId, source) => this.conversationSink!.register(agentId, source)
+          : undefined,
+        releaseConversationSource: this.conversationSink
+          ? (agentId) => this.conversationSink!.release(agentId)
+          : undefined,
+        getCancellationSignal: this.cancellationSource ? (agentId) => this.cancellationSource!.get(agentId) : undefined,
+        processManager,
+        messageBus: this.messageBus,
+        knowledgeService: this.toolDeps?.knowledgeService,
+        memoryRegistry: this.toolDeps?.memoryRegistry,
+        codeReadAccessFilter: ownerReadAccess,
+        codeIndex: authority ? createCapturedCodeContext({ authority, root: cwd, readAccessFilter: ownerReadAccess, registry: this.toolDeps?.memoryEmbeddingRegistry, signal }) : this.toolDeps?.codeIndex,
+        isCodeInjectionSettingEnabled: this.toolDeps?.isCodeInjectionSettingEnabled,
+        onToolExecuted:
+          this.toolDeps?.codeIndexReindexScheduler || this.toolDeps?.toolExecutionObserver
+            ? (toolName, args, success) => {
+                if (!authority) this.toolDeps?.codeIndexReindexScheduler?.onToolExecuted(toolName, args, success);
+                this.toolDeps?.toolExecutionObserver?.(toolName, args, success);
+              }
+            : undefined,
+        contractHooks: authority && contractHooks && processManager
+          ? {
+              onTurnEnd: (record, turn) => {
+                void processManager.waitOwnedBoundaries(authority, signal).then(() => {
+                  signal?.throwIfAborted();
+                  contractHooks.onTurnEnd(record, turn);
+                }).catch((error: unknown) => {
+                  logger.debug('Captured turn check stopped before execution settlement', { error: String(error) });
+                });
+              },
+              holdCompletion: async (record, candidateOutput) => {
+                await processManager.waitOwnedBoundaries(authority, signal);
+                signal?.throwIfAborted();
+                return contractHooks.holdCompletion(record, candidateOutput);
+              },
+            }
+          : contractHooks,
+        ...(beforeRunSettlement ? { beforeRunSettlement } : {}),
+        archetypeLoader: this.toolDeps?.archetypeLoader,
+        providerOptimizer: this.toolDeps?.providerOptimizer,
+        providerRegistry: this.toolDeps!.providerRegistry!,
+        ...(this.toolDeps?.permissionManager ? { permissionManager: this.toolDeps.permissionManager } : {}),
+        getFullRegistry: () =>
+          this.getFullRegistry(
+            cwd,
+            authority,
+            signal,
+            runKey,
+            delivered,
+            ownerReadAccess,
+            dependencyInputs,
+            capturedRegistry,
+            processManager,
+            nodeRuntimeAdmission,
+            bunRuntimeAdmission,
+            capturedReplHistory,
+          ),
+        buildScopedRegistry: (allowedNames, fullRegistry, captureAuthority) =>
+          this.buildScopedRegistry(allowedNames, fullRegistry, captureAuthority),
+        resolveProviderForRecord: (providerRegistry, record, currentModel) =>
+          this.resolveProviderForRecord(providerRegistry, record, currentModel),
+        resolveFallbackModelRoutes: (providerRegistry, record, currentModel, primaryRequestedModelId) =>
+          this.resolveFallbackModelRoutes(providerRegistry, record, currentModel, primaryRequestedModelId),
+      };
+    } catch (error) {
+      try { if (beforeRunSettlement) await beforeRunSettlement(); else disposeInputs(); }
+      catch (cleanup) { throw new AggregateError([error, cleanup], 'Captured run construction and cleanup failed'); }
+      throw error;
+    }
   }
 
   /**
@@ -926,11 +951,14 @@ export class AgentOrchestrator {
       );
       await runAgentTask(context, record);
     } finally {
-      await context?.beforeRunSettlement?.();
-      if (runKey) {
-        this.fullRegistries.delete(runKey);
-        await this.ownedProjectIndexes.get(runKey)?.dispose();
-        this.ownedProjectIndexes.delete(runKey);
+      try { await context?.beforeRunSettlement?.(); }
+      finally {
+        if (runKey) {
+          this.fullRegistries.delete(runKey);
+          const index = this.ownedProjectIndexes.get(runKey);
+          this.ownedProjectIndexes.delete(runKey);
+          await index?.dispose();
+        }
       }
     }
   }

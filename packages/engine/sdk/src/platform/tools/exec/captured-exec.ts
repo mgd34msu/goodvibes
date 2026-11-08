@@ -33,6 +33,8 @@ import type { ReadAccessFilter } from '../shared/read-access.js';
 import type { ExecCommandInput, ExecCommandResult, ExecFileOp } from './schema.js';
 
 export interface CapturedExecAuthority {
+  /** Actual host run owns staged input resources; never read from tool JSON. */
+  readonly retainInputResource?: ((dispose: () => void) => void) | undefined;
   readonly bunRuntimeInput?: CapturedExecBunRuntimeInput | undefined;
   readonly bunRuntimeAdmission?: ((signal?: AbortSignal) => Promise<CapturedExecBunRuntimeInput>) | undefined;
   readonly nodeRuntimeInput?: CapturedExecNodeRuntimeInput | undefined;

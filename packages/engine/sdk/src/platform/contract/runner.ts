@@ -656,7 +656,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       }
       requireDecisionFeature('autonomous contract planning and acceptance');
       // Never mint another binding if a compatibility checkpoint proves the receipt went missing.
-      for (const storedId of deps.store.listStoredIds()) {
+      const storedIds = deps.store.listStoredIds();
+      for (const storedId of storedIds) {
         const stored = deps.store.load(storedId);
         if (stored?.durableAdmission !== undefined && durableKeyIdentity(stored.durableAdmission.key) === durableKeyIdentity(frozen.key)) {
           throw new DurableContractAdmissionError('checkpoint');
@@ -664,6 +665,10 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       }
       const lease = await durableAdmissions.lease(frozen.key);
       const id = newContractId();
+      if (runs.has(id) || settlements.has(id) || durableLeases.has(id) || deps.store.get(id) !== null || storedIds.includes(id)) {
+        lease();
+        throw new DurableContractAdmissionError('conflict');
+      }
       durableLeases.set(id, lease);
       try {
         requireDecisionFeature('autonomous contract planning and acceptance');
@@ -863,13 +868,18 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
     };
     bindNativeContractSource(contract);
     bindOwnedContractSource(contract, owner);
-    const run = newRun(contract);
-    run.requireSettlement = requireSettlement;
-    deps.store.put(contract);
+    // Establish the immutable identity/checkpoint before publishing this run.
+    // A failed admission cannot replace an existing live map or leave an
+    // uncommitted run visible to reentrant store/creation observers.
     if (contract.durableAdmission !== undefined) {
       const checkpoint = serializeContract(contract, now());
       if (checkpoint === null) throw new DurableContractAdmissionError('checkpoint');
       durableAdmissions.write(contract.durableAdmission, checkpoint);
+    }
+    const run = newRun(contract);
+    run.requireSettlement = requireSettlement;
+    deps.store.put(contract);
+    if (contract.durableAdmission !== undefined) {
       if (!deps.store.write(id)) throw new DurableContractAdmissionError('checkpoint');
     }
     run.decide('created', id, `origin ${input.origin}; ${isolation} isolation${extra.draftPlan === undefined ? '' : `; ${extra.draftPlan.units.length} drafted units`}`);

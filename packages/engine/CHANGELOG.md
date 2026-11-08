@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Resolve indexed native contract IDs directly against their original durable
+  receipt, so unrelated damaged records do not block that recovery. Reserve
+  reverse identities exclusively before admission and keep missing or damaged
+  target authority fenced. Older unindexed metadata retains conservative checks.
+
 - Preserve damaged or unsupported checkout journals instead of discarding pending
   purchases. Validate stored recovery identities, phases and amounts, refuse stale
   file owners, and report failed removals while retaining the purchase page.

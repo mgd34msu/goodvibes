@@ -1,10 +1,11 @@
 /** Durable runner admission only. The native owner still owns semantic decisions and its action ledger. */
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, readdirSync } from 'node:fs';
+import { closeSync, constants, fstatSync, fsyncSync, linkSync, lstatSync, openSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import type { JevDecisionBinding } from '@goodvibes-jev/judgment/decisions';
-import { writeFileAtomic } from '../utils/atomic-json-store.js';
+import { createAtomicTempPath, writeFileAtomic } from '../utils/atomic-json-store.js';
+import { readFileObservation } from '../utils/file-observation.js';
 import { acquireCrossProcessLock } from '../workspace/checkpoint/cross-process-lock.js';
 import { CONTRACT_ORIGINS, isContractId, type ContractView, type StartContractInput } from './types.js';
 import { captureNativeContractSource } from './native-source.js';
@@ -64,6 +65,37 @@ export class DurableContractAdmissionError extends Error {
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function missing(error: unknown): boolean {
+  return record(error) && error['code'] === 'ENOENT';
+}
+
+/** Only an absent pathname means absent authority. Failed reads, unsafe links,
+ * replacement during the read and invalid UTF8 never become a missing receipt.
+ */
+function readAdmissionJson(path: string): unknown {
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileObservation(path).bytes));
+}
+
+/** An immutable metadata pointer can retain its publication candidate hard link
+ * after a crash. It contains no input/checkpoint and grants no authority; its
+ * actual forward receipt is independently read and validated. Never follow a
+ * symlink or read a special file in place of that pointer.
+ */
+function readAdmissionIndexJson(path: string): unknown {
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    // Four printable-ASCII references of at most256 chars plus fixed keys.
+    if (!stat.isFile() || stat.size > 4096) throw new DurableContractAdmissionError('invalid');
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readFileSync(fd)));
+  } finally { closeSync(fd); }
+}
+
+function admissionPathExists(path: string): boolean {
+  try { lstatSync(path); return true; }
+  catch (error) { if (missing(error)) return false; throw new DurableContractAdmissionError('invalid'); }
 }
 
 function references(value: unknown, keys: readonly string[]): boolean {
@@ -220,6 +252,67 @@ export class DurableContractAdmissions {
 
   private path(key: DurableContractKey): string { return join(this.directory, `${durableKeyHash(key)}.json`); }
 
+  private indexPath(contractId: string): string {
+    if (!isContractId(contractId)) throw new DurableContractAdmissionError('invalid');
+    return join(this.directory, '.by-contract', `${contractId}.json`);
+  }
+
+  private indexedKey(contractId: string): DurableContractKey | null {
+    const path = this.indexPath(contractId);
+    if (!admissionPathExists(path)) return null;
+    try {
+      const value = readAdmissionIndexJson(path);
+      if (!record(value) || Object.keys(value).length !== 3 || value['schemaVersion'] !== 1
+        || value['contractId'] !== contractId || !references(value['key'], KEY_FIELDS)) throw new Error();
+      return freeze(value['key'] as unknown as DurableContractKey);
+    } catch { throw new DurableContractAdmissionError('invalid'); }
+  }
+
+  /** Reserve the immutable reverse identity before committing a new key binding.
+   * link(2) publishes only if absent: independent key writers cannot overwrite
+   * another contract-ID owner. A crash after this reservation but before the
+   * forward receipt leaves a held ID, never evidence for compatibility rebinding.
+   * The index stores no checkpoint or input and cannot authorize execution.
+   */
+  private reserveIndex(admission: DurableContractAdmission, confirmExisting = false): void {
+    const path = this.indexPath(admission.contractId);
+    const same = (key: DurableContractKey) => durableKeyIdentity(key) === durableKeyIdentity(admission.key);
+    const existing = this.indexedKey(admission.contractId);
+    if (existing !== null) {
+      if (!same(existing)) throw new DurableContractAdmissionError('conflict');
+      if (confirmExisting) {
+        syncContractDirectory(dirname(path));
+        syncContractDirectory(this.directory);
+      }
+      return;
+    }
+    const candidate = createAtomicTempPath(path);
+    let retiredCandidate = false;
+    try {
+      writeFileAtomic(candidate, canonical({ schemaVersion: 1, contractId: admission.contractId, key: admission.key }),
+        { mode: 0o600, durable: true, cleanupStaleTemps: false });
+      try { linkSync(candidate, path); }
+      catch (error) {
+        if (!record(error) || error['code'] !== 'EEXIST') throw error;
+        const winner = this.indexedKey(admission.contractId);
+        if (winner === null || !same(winner)) throw new DurableContractAdmissionError('conflict');
+      }
+      unlinkSync(candidate);
+      retiredCandidate = true;
+      syncContractDirectory(dirname(path));
+      syncContractDirectory(this.directory);
+    } catch (error) {
+      if (error instanceof DurableContractAdmissionError) throw error;
+      throw new DurableContractAdmissionError('invalid');
+    } finally {
+      try { if (!retiredCandidate) unlinkSync(candidate); }
+      catch {
+        // A leftover private candidate grants nothing. Preserve the admission
+        // failure, or its already durable index, if cleanup is unavailable.
+      }
+    }
+  }
+
   lock(key: DurableContractKey): Promise<() => void> {
     return acquireCrossProcessLock(`${this.path(key)}.lock`, { strictOwnership: true });
   }
@@ -229,27 +322,45 @@ export class DurableContractAdmissions {
     return acquireCrossProcessLock(`${this.path(key)}.execution`, { strictOwnership: true, totalTimeoutMs: 100 });
   }
 
-  private envelope(key: DurableContractKey): { admission: DurableContractAdmission; checkpoint: string } | null {
+  private envelope(key: DurableContractKey): { admission: DurableContractAdmission; checkpoint: string; indexed: boolean } | null {
     const path = this.path(key);
-    if (!existsSync(path)) return null;
+    if (!admissionPathExists(path)) return null;
     try {
-      const value: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+      const value = readAdmissionJson(path);
       if (!record(value) || Object.keys(value).length !== 2 || typeof value['checkpoint'] !== 'string') throw new Error();
       const admission = parseDurableAdmission(value['admission']);
       if (durableKeyIdentity(admission.key) !== durableKeyIdentity(key)) throw new Error();
-      return { admission, checkpoint: value['checkpoint'] };
+      const indexed = this.indexedKey(admission.contractId);
+      if (indexed !== null && durableKeyIdentity(indexed) !== durableKeyIdentity(key)) throw new Error();
+      return { admission, checkpoint: value['checkpoint'], indexed: indexed !== null };
     } catch { throw new DurableContractAdmissionError('invalid'); }
   }
 
   /** Reverse identity fence for compatibility imports/resume, even if the contract-ID copy is absent. */
   findByContractId(contractId: string): DurableContractAdmission | null {
-    if (!existsSync(this.directory)) return null;
+    const key = this.indexedKey(contractId);
+    if (key !== null) {
+      const envelope = this.envelope(key);
+      if (envelope === null || envelope.admission.contractId !== contractId) throw new DurableContractAdmissionError('invalid');
+      return envelope.admission;
+    }
+    const admission = this.findUnindexedContract(contractId);
+    if (admission !== null) this.reserveIndex(admission);
+    return admission;
+  }
+
+  /** Old receipts contain no reverse name. Proving a previously unindexed ID
+   * absent still requires reading them; damaged unknown authority cannot be
+   * skipped to mint a new binding. Positive indexed recovery avoids this scan.
+   */
+  private findUnindexedContract(contractId: string): DurableContractAdmission | null {
+    if (!admissionPathExists(this.directory)) return null;
     for (const file of readdirSync(this.directory)) {
       if (!file.endsWith('.json')) continue;
       let admission: DurableContractAdmission;
       try {
-        const value: unknown = JSON.parse(readFileSync(join(this.directory, file), 'utf-8'));
-        if (!record(value)) throw new Error();
+        const value = readAdmissionJson(join(this.directory, file));
+        if (!record(value) || Object.keys(value).length !== 2 || typeof value['checkpoint'] !== 'string') throw new Error();
         admission = parseDurableAdmission(value['admission']);
         if (file !== `${durableKeyHash(admission.key)}.json`) throw new Error();
       } catch { throw new DurableContractAdmissionError('invalid'); }
@@ -277,13 +388,19 @@ export class DurableContractAdmissions {
   /** Caller holds the key lock. Binding and initial checkpoint appear in one atomic durable write. */
   write(admission: DurableContractAdmission, checkpoint: string): void {
     if (this.read(admission.key) !== null) throw new DurableContractAdmissionError('conflict');
+    // A fresh index cannot steal an older receipt's unindexed ID. This check
+    // is intentionally conservative until that historical identity is known.
+    if (this.indexedKey(admission.contractId) === null && this.findUnindexedContract(admission.contractId) !== null)
+      throw new DurableContractAdmissionError('conflict');
+    this.reserveIndex(admission, true);
     this.persist(admission, checkpoint);
   }
 
   /** Only the execution-lease holder may update a checkpoint; the receipt itself cannot change. */
   update(admission: DurableContractAdmission, checkpoint: string): void {
-    const existing = this.read(admission.key);
-    if (existing === null || canonical(existing) !== canonical(admission)) throw new DurableContractAdmissionError('checkpoint');
+    const existing = this.envelope(admission.key);
+    if (existing === null || canonical(existing.admission) !== canonical(admission)) throw new DurableContractAdmissionError('checkpoint');
+    if (!existing.indexed) this.reserveIndex(admission);
     this.persist(admission, checkpoint);
   }
 }

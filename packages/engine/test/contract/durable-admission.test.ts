@@ -409,6 +409,21 @@ describe('native durable contract admission', () => {
     expect(h.manager.list().filter((record) => record.contractRole === 'owner')).toHaveLength(1);
   });
 
+  test('an indexed native contract retains its compatibility-import fence despite unrelated damaged metadata', async () => {
+    const h = setup(undefined, makeRepo(), 0);
+    const first = await h.runner.startDurable(request(h.root));
+    const snapshot = JSON.parse(h.runner.serializeContract(first.admission.contractId)!);
+    delete snapshot.contract.durableAdmission; delete snapshot.contract.durableLaunchState;
+    writeFileSync(join(h.root, '.goodvibes', 'contracts', 'admissions', `${'0'.repeat(64)}.json`), '{');
+    const admissions = new DurableContractAdmissions(h.root);
+    expect(admissions.findByContractId(first.admission.contractId)).toMatchObject(first.admission);
+    expect(h.runner.importContract(JSON.stringify(snapshot), true)).toBe(false);
+    h.dispose(); await h.runner.join(first.admission.contractId);
+    const next = setup(undefined, h.root);
+    const resumed = await next.runner.resumeDurable(key);
+    expect(resumed.admission).toEqual(first.admission);
+  });
+
   test.each(['envelope', 'persisted', 'launched'])('real process death after %s and before ack preserves one binding', async (crash) => {
     const root = makeRepo(); roots.push(root);
     const support = fileURLToPath(new URL('./runner-support.ts', import.meta.url));

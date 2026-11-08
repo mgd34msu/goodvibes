@@ -224,6 +224,30 @@ export class FixtureCheckoutDriver implements CheckoutPageDriver {
     return this.options.pageUrl;
   }
 
+  async readCurrentQuote(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },
+    owner: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<RawCheckoutReading | null> {
+    this.verifiedTerms = null;
+    const current = (): void => { owner.signal?.throwIfAborted(); owner.assertCurrent(); };
+    current(); const html = await this.options.merchant.checkoutHtml(); current();
+    const reading = await readFixtureCheckoutHtml(this.options.merchant.shape, html); current();
+    const extraction = extractCheckout(reading, original.terms.currency);
+    if (!extraction.ok || reading.statedTotal === null) return null;
+    const checkout = extraction.checkout;
+    if (checkout.currency !== original.terms.currency || checkout.lines.length !== original.terms.lines.length
+      || checkout.lines.some((line, index) => line.label !== original.terms.lines[index]?.label || line.quantity !== original.terms.lines[index]?.quantity)
+      || checkout.shippingOptions.length !== original.reading.shippingOptions.length
+      || checkout.shippingOptions.some((option, index) => option.rawLabel !== original.reading.shippingOptions[index]?.label)) return null;
+    const shipping = checkout.shippingOptions.find(option => option.rawLabel === original.terms.shippingLabel);
+    if (!shipping) return null;
+    const total = checkout.subtotalMinorUnits + shipping.costMinorUnits;
+    if (!Number.isSafeInteger(total) || parseMinorUnits(reading.statedTotal, checkout.currency) !== total) return null;
+    const expected: CheckoutTerms = { ...original.terms, lines: checkout.lines, taxMinorUnits: checkout.taxMinorUnits,
+      feesMinorUnits: checkout.feesMinorUnits, feeLabels: checkout.feeLabels, shippingMinorUnits: shipping.costMinorUnits, totalMinorUnits: total };
+    const valid = await this.verifyTerms(expected, owner); current();
+    this.verifiedTerms = null;
+    return valid ? reading : null;
+  }
+
   /** This test adapter reads the live fixture's rendered total and selected delivery. */
   async verifyTerms(expected: CheckoutTerms, owner?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
     this.verifiedTerms = null;

@@ -26,6 +26,7 @@
 import type { CardFieldKind } from './card-redaction.js';
 import type { CartLine } from './cart.js';
 import type { CurrencyCode, MinorUnits } from './types.js';
+import type { RawCheckoutReading } from './checkout-extraction.js';
 
 /** The exact parsed purchase shown to the owner, never an expandable allowance. */
 export interface CheckoutTerms {
@@ -52,6 +53,11 @@ export interface CheckoutPageDriver {
 
   /** Automated checkout requires a fresh full-page quote check. Fill-only ports may omit it. */
   verifyTerms?(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean>;
+
+  /** Read a verified replacement price for the same purchase and controls.
+   * Returning it grants no approval: the flow must decide and notify again. */
+  readCurrentQuote?(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },
+    ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<RawCheckoutReading | null>;
 
   /** The page's current url, for the merchant-origin check. */
   url(ownership?: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<string>;
@@ -150,6 +156,11 @@ export class CheckoutSubmitRefused extends Error {
     super(message);
     this.name = 'CheckoutSubmitRefused';
   }
+}
+
+/** The retained quote changed before dispatch; no click reached the merchant. */
+export class CheckoutQuoteChanged extends CheckoutSubmitRefused {
+  constructor() { super('The current checkout quote changed before submission.'); this.name = 'CheckoutQuoteChanged'; }
 }
 
 /** A verification step the merchant put in the way, described for the owner. */

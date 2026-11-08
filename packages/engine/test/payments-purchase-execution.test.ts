@@ -436,6 +436,37 @@ for (const shape of shapes()) test(`new recurring terms in the live ${shape.name
   expect(harness.ledger.state().reservations).toEqual([]); expect(await harness.journal.list()).toEqual([]);
 });
 
+for (const shape of shapes()) for (const answer of ['approve', 'deny'] as const)
+  test(`verified live repricing at ${shape.name} requires its own new approval (${answer})`, async () => {
+    const merchant = shape.get();
+    const harness = buildHarness({ merchant, dailyItemMinorUnits: merchant.shape === 'alpha' ? 15_000 : 150_000 });
+    let windows = 0;
+    harness.deps.notifier.awaitAnswer = async input => {
+      if (++windows === 1) {
+        expect(input.kind).toBe('veto');
+        merchant.rewriteCheckout(html => {
+          const prices = merchant.shape === 'alpha'
+            ? html.replaceAll('$129.00', '$200.00').replaceAll('$10.97', '$20.00')
+            : html.replaceAll('1.299,00 &euro;', '2.000,00 &euro;').replaceAll('246,81 &euro;', '380,00 &euro;');
+          return prices.replace(/(<output\b[^>]*>)[^<]+(<\/output>)/, (_all: string, open: string, close: string) =>
+            `${open}${merchant.shape === 'alpha' ? '$226.49' : '2.386,90 &euro;'}${close}`);
+        });
+        return { answer: 'acknowledge', channel: 'tui' };
+      }
+      expect(windows).toBe(2); expect(input.kind).toBe('approval');
+      expect(merchant.submissions).toEqual([]); expect(harness.recorded).toEqual([]);
+      return { answer, channel: 'tui' };
+    };
+    const outcome = await runOn(harness, merchant);
+    expect(windows).toBe(2); expect(harness.notices.map(notice => notice.kind)).toEqual(['veto', 'approval']);
+    if (answer === 'approve') {
+      expect(outcome.kind).toBe('purchased'); expect(merchant.submissions).toHaveLength(1);
+      expect(harness.recorded[0]?.totalMinorUnits).toBe(merchant.shape === 'alpha' ? 22_649 : 238_690);
+    } else { expect(outcome.kind).toBe('refused'); expect(merchant.submissions).toEqual([]); expect(harness.recorded).toEqual([]); }
+    expect(harness.ledger.state().reservations).toEqual([]); expect(await harness.journal.list()).toEqual([]);
+    expectNoCardMaterial('repriced owner notices', JSON.stringify(harness.notices));
+  });
+
 // ═══ 1. The card is absent from every response, log, trace and error ════════
 
 describe('the card never comes back', () => {

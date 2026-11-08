@@ -165,6 +165,7 @@ export function extractCheckout(
       return fail(`fees[${String(index)}]`, 'Refused: I cannot read a fee line on this checkout as an exact amount.');
     }
     feesMinorUnits += amount;
+    if (!Number.isSafeInteger(feesMinorUnits)) return fail('fees', 'Refused: the mandatory fees exceed exact integer accounting.');
     feeLabels.push(sanitizeNoticeField(fee.label, 60));
   }
 
@@ -192,6 +193,10 @@ export function extractCheckout(
   }
 
   const subtotalMinorUnits = itemMinorUnits + taxMinorUnits + feesMinorUnits;
+  if (!Number.isSafeInteger(subtotalMinorUnits)) return fail('subtotal', 'Refused: the checkout subtotal exceeds exact integer accounting.');
+  if (shippingOptions.some(option => !Number.isSafeInteger(subtotalMinorUnits + option.costMinorUnits))) {
+    return fail('shippingOptions', 'Refused: a complete checkout total exceeds exact integer accounting.');
+  }
 
   // The stated total is checked against ours only when the page states one AND
   // the comparison is meaningful, which it is only for a single delivery

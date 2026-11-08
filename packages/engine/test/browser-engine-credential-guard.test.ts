@@ -993,7 +993,7 @@ test('native checkout observation redacts live card echoes without replacing sna
   const guard = new CardMaterialRedactor(), number = '4242424242424242';
   let body = `Cable x1 USD 10.00. Total USD 11.00. Card ${number}`;
   const engine = await buildEngine(ORDINARY_URL, ORDINARY_ELEMENTS, { guard,
-    checkout: () => ({ text: body, selections: [], quantities: [{ selector: '#quantity', value: number }] }),
+    checkout: () => ({ text: body, selections: [{ selector: '#delivery', labels: ['Standard'], options: ['Standard', `Priority ${number}`] }], quantities: [{ selector: '#quantity', value: number }] }),
     arm: (sessionId, pageId) => guard.arm(sessionId, pageId, [{ kind: 'number', value: number }]),
   });
   const snapshot = await engine.snapshot({});

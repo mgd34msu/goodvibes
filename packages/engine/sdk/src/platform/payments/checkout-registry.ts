@@ -158,12 +158,38 @@ function ownCheckout(record: InFlightCheckout): InFlightCheckout {
  * that cannot happen is to make it unrepresentable.
  */
 
+/** An original in-process page owner spanning successive price reservations. */
+export interface CheckoutPageClaim {
+  readonly assertCurrent: () => void;
+  readonly release: () => void;
+}
+
 export class CheckoutRegistry {
   readonly #byPage = new Map<string, Map<string, InFlightCheckout>>();
   readonly #byPurchase = new Map<string, InFlightCheckout>();
   readonly #writing = new Set<string>();
+  readonly #pageOwners = new Map<string, Map<string, CheckoutPageClaim>>();
 
   constructor(private readonly journal: CheckoutJournal) {}
+
+  /** Page ownership is separate from money held for a particular quote. */
+  claimPage(sessionId: string, pageId: string): CheckoutPageClaim {
+    if (this.#byPage.get(sessionId)?.has(pageId) || this.#pageOwners.get(sessionId)?.has(pageId)) {
+      throw new CheckoutRegistryError('This browser page already belongs to a checkout.', 'Finish the original purchase before starting another on this page.');
+    }
+    const pages = this.#pageOwners.get(sessionId) ?? new Map<string, CheckoutPageClaim>();
+    const claim: CheckoutPageClaim = Object.freeze({
+      assertCurrent: () => {
+        if (this.#pageOwners.get(sessionId)?.get(pageId) !== claim) throw new CheckoutRegistryError('The original checkout page claim has ended.', 'Start a new checkout on a live page.');
+      },
+      release: () => {
+        if (this.#pageOwners.get(sessionId)?.get(pageId) !== claim) return;
+        pages.delete(pageId); if (pages.size === 0) this.#pageOwners.delete(sessionId);
+      },
+    });
+    this.#pageOwners.set(sessionId, pages); pages.set(pageId, claim);
+    return claim;
+  }
 
   private assertWritable(purchaseId: string): void {
     if (this.#writing.has(purchaseId)) throw new CheckoutRegistryError(
@@ -179,8 +205,11 @@ export class CheckoutRegistry {
     if (this.#byPurchase.get(record.purchaseId) === record) this.#byPurchase.delete(record.purchaseId);
   }
 
-  async open(record: InFlightCheckout): Promise<InFlightCheckout> {
+  async open(record: InFlightCheckout, claim?: CheckoutPageClaim): Promise<InFlightCheckout> {
     const owned = ownCheckout(record);
+    const owner = this.#pageOwners.get(owned.sessionId)?.get(owned.pageId);
+    if ((owner !== undefined || claim !== undefined) && owner !== claim) throw new CheckoutRegistryError(
+      'The checkout does not own this page.', 'Use the original purchase page claim.');
     this.assertWritable(owned.purchaseId);
     const pages = this.#byPage.get(owned.sessionId) ?? new Map<string, InFlightCheckout>();
     const existing = pages.get(owned.pageId);

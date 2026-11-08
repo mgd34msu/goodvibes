@@ -60,7 +60,7 @@ interface RawElement {
  */
 function collectElements(options: number | { readonly limit: number; readonly identityOnly: true; readonly checkout?: true }): RawElement[] | {
   readonly url: string; readonly title: string; readonly elements: RawElement[];
-  readonly checkout?: { readonly text: string | null; readonly selections: readonly { selector: string; labels: string[] }[]; readonly quantities: readonly { selector: string; value: string }[] };
+  readonly checkout?: { readonly text: string | null; readonly selections: readonly { selector: string; labels: string[]; options?: string[] }[]; readonly quantities: readonly { selector: string; value: string }[] };
 } {
   const identityOnly = typeof options !== 'number';
   const limit = typeof options === 'number' ? options : options.limit;
@@ -259,12 +259,13 @@ function collectElements(options: number | { readonly limit: number; readonly id
   if (typeof options === 'number' || options.checkout !== true) return { url: document.URL, title: document.title, elements: results };
   const text = [document.body?.innerText ?? '', ...roots.flatMap(root => root instanceof ShadowRoot && isVisible(root.host)
     ? Array.from(root.children).filter(isVisible).map(child => (child as HTMLElement).innerText ?? '') : [])].join('\n');
-  const selections: { selector: string; labels: string[] }[] = [];
+  const selections: { selector: string; labels: string[]; options?: string[] }[] = [];
   const quantities: { selector: string; value: string }[] = [];
   for (const element of seen) {
     if (!isVisible(element)) continue;
     if (element.tagName.toLowerCase() === 'select') selections.push({ selector: selectorFor(element),
-      labels: Array.from((element as HTMLSelectElement).selectedOptions).map(option => option.text) });
+      labels: Array.from((element as HTMLSelectElement).selectedOptions).map(option => option.text),
+      options: Array.from((element as HTMLSelectElement).options).map(option => option.text) });
     // No passwords, hidden fields or arbitrary typed text. Number controls
     // supply quantities that need not be rendered in body text. The host
     // redacts live card material before this evidence can reach a reader.
@@ -331,9 +332,12 @@ function checkoutDocument(value: unknown, scrub: (text: string) => string) {
   return {
     text: text(value.text),
     selections: value.selections.map((entry: unknown) => {
-      if (!plainRecord(entry) || !ownEvidenceFields(entry, ['selector', 'labels']) || !Array.isArray(entry.labels)
+      if (!plainRecord(entry) || !ownEvidenceFields(entry, Object.hasOwn(entry, 'options') ? ['selector', 'labels', 'options'] : ['selector', 'labels']) || !Array.isArray(entry.labels)
         || entry.labels.length > 100) throw new Error('Complete checkout selections are unavailable.');
-      return { selector: text(entry.selector), labels: entry.labels.map((label: unknown) => text(label)) };
+      const hasOptions = Object.hasOwn(entry, 'options'), options = hasOptions ? entry.options : undefined;
+      if (hasOptions && (!Array.isArray(options) || options.length > 1_000)) throw new Error('Complete checkout options are unavailable.');
+      return { selector: text(entry.selector), labels: entry.labels.map((label: unknown) => text(label)),
+        ...(Array.isArray(options) ? { options: options.map((label: unknown) => text(label)) } : {}) };
     }),
     quantities: value.quantities.map((entry: unknown) => {
       if (!plainRecord(entry) || !ownEvidenceFields(entry, ['selector', 'value'])) throw new Error('Complete checkout quantities are unavailable.');

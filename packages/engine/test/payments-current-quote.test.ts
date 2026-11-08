@@ -2,7 +2,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import { createBrowserCheckoutDriverFactory, type CheckoutBrowserEngine } from '../sdk/src/platform/payments/browser-checkout-driver.js';
-import { CheckoutSubmitRefused, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
+import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
+import { StaleElementError } from '../sdk/src/platform/browser/browser-snapshot.js';
 import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redaction.js';
 import { parseCurrencyCode } from '../sdk/src/platform/payments/types.js';
 import { paymentsPort } from './helpers/payments-readings.ts';
@@ -42,7 +43,7 @@ function fixture(verdict: boolean | 'unsure' = true) {
       owner.assertCurrent(); const original = revision;
       return { state: { url, submitControl: { ref: submitTarget, selector: '#place', frameChain: [], name: 'Place order', role: 'button', submits: true },
         documents: [{ frameChain: [], checkout: { text: 'Cable x1 USD $10.00. Tax $1.00. Standard selected, free. One-off total USD $11.00.' } }] },
-        async assertCurrent() { owner.assertCurrent(); if (revision !== original) throw new Error('Current quote changed'); } };
+        async assertCurrent() { owner.assertCurrent(); if (revision !== original) throw new StaleElementError('Current quote changed', 'Read the current quote again.'); } };
     },
     async click(_target, _args, owner) {
       owner?.assertCurrent(); await beforeDispatch(); owner?.assertCurrent();
@@ -118,7 +119,7 @@ test('a quote change during later browser checks is caught at the final dispatch
   f.beforeDispatch(async () => { entered.release(); await wait.wait; });
   const submission = f.driver.submitOrder('place'); pending.push(submission); void submission.catch(() => {});
   await entered.wait; f.change(); wait.release();
-  await expect(submission).rejects.toBeInstanceOf(CheckoutSubmitRefused);
+  await expect(submission).rejects.toBeInstanceOf(CheckoutQuoteChanged);
   expect(f.effects).toEqual([]);
 });
 

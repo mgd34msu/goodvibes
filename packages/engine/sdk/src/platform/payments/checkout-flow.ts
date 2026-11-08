@@ -15,7 +15,7 @@
  *   3  RECURRING          a subscription is refused outright
  *   4  DECIDE             budget, ceiling, overage pool, shipping ladder
  *   5  RESERVE            money is held before any window opens
- *   6  NOTICE + WINDOW    ONE message, sent once, with the final total
+ *   6  NOTICE + WINDOW    one message for this exact quote and final total
  *   7  APPLY SHIPPING     the tier the ladder chose
  *   8  FILL               the daemon types the card
  *   9  SUBMIT             journalled BEFORE the click
@@ -68,6 +68,7 @@ import { assertCartMatchesRequest, detectRecurringCharge, type RequestedLine } f
 import { checkPaymentGates, type GateInput } from './gates.js';
 import { requireDecisionFeature } from '../runtime/decision-policy.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
+import { captureMutationDescriptors } from '../utils/file-mutation.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from './checkout-ownership.js';
 import { decidePurchase, type BudgetDraw } from './decide.js';
 import { readShippingTiers } from './shipping.js';
@@ -103,9 +104,9 @@ import {
 } from './address.js';
 import type { CardMaterialStore } from './card-material.js';
 import type { CardMaterialRedactor } from './card-redaction.js';
-import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms } from './checkout-page.js';
+import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms } from './checkout-page.js';
 import type { PurchaseRecord } from './purchase-record.js';
-import type { CheckoutRegistry } from './checkout-registry.js';
+import type { CheckoutPageClaim, CheckoutRegistry } from './checkout-registry.js';
 import type { UntrustedContentLedger } from '../security/untrusted-content.js';
 import { dayKey } from './day.js';
 import type {
@@ -269,35 +270,60 @@ export async function runCheckout(
     gates: GateInput; limits: BudgetLimits; merchantPolicy: MerchantPolicy | undefined;
   };
   const owner = captureCheckoutOwnership(deps);
-  const lifecycle: CheckoutExecutionLifetime = { current: owner.assertCurrent, submitMayHaveHappened: false };
+  const driverCurrent = captureMutationDescriptors(deps.driver, ['identity', 'verifyTerms', 'readCurrentQuote', 'url', 'fill', 'fillSecrets', 'choose', 'submitOrder']);
+  const current = () => {
+    owner.assertCurrent();
+    try { driverCurrent(); } catch { throw new CheckoutOwnershipError(); }
+    owner.assertCurrent();
+  };
+  const lifecycle: CheckoutExecutionLifetime = { current, submitMayHaveHappened: false };
   try {
-    return await runOwnedCheckout(input.request, input.reading, input.controls,
-      { ...deps, gates: input.gates, limits: input.limits, merchantPolicy: input.merchantPolicy }, lifecycle);
+    let currentReading = input.reading;
+    for (;;) {
+      current();
+      const result = await runOwnedCheckout(input.request, currentReading, input.controls,
+        { ...deps, gates: input.gates, limits: input.limits, merchantPolicy: input.merchantPolicy }, lifecycle);
+      if (result.kind !== 'reprice') return result;
+      current();
+      currentReading = result.reading;
+    }
   } catch (error) {
     if (lifecycle.release && !lifecycle.submitMayHaveHappened) {
       try { await lifecycle.release(); }
       catch { throw new Error('Checkout stopped before submission, but its journal or budget hold could not be released. Inspect this purchase before retrying.'); }
     }
     throw error;
+  } finally {
+    lifecycle.pageClaim?.release();
   }
 }
 
 interface CheckoutExecutionLifetime {
   readonly current: () => void;
+  originalPage?: ReturnType<CheckoutPageDriver['identity']> | undefined;
+  originalAddress?: ReturnType<typeof captureCheckoutOwnership> | undefined;
+  pageClaim?: CheckoutPageClaim | undefined;
   release?: (() => Promise<void>) | undefined;
   submitMayHaveHappened: boolean;
 }
 
+type CheckoutAttemptOutcome = CheckoutOutcome | { readonly kind: 'reprice'; readonly reading: RawCheckoutReading };
+
 async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutReading, controls: CheckoutControls,
-  deps: CheckoutFlowDeps, lifecycle: CheckoutExecutionLifetime): Promise<CheckoutOutcome> {
+  deps: CheckoutFlowDeps, lifecycle: CheckoutExecutionLifetime): Promise<CheckoutAttemptOutcome> {
   const { registry, driver, ledger, notifier, now } = deps;
   const signal = deps.signal;
   let originalPage: ReturnType<CheckoutPageDriver['identity']> | undefined;
   let identityReader: CheckoutPageDriver['identity'] | undefined;
   let termsReader: CheckoutPageDriver['verifyTerms'];
+  let quoteReader: CheckoutPageDriver['readCurrentQuote'];
+  let quoteReaderCaptured = false;
   const current = (): void => {
     lifecycle.current();
+    lifecycle.originalAddress?.assertCurrent();
+    lifecycle.pageClaim?.assertCurrent();
     if (termsReader && driver.verifyTerms !== termsReader) throw new CheckoutOwnershipError();
+    if (quoteReaderCaptured && driver.readCurrentQuote !== quoteReader) throw new CheckoutOwnershipError();
     if (originalPage && identityReader) {
       if (driver.identity !== identityReader) throw new CheckoutOwnershipError();
       const page = identityReader.call(driver);
@@ -313,6 +339,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   const verifyTerms = driver.verifyTerms;
   if (typeof verifyTerms !== 'function') return refused('total-changed', 'Refused: this checkout driver cannot verify the current cart and payable total. Nothing was submitted.');
   termsReader = verifyTerms;
+  const readCurrentQuote = driver.readCurrentQuote;
+  quoteReader = readCurrentQuote; quoteReaderCaptured = true;
   // Capture the original financial reader before any asynchronous work. Other
   // purchases may append legitimately; availability, rather than unchanged
   // whole-ledger content, is the restriction on this purchase's next submit.
@@ -320,6 +348,9 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     assertCurrent: deps.purchases.assertAvailable?.bind(deps.purchases) });
   identityReader = driver.identity;
   const identity = Object.freeze({ ...identityReader.call(driver) });
+  if (lifecycle.originalPage && (identity.sessionId !== lifecycle.originalPage.sessionId || identity.pageId !== lifecycle.originalPage.pageId)) throw new CheckoutOwnershipError();
+  lifecycle.originalPage ??= identity;
+  lifecycle.pageClaim ??= registry.claimPage(identity.sessionId, identity.pageId);
   originalPage = identity;
   current();
 
@@ -484,7 +515,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       shippingTierUsed: shipping.tier,
       stepDown,
       totalMinorUnits: draw.totalMinorUnits,
-    });
+    }, lifecycle.pageClaim);
   } catch (error) {
     // This attempt never acquired a durably published checkout. Release only
     // its newly reserved budget; do not close another purchase on this page.
@@ -539,8 +570,36 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     return refused('no-shipping-address', 'The stored address could not be verified for this purchase. Nothing was submitted.');
   }
   const retainedAddress = captureCheckoutOwnership({ signal, assertCurrent: addresses.assertCurrent?.bind(addresses) });
+  lifecycle.originalAddress ??= retainedAddress;
   const addressCurrent = () => { current(); retainedAddress.assertCurrent(); };
   const addressStillCurrent = () => { try { addressCurrent(); return true; } catch { return false; } };
+  const reprice = async (): Promise<CheckoutAttemptOutcome> => {
+    // The old answer and its held amount are void before any new reading.
+    // This path is reachable only while a submit is known not to have happened.
+    await release(); addressCurrent();
+    if (typeof readCurrentQuote !== 'function') return refused('total-changed', 'The checkout terms changed and this browser cannot read a verified replacement quote. Nothing was submitted.');
+    const next = await readCurrentQuote.call(driver, { terms: expectedTerms, reading }, { signal, assertCurrent: addressCurrent });
+    addressCurrent();
+    if (!next) return refused('total-changed', 'The changed checkout could not establish a complete replacement quote for the same purchase. Nothing was submitted.');
+    const retained = captureOwnedJson(next) as unknown as RawCheckoutReading;
+    const extracted = extractCheckout(retained, deps.budgetCurrency);
+    if (!extracted.ok) return refused('extraction-failed', extracted.reason);
+    const fresh = extracted.checkout;
+    const samePrices = fresh.currency === checkout.currency && fresh.taxMinorUnits === checkout.taxMinorUnits
+      && fresh.feesMinorUnits === checkout.feesMinorUnits
+      && fresh.lines.length === checkout.lines.length && fresh.lines.every((line, index) => {
+        const original = checkout.lines[index];
+        return original && line.quantity === original.quantity && line.unitMinorUnits === original.unitMinorUnits;
+      })
+      && fresh.shippingOptions.length === checkout.shippingOptions.length && fresh.shippingOptions.every((option, index) => {
+        const original = checkout.shippingOptions[index];
+        return original && option.costMinorUnits === original.costMinorUnits;
+      });
+    if (samePrices) return refused('total-changed', 'The earlier quote could not be verified, and no changed price was established. Nothing was submitted.');
+    // Iterative re-entry avoids retaining earlier request/window stacks. The
+    // next attempt reads the live budget and creates a completely new window.
+    return { kind: 'reprice', reading: retained };
+  };
   let shippingAddress;
   try { shippingAddress = addressKinds.includes('shipping') ? await addresses.read('shipping', { signal }) : null; addressCurrent(); }
   catch { await release(); return refused('no-shipping-address', 'The stored address changed before this purchase could proceed.'); }
@@ -566,12 +625,12 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     destination: renderDestination(shippingAddress),
   };
 
-  // ── 6. ONE notification, and the window its mode implies ────────────────
+  // ── 6. One notification for this quote, and its new window ──────────────
   //
   // Sent once, here, because this is the first moment both halves of what the
   // owner asked to see are known: WHAT was chosen, and what it will actually
-  // cost. Earlier would be a message without a total; a second message later
-  // would restore the two-step flow this design deliberately collapsed into one.
+  // cost. An actual reprice voids this answer and starts a different quote and
+  // window. It never reuses this notification's answer for another amount.
   await registry.advance(request.purchaseId, 'awaiting-window', {}, now());
   addressCurrent();
 
@@ -765,10 +824,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // The notice approves exactly its earlier parsed quote, never a larger limit.
   const beforeCard = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
   addressCurrent();
-  if (beforeCard !== true) {
-    await release();
-    return refused('total-changed', 'Refused: the current cart, delivery choice or payable total no longer confirms the exact purchase shown in your notice. No card was entered.');
-  }
+  if (beforeCard !== true) return reprice();
   purchaseEvidence.assertCurrent();
   addressCurrent();
   await registry.advance(request.purchaseId, 'arming-payment', {}, now());
@@ -801,10 +857,7 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
   // actual click after journal flush and all other asynchronous browser checks.
   const beforeSubmit = await verifyTerms.call(driver, expectedTerms, { signal, assertCurrent: addressCurrent });
   addressCurrent();
-  if (beforeSubmit !== true) {
-    await release();
-    return refused('total-changed', 'Refused: the current checkout no longer confirms the exact purchase shown in your notice. Nothing was submitted; card redaction remains active on this page.');
-  }
+  if (beforeSubmit !== true) return reprice();
 
   // ── 9. Journal BEFORE the submit, then submit exactly once ──────────────
   // This flush is what lets a restart tell "not submitted" from "possibly
@@ -825,6 +878,10 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
     lifecycle.submitMayHaveHappened = true;
     submission = await driver.submitOrder(controls.placeOrderTarget, { assertCurrent: submitCurrent, signal });
   } catch (error) {
+    if (error instanceof CheckoutQuoteChanged) {
+      lifecycle.submitMayHaveHappened = false;
+      return reprice();
+    }
     if (error instanceof CheckoutSubmitRefused) {
       lifecycle.submitMayHaveHappened = false;
       // Refused BEFORE the click reached the merchant (a typed refusal, the

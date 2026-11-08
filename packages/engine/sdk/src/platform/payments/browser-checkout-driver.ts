@@ -96,12 +96,14 @@
  */
 import type { CardFieldKind } from './card-redaction.js';
 import { captureCheckoutOwnership } from './checkout-ownership.js';
-import { CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms, type PageIdentity } from './checkout-page.js';
+import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutChallenge, type CheckoutPageDriver, type CheckoutTerms, type PageIdentity } from './checkout-page.js';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { checkAnswers, toJson, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { checkoutTerms, checkoutTermsView } from './batteries/checkout-terms.js';
 import { registrableDomain } from '../security/public-suffix.js';
+import type { RawCheckoutReading } from './checkout-extraction.js';
+import { readRepricedCheckout } from './checkout-repricing.js';
 
 /**
  * The part of a card-material guard this adapter can see.
@@ -243,6 +245,7 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     private readonly deps: BrowserCheckoutDriverDeps,
   ) {
     this.target = Object.freeze({ sessionId, pageId });
+    this.deps = Object.freeze({ ...deps });
   }
 
   identity(): PageIdentity {
@@ -251,7 +254,7 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
 
   private invalidateTerms(): void { this.#termsOwner = null; this.#quote = null; }
 
-  async verifyTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
+  private async observeTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }) {
     this.#quote = null;
     const token = {};
     this.#termsOwner = token;
@@ -268,10 +271,10 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     const state = captureOwnedJson(observation.state);
     if (!state || typeof state !== 'object' || Array.isArray(state) || !('url' in state) || typeof state.url !== 'string') throw new CheckoutDriverRefusal('The current checkout page has no verifiable origin.', 'Read the checkout again.');
     if (!('submitControl' in state) || !state.submitControl || typeof state.submitControl !== 'object' || Array.isArray(state.submitControl)
-      || !('ref' in state.submitControl) || state.submitControl.ref !== retained.submitTarget) return false;
+      || !('ref' in state.submitControl) || state.submitControl.ref !== retained.submitTarget) return null;
     let url: URL;
-    try { url = new URL(state.url); } catch { return false; }
-    if (url.protocol !== 'https:' || url.username || url.password || registrableDomain(url.hostname) !== retained.merchantDomain) return false;
+    try { url = new URL(state.url); } catch { return null; }
+    if (url.protocol !== 'https:' || url.username || url.password || registrableDomain(url.hostname) !== retained.merchantDomain) return null;
     const assertActive = (): void => {
       owner.assertCurrent();
       signal?.throwIfAborted();
@@ -291,6 +294,13 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
       });
       await current(); checkAnswers(request.questions, result.answers); return result;
     } };
+    return { retained, engine, state, port, signal, current, assertActive };
+  }
+
+  async verifyTerms(expected: CheckoutTerms, ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<boolean> {
+    const observed = await this.observeTerms(expected, ownership);
+    if (!observed) return false;
+    const { retained, engine, state, port, signal, current, assertActive } = observed;
     const run = await checkoutTerms.run(port, toJson(checkoutTermsView(retained, state)) as EntryType, { site: 'payments.current-checkout-terms', signal });
     await current();
     const unchanged = run.readings.unchanged.outcome === 'act' && run.readings.unchanged.verdict === 'yes';
@@ -298,6 +308,17 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
     assertActive();
     if (unchanged) this.#quote = { engine, submitTarget: retained.submitTarget, current };
     return unchanged;
+  }
+
+  async readCurrentQuote(original: { readonly terms: CheckoutTerms; readonly reading: RawCheckoutReading },
+    ownership: { readonly assertCurrent: () => void; readonly signal?: AbortSignal | undefined }): Promise<RawCheckoutReading | null> {
+    const retained = captureOwnedJson(original) as unknown as typeof original;
+    const observed = await this.observeTerms(retained.terms, ownership);
+    if (!observed) return null;
+    const next = await readRepricedCheckout({ previous: retained.terms, reading: retained.reading, current: observed.state,
+      port: observed.port, signal: observed.signal, assertCurrent: observed.current });
+    await observed.current();
+    return next;
   }
 
   /**
@@ -421,16 +442,21 @@ class BrowserCheckoutPageDriver implements CheckoutPageDriver {
       const engine = await this.engine();
       owner.assertCurrent();
       if (engine !== quote.engine) throw new CheckoutSubmitRefused('The original checkout browser was replaced.');
-      await quote.current(); owner.assertCurrent();
+      try { await quote.current(); owner.assertCurrent(); }
+      catch (error) { if (error instanceof Error && error.name === 'StaleElementError') throw new CheckoutQuoteChanged(); throw error; }
       const current = { ...owner, assertCurrent: () => {
         try { owner.assertCurrent(); } catch { throw new CheckoutSubmitRefused('The original purchase owner or stored address changed before submission.'); }
       }, beforeDispatch: async () => {
         try { await quote.current(); owner.assertCurrent(); }
-        catch { throw new CheckoutSubmitRefused('The current checkout terms changed before submission.'); }
+        catch (error) {
+          if (error instanceof Error && error.name === 'StaleElementError') throw new CheckoutQuoteChanged();
+          throw new CheckoutSubmitRefused('The current checkout could not be verified before submission.');
+        }
       } };
       enteredClick = true;
       result = await engine.click(this.target, { ref: target }, current);
     } catch (error) {
+      if (error instanceof CheckoutQuoteChanged) throw error;
       if (!enteredClick) throw new CheckoutSubmitRefused('The original checkout owner or browser became unavailable before submission.');
       throw asSubmitFailure(error);
     }
@@ -492,6 +518,7 @@ function describePreClickFailure(name: string): string {
 }
 
 function asSubmitFailure(error: unknown): Error {
+  if (error instanceof CheckoutQuoteChanged) return error;
   if (error instanceof CheckoutDriverRefusal) {
     // This module's own guard messages (identity, armed state): they name a
     // field, a page or a missing guard, and never page-authored text. See this
@@ -514,5 +541,6 @@ function asSubmitFailure(error: unknown): Error {
 export function createBrowserCheckoutDriverFactory(
   deps: BrowserCheckoutDriverDeps,
 ): (sessionId: string, pageId: string) => CheckoutPageDriver {
+  deps = Object.freeze({ ...deps });
   return (sessionId, pageId) => new BrowserCheckoutPageDriver(sessionId, pageId, deps);
 }

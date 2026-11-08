@@ -8,9 +8,9 @@ import { CardMaterialRedactor } from '../sdk/src/platform/payments/card-redactio
 import { CheckoutRegistry, MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
 import { CheckoutOwnershipError } from '../sdk/src/platform/payments/checkout-ownership.js';
 import { runCheckout, type CheckoutFlowDeps, type CheckoutControls, type PurchaseRequest } from '../sdk/src/platform/payments/checkout-flow.js';
-import { CheckoutSubmitRefused, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
+import { CheckoutQuoteChanged, CheckoutSubmitRefused, type CheckoutTerms } from '../sdk/src/platform/payments/checkout-page.js';
 import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
-import { PaymentReplyInbox } from '../sdk/src/platform/payments/reply-inbox.js';
+import { PaymentReplyInbox, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
 import type { RawCheckoutReading } from '../sdk/src/platform/payments/checkout-extraction.js';
 import type { PurchaseRecord } from '../sdk/src/platform/payments/purchase-record.js';
 import { PaymentsGatewayServiceImpl } from '../sdk/src/platform/payments/payments-gateway-service.js';
@@ -34,7 +34,7 @@ const material = { number: '4242424242424242', expiryMonth: '01', expiryYear: '2
 function fixture() {
   const currency = parseCurrencyCode('USD'); if (!currency) throw new Error('Fixture currency failed');
   const ledger = new BudgetLedger(), journal = new MemoryCheckoutJournal(), redactor = new CardMaterialRedactor();
-  let active = true, page = 'page', metadataFailure = false;
+  let active = true, page = 'page', metadataFailure = false, liveTotal = 1_100;
   owners.push(() => { active = false; });
   let onMerchant = async () => {}, onMetadata = async () => {}, onChoose = async () => {}, onSubmit = async () => {};
   let onTerms = async (_expected: CheckoutTerms) => true;
@@ -66,7 +66,7 @@ function fixture() {
       async verifyTerms(expected, owner) {
         owner.assertCurrent(); terms.push(expected);
         const result = await onTerms(expected); owner.assertCurrent();
-        return result && expected.totalMinorUnits === 1_100 && expected.currency === 'USD'
+        return result && expected.totalMinorUnits === liveTotal && expected.currency === 'USD'
           && expected.lines.length === 1 && expected.lines[0]?.label === 'Original item' && expected.lines[0]?.quantity === 1;
       },
       async fill(target, _value, owner) { owner?.assertCurrent(); effects.push(`fill:${target}`); },
@@ -84,6 +84,7 @@ function fixture() {
     run: () => { const pending = runCheckout(request, reading, controls, deps); work.push(pending); drainOwned(pending); return pending; },
     revoke: () => { active = false; }, changePage: () => { page = 'replacement-page'; },
     merchantCalls: () => merchantCalls, failMetadata: () => { metadataFailure = true; },
+    setLiveTotal: (total: number) => { liveTotal = total; },
     onMerchant: (work: () => Promise<void>) => { onMerchant = work; }, onMetadata: (work: () => Promise<void>) => { onMetadata = work; },
     onChoose: (work: () => Promise<void>) => { onChoose = work; }, onSubmit: (work: () => Promise<void>) => { onSubmit = work; },
     onTerms: (work: (expected: CheckoutTerms) => Promise<boolean>) => { onTerms = work; } };
@@ -382,4 +383,182 @@ test('the actual service drains an async purchase-evidence guard and refuses bef
     await expect(service.beginCheckout(input)).rejects.toBeInstanceOf(CheckoutOwnershipError);
     expect(f.effects).toEqual([]); expect(readings.requests).toEqual([]);
   } finally { await service.close(); }
+});
+
+for (const phase of ['before-card', 'after-card', 'before-dispatch'] as const)
+  for (const answer of ['approve', 'deny'] as const)
+    test(`a new price ${phase} releases the old hold and requires a new budget approval (${answer})`, async () => {
+      const f = fixture(), secondWindow = barrier(), answered = barrier();
+      Reflect.set(f.deps, 'limits', { ...f.deps.limits, dailyItemMinorUnits: 1_500 });
+      const replacement: RawCheckoutReading = { ...f.reading,
+        lines: [{ label: 'Original item', quantity: '1', unitPrice: '$20.00' }], tax: '$2.00', statedTotal: '$22.00' };
+      let windows = 0, rereads = 0;
+      f.deps.driver.readCurrentQuote = async (original, owner) => {
+        owner.assertCurrent(); rereads++;
+        expect(original.terms.totalMinorUnits).toBe(1_100);
+        expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+        expect(f.effects.filter(effect => effect.startsWith('submit:'))).toEqual([]);
+        return replacement;
+      };
+      f.deps.notifier.awaitAnswer = async input => {
+        windows++;
+        if (windows === 1) {
+          expect(input.kind).toBe('veto');
+          if (phase === 'before-card') f.setLiveTotal(2_200);
+          return { answer: 'acknowledge', channel: 'operator' };
+        }
+        expect(windows).toBe(2); expect(input.kind).toBe('approval');
+        secondWindow.release(); await answered.wait;
+        return { answer, channel: 'operator' };
+      };
+      if (phase === 'after-card') {
+        const fill = f.deps.driver.fillSecrets.bind(f.deps.driver); let changed = false;
+        f.deps.driver.fillSecrets = async (fields, owner) => {
+          const result = await fill(fields, owner);
+          if (!changed) { changed = true; f.setLiveTotal(2_200); }
+          return result;
+        };
+      }
+      if (phase === 'before-dispatch') {
+        const submit = f.deps.driver.submitOrder.bind(f.deps.driver); let changed = false;
+        f.deps.driver.submitOrder = async (target, owner) => {
+          if (!changed) { changed = true; f.setLiveTotal(2_200); throw new CheckoutQuoteChanged(); }
+          return submit(target, owner);
+        };
+      }
+      const result = f.run();
+      try {
+        await secondWindow.wait;
+        expect(rereads).toBe(1); expect(f.notices.map(notice => notice.kind)).toEqual(['veto', 'approval']);
+        expect(f.notices[0]?.message).toContain('11.00'); expect(f.notices[1]?.message).toContain('22.00');
+        expect(f.records).toEqual([]); expect(f.effects.some(effect => effect.startsWith('submit:'))).toBe(false);
+        expect(f.ledger.state().reservations).toMatchObject([{ itemMinorUnits: 2_000, overageMinorUnits: 200 }]);
+        if (phase === 'before-card') expect(f.effects).not.toContain('card-read');
+        else expect(f.redactor.hasLiveMaterial('session', 'page')).toBe(true);
+        answered.release();
+        const outcome = await result;
+        if (answer === 'approve') {
+          expect(outcome.kind).toBe('purchased'); expect(f.records).toMatchObject([{ totalMinorUnits: 2_200 }]);
+          expect(f.effects.filter(effect => effect === 'submit:submit-original')).toHaveLength(1);
+        } else { expect(outcome.kind).toBe('refused'); expect(f.records).toEqual([]); }
+        expect(windows).toBe(2); expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+      } finally { answered.release(); await result; }
+    });
+
+test('uncertain submit never invokes repricing or releases its protected original hold', async () => {
+  const f = fixture(); let rereads = 0;
+  f.deps.driver.readCurrentQuote = async () => { rereads++; return null; };
+  f.deps.driver.submitOrder = async () => { throw new Error('The merchant may already have received the click'); };
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'challenge-abandoned' });
+  expect(rereads).toBe(0); expect(f.notices).toHaveLength(1);
+  expect(f.ledger.state().reservations).toHaveLength(1);
+  expect(await f.journal.list()).toMatchObject([{ phase: 'submit-pending' }]);
+});
+
+test('a failed quote check without a verified changed price cannot keep renewing owner windows', async () => {
+  const f = fixture(); f.onTerms(async () => false);
+  f.deps.driver.readCurrentQuote = async () => f.reading;
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'total-changed' });
+  expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('repricing retains the original page even after releasing the earlier quote reservation', async () => {
+  const f = fixture(); f.onTerms(async () => false);
+  f.deps.driver.readCurrentQuote = async () => {
+    f.changePage();
+    return { ...f.reading, lines: [{ label: 'Original item', quantity: '1', unitPrice: '$20.00' }], tax: '$2.00', statedTotal: '$22.00' };
+  };
+  await expect(f.run()).rejects.toBeInstanceOf(CheckoutOwnershipError);
+  expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('actual operator window IDs change on repricing and an old approval cannot settle the new price', async () => {
+  const f = fixture(), first = barrier(), second = barrier(), windows: ReturnType<PaymentReplyInbox['inspect']>[number][] = [];
+  Reflect.set(f.deps, 'limits', { ...f.deps.limits, dailyItemMinorUnits: 1_500 });
+  const replies = new PaymentReplyInbox({ now: () => f.deps.now() });
+  const replacement: RawCheckoutReading = { ...f.reading,
+    lines: [{ label: 'Original item', quantity: '1', unitPrice: '$20.00' }], tax: '$2.00', statedTotal: '$22.00' };
+  f.deps.driver.readCurrentQuote = async () => replacement;
+  let deliveries = 0;
+  const channel = createChannelPaymentNotifier({ replies, targets: [{ channel: 'telegram', request: {}, backfillable: false }],
+    router: { async deliver() { return `actual-quote-notice-${++deliveries}`; } } });
+  Reflect.set(f.deps, 'notifier', { ...channel, prepareWindow(input: Parameters<NonNullable<typeof channel.prepareWindow>>[0]) {
+    const reception = channel.prepareWindow?.(input); if (!reception) throw new Error('Missing real prepared notice reception');
+    return { ...reception, awaitAnswer(deadlineMs: number) {
+      const answer = reception.awaitAnswer(deadlineMs), current = replies.inspect()[0];
+      if (!current) throw new Error('Missing actual armed operator window');
+      windows.push(current);
+      if (windows.length === 1) first.release(); else second.release();
+      return answer;
+    } };
+  } });
+  const purchase = f.run(), handled = purchase.catch((error: unknown) => error);
+  try {
+    await first.wait;
+    const old = windows[0]; if (!old) throw new Error('Missing first window');
+    f.setLiveTotal(2_200);
+    replies.answer({ purchaseId: old.purchaseId, windowId: old.windowId, action: 'approve' });
+    await second.wait;
+    const fresh = windows[1]; if (!fresh) throw new Error('Missing new price window');
+    expect(fresh.windowId).not.toBe(old.windowId); expect(fresh.purchaseId).toBe(old.purchaseId);
+    expect(old.notice).toContain('11.00'); expect(fresh.notice).toContain('22.00'); expect(fresh.kind).toBe('approval');
+    expect(() => replies.answer({ purchaseId: old.purchaseId, windowId: old.windowId, action: 'approve' })).toThrow(PaymentReplyWindowError);
+    expect(f.records).toEqual([]); expect(replies.pending).toBe(1);
+    replies.answer({ purchaseId: fresh.purchaseId, windowId: fresh.windowId, action: 'approve' });
+    expect((await purchase).kind).toBe('purchased'); expect(f.records).toMatchObject([{ totalMinorUnits: 2_200 }]);
+    expect(deliveries).toBe(2); expect(replies.pending).toBe(0);
+  } finally { await replies.close(); await handled; }
+});
+
+test('a cheaper replacement also voids the earlier answer and opens its own veto window', async () => {
+  const f = fixture();
+  Reflect.set(f.deps, 'limits', { ...f.deps.limits, dailyItemMinorUnits: 500 });
+  f.deps.driver.readCurrentQuote = async () => ({ ...f.reading,
+    lines: [{ label: 'Original item', quantity: '1', unitPrice: '$5.00' }], tax: '$0.50', statedTotal: '$5.50' });
+  let windows = 0;
+  f.deps.notifier.awaitAnswer = async input => {
+    if (++windows === 1) { expect(input.kind).toBe('approval'); f.setLiveTotal(550); return { answer: 'approve', channel: 'operator' }; }
+    expect(windows).toBe(2); expect(input.kind).toBe('veto');
+    return { answer: 'object', channel: 'operator' };
+  };
+  expect(await f.run()).toMatchObject({ kind: 'cancelled' });
+  expect(f.notices.map(notice => notice.kind)).toEqual(['approval', 'veto']); expect(f.notices[1]?.message).toContain('5.50');
+  expect(f.records).toEqual([]); expect(f.effects).not.toContain('card-read');
+  expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+});
+
+test('the original checkout owns its page while repricing even with no budget reservation or journal row', async () => {
+  const f = fixture(); f.onTerms(async () => false);
+  f.deps.driver.readCurrentQuote = async () => {
+    expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
+    await expect(runCheckout({ ...f.request, purchaseId: 'competing-purchase' }, f.reading, f.controls, f.deps)).rejects.toThrow('already belongs');
+    return null;
+  };
+  expect(await f.run()).toMatchObject({ kind: 'refused', code: 'total-changed' });
+  expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
+  expect(f.ledger.state().reservations).toEqual([]);
+  // The failed original operation eventually releases its own page claim.
+  const next = f.deps.registry.claimPage('session', 'page'); next.release();
+});
+
+test('a replacement quote cannot adopt a later stored address after the original address owner retires', async () => {
+  const f = fixture(); let originalAddressCurrent = true, preparations = 0;
+  const address = { name: 'Fixture Owner', line1: '100 Example Street', line2: '', city: 'Chicago', region: 'IL', postalCode: '60601', country: 'US' };
+  Reflect.set(f.controls, 'addressFields', [{ kind: 'shipping', field: 'name', target: 'ship-name' }]);
+  Reflect.set(f.deps, 'addresses', {
+    async read() { return address; },
+    async prepare() {
+      const original = ++preparations === 1;
+      return { assertCurrent() { if (original && !originalAddressCurrent) throw new Error('Original stored address retired'); }, async read() { return original ? address : { ...address, line1: 'Different destination' }; } };
+    },
+  });
+  f.onTerms(async () => false);
+  f.onMerchant(async () => { if (f.merchantCalls() === 2) originalAddressCurrent = false; });
+  f.deps.driver.readCurrentQuote = async () => ({ ...f.reading,
+    lines: [{ label: 'Original item', quantity: '1', unitPrice: '$20.00' }], tax: '$2.00', statedTotal: '$22.00' });
+  await expect(f.run()).rejects.toBeInstanceOf(CheckoutOwnershipError);
+  expect(preparations).toBe(1); expect(f.notices).toHaveLength(1); expect(f.effects).not.toContain('card-read');
+  expect(f.records).toEqual([]); expect(f.ledger.state().reservations).toEqual([]); expect(await f.journal.list()).toEqual([]);
 });

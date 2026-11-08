@@ -17,9 +17,13 @@
 
 - Check the complete current checkout against the exact notified quote before
   card entry and again before submission. Retain that observation through the
-  final click boundary. Changed or unestablished terms stop with no submit;
-  automatic re-decision at the new price remains unfinished. Count split cart
-  rows together and require the exact owner-requested quantity.
+  final click boundary. A verified replacement price voids the earlier answer
+  and reservation, then receives a new budget decision, notice and window ID.
+  Read exact current source numerals, including collapsed delivery options;
+  refuse unestablished replacements and never retry uncertain submits. Custom
+  adapters can implement `readCurrentQuote` for this path. Count split cart rows
+  together and require the exact owner-requested quantity. Refuse subtotal and
+  delivery arithmetic that cannot preserve exact integer minor units.
 
 - Retain the original gateway credential, principal, scope ceiling and catalog
   owner independently of a request's mutable fields or payload. Replacing a

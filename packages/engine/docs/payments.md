@@ -1,10 +1,11 @@
 # Payments: design
 
 **Status:** partially implemented. This document is the design of record.
-Current checkout checks the live quote before card entry and submission. A changed
-or unestablished quote currently stops the operation; automatic re-decision for
-the new price (§8.4), browser continuation after restart and notification backfill
-remain unfinished. The retained requirements below are not completion claims.
+Current checkout checks the live quote before card entry and submission. A verified
+replacement price for the same purchase re-enters the budget decision and opens a
+new window (§8.4). Browser continuation after restart and notification backfill
+remain unfinished; current-source integration and release qualification remain
+pending. The retained requirements below are not completion claims.
 **The behaviors recorded here are contractual. Do not revise them silently.**
 Choices made under zero-deferrals where no owner ruling existed are listed in
 §12.1 as rulings taken, with their reasoning, so they can be overturned
@@ -805,11 +806,34 @@ again after card entry. The browser adapter retains
 that observation and rechecks it immediately before the submit click, after the
 journal flush and other asynchronous browser checks. A changed, incomplete or
 unresolved quote releases the known pre-submit reservation and reports
-`total-changed`. No submission is attempted, and any card material already entered
-keeps its page redaction. Automatic re-entry with newly read prices is still
-unfinished; the earlier answer is never reused to approve another amount.
+`total-changed` if a complete replacement quote cannot be established. Any card
+material already entered keeps its page redaction.
+
+When prices change, the original reservation and answer are released before
+reading replacement prices. The native adapter reads exact current source
+numerals for item prices, tax, mandatory fees, delivery options and the final
+payable total. Code parses them into integer minor units and checks their sum;
+decision models identify their meaning and verify the complete replacement quote.
+They cannot invent a price or authorize payment. Collapsed native select options
+are included even when their prices are absent from rendered body text.
+
+The same owner, page, stored address, item/quantity intent, currency and controls
+must remain current. A changed purchase layout or unestablished source stops;
+it does not authorize substituting another purchase. A valid changed quote
+re-enters the decision order with the live budget, shipping ladder and a fresh
+reservation. The original page claim stays held while the old budget reservation
+is released, so another checkout cannot take over the page during price reading.
+Its new notice shows the new amount and has a new window ID, even
+when the price decreased. An old operator window ID cannot answer it. The new
+budget result determines whether it requires approval or a veto window. There
+is no retry after a click may have reached the merchant; that outcome retains
+the protected hold and requires reconciliation.
 
 Custom automated-checkout adapters must implement `CheckoutPageDriver.verifyTerms`.
+To support repricing they also implement `readCurrentQuote`, returning a complete
+verified reading for the original purchase. An adapter without that capability
+stops on a changed quote. Returning a replacement reading never permits submit;
+the flow must complete the new decision and window first.
 Fill-only adapters may omit it. A driver without fresh verification cannot run an
 automated purchase; it is not treated as an unchanged quote. Native evidence reads
 preserve the existing snapshot refs, cover all readable frames and open shadow

@@ -171,13 +171,14 @@ export {
   describeInterruption,
 } from './checkout-registry.js';
 export type {
+  CheckoutPageClaim,
   CheckoutJournal,
   CheckoutPhase,
   InFlightCheckout,
   InterruptedVerdict,
 } from './checkout-registry.js';
 
-export { CheckoutSubmitRefused } from './checkout-page.js';
+export { CheckoutSubmitRefused, CheckoutQuoteChanged } from './checkout-page.js';
 export type { CheckoutPageDriver, PageIdentity, CheckoutChallenge } from './checkout-page.js';
 
 // The one implementation of that port over a real browser. Exported because a

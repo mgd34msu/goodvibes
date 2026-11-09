@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Keep fresh durable configuration file observations without nested file-content
+  hashes. Existing configuration history remains readable; a real settings
+  mutation advances its owner before adopting the new observation format.
+
 - Keep each trigger bound to its originally approved command, arguments and
   directory across saved grant edits and restart. New grants use independent
   action snapshots and revisions; earlier saved grants remain readable.

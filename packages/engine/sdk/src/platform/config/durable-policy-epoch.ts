@@ -6,9 +6,12 @@ import { isDeepStrictEqual } from 'node:util';
 import { confirmFileDurable, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { readFileObservation } from '../utils/file-observation.js';
 
-interface Epoch { readonly version: 1; readonly incarnation: string; readonly fileIdentity: string; }
-// Existing released v1 records/grants store this representation. The format
-// migration is separate from observing the same live native owner repeatedly.
+interface Epoch { readonly version: 1 | 2; readonly incarnation: string; readonly fileIdentity: string; }
+// A persisted continuation must compare the effective configuration after a
+// restart, including CLI/default/runtime contributions. Retaining the plaintext
+// frame in a sidecar would duplicate private configuration values. Keep one
+// compact, non-reversible commitment; it is not an authorization signature.
+// Physical file observations below need no additional content hashes.
 const digest = (serialized: string) => createHash('sha256').update(serialized).digest('hex');
 interface FilePin { readonly observation: string; readonly identity: string }
 interface EpochPin { readonly observation: string; readonly value: Epoch }
@@ -40,7 +43,8 @@ function ancestry(path: string, allowMissing = false): readonly unknown[] {
   }
   return result;
 }
-function fileIdentity(path: string, observations: PolicyObservations): string {
+/** Only actual earlier v1 epoch records select this published representation. */
+function savedV1FileIdentity(path: string, observations: PolicyObservations): string {
   const ancestors = ancestry(path);
   try {
     const before = lstatSync(path, { bigint: true });
@@ -69,6 +73,39 @@ function fileIdentity(path: string, observations: PolicyObservations): string {
     throw error;
   }
 }
+const FILE_OBSERVATION_PREFIX = 'policy-file-v2:';
+function physicalIdentityShape(value: string): boolean {
+  if (!value.startsWith(FILE_OBSERVATION_PREFIX)) return false;
+  try {
+    const text = value.slice(FILE_OBSERVATION_PREFIX.length), parsed: unknown = JSON.parse(text);
+    if (!Array.isArray(parsed) || JSON.stringify(parsed) !== text || !Array.isArray(parsed[0]) || parsed[0].length === 0) return false;
+    const integer = (field: unknown): boolean => typeof field === 'string' && /^-?\d+$/.test(field);
+    if (!parsed[0].every((entry: unknown) => Array.isArray(entry) && entry.length === 4
+      && typeof entry[0] === 'string' && resolve(entry[0]) === entry[0] && entry.slice(1).every(integer))) return false;
+    return (parsed.length === 2 && parsed[1] === 'absent') || (parsed.length === 11 && parsed.slice(1).every(integer));
+  } catch { return false; }
+}
+/** Private durable physical facts, not a checksum or public identifier.
+ * Nanosecond ctime also catches a same-size rewrite with restored mtime.
+ * Absence remains bound to its original physical directory owners. */
+function fileIdentity(path: string, observations: PolicyObservations, version: Epoch['version']): string {
+  if (version === 1) return savedV1FileIdentity(path, observations);
+  const ancestors = ancestry(path);
+  let observed: string;
+  try { observed = physical(path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    // A source that disappeared during a read is not a confirmed absence.
+    try { lstatSync(path); }
+    catch (absent) {
+      if ((absent as NodeJS.ErrnoException).code !== 'ENOENT' || !isDeepStrictEqual(ancestry(path), ancestors)) throw absent;
+      return FILE_OBSERVATION_PREFIX + JSON.stringify([ancestors, 'absent']);
+    }
+    throw new Error('Policy source changed while observing absence');
+  }
+  if (!isDeepStrictEqual(ancestry(path), ancestors)) throw new Error('Policy source owner changed during observation');
+  return FILE_OBSERVATION_PREFIX + observed;
+}
 function assertUnlocked(path: string): void {
   try { lstatSync(`${path}.owner-lock`); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
   throw new Error('Durable policy epoch has outstanding ownership');
@@ -79,9 +116,11 @@ function read(path: string, observations: PolicyObservations): Epoch {
   const file = lstatSync(path, { bigint: true });
   if (!file.isFile() || file.nlink !== 1n) throw new Error('Durable policy epoch is not an ordinary file');
   const before = readFileSync(path, 'utf8'); const value = JSON.parse(before) as Epoch;
-  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 3 || value.version !== 1
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 3 || (value.version !== 1 && value.version !== 2)
     || typeof value.incarnation !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.incarnation)
-    || typeof value.fileIdentity !== 'string' || !/^[0-9a-f]{64}$/.test(value.fileIdentity)) throw new Error('Invalid durable policy epoch');
+    || typeof value.fileIdentity !== 'string'
+    || (value.version === 1 ? !/^[0-9a-f]{64}$/.test(value.fileIdentity)
+      : !physicalIdentityShape(value.fileIdentity))) throw new Error('Invalid durable policy epoch');
   confirmFileDurable(path);
   if (readFileSync(path, 'utf8') !== before) throw new Error('Durable policy epoch changed');
   const after = lstatSync(path, { bigint: true });
@@ -146,7 +185,7 @@ export class DurablePolicyEpochOwner {
       for (const root of this.roots) {
         const path = `${root}.policy-epoch.json`; assertUnlocked(path); this.assertRoot(root);
         const current = read(path, this.#observations);
-        if (current.fileIdentity !== fileIdentity(root, this.#observations)) throw new Error('Configuration policy image changed');
+        if (current.fileIdentity !== fileIdentity(root, this.#observations, current.version)) throw new Error('Configuration policy image changed');
         assertUnlocked(path); this.accepted.set(root, current);
       }
     } catch { this.failed = true; }
@@ -172,8 +211,8 @@ export class DurablePolicyEpochOwner {
           try { current = read(path, this.#observations); }
           catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
           if (current) throw new Error('Configuration policy owner changed during issuance');
-          const identity = fileIdentity(root, this.#observations);
-          current = { version: 1, incarnation: randomUUID(), fileIdentity: identity };
+          const identity = fileIdentity(root, this.#observations, 2);
+          current = { version: 2, incarnation: randomUUID(), fileIdentity: identity };
           writeJsonFileAtomic(path, current, { durable: true, mode: 0o600 });
           this.accepted.set(root, current);
         });
@@ -211,11 +250,14 @@ export class DurablePolicyEpochOwner {
             const source = lstatSync(root);
             if (!source.isFile() || source.nlink !== 1) throw new Error('Policy source is not an ordinary file');
           } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-          const previous = read(path, this.#observations);
+          read(path, this.#observations);
           // Do not read the possibly malformed/unreadable policy here. The
           // actual ConfigManager mutation owns restrictive fallback/error
           // handling. Its prior image is obsolete as soon as the nonce moves.
-          const next: Epoch = { ...previous, incarnation: randomUUID() };
+          // Mutation intent already retires the previous incarnation. Advance
+          // an earlier v1 owner to physical observations only at that real
+          // mutation boundary, never while merely recovering an old grant.
+          const next: Epoch = { version: 2, incarnation: randomUUID(), fileIdentity: fileIdentity(root, this.#observations, 2) };
           writeJsonFileAtomic(path, next, { durable: true, mode: 0o600 });
           accepted.set(root, next);
         });
@@ -236,7 +278,7 @@ export class DurablePolicyEpochOwner {
         const path = `${root}.policy-epoch.json`; assertUnlocked(path);
         const row = read(path, this.#observations);
         if (JSON.stringify(row) !== JSON.stringify(this.accepted.get(root))) throw new Error('Configuration policy owner changed');
-        if (row.fileIdentity !== fileIdentity(root, this.#observations)) throw new Error('Configuration policy image changed');
+        if (row.fileIdentity !== fileIdentity(root, this.#observations, row.version)) throw new Error('Configuration policy image changed');
         assertUnlocked(path); return [root, row.incarnation, row.fileIdentity];
       });
       const frame = JSON.stringify([identities, effective]);
@@ -256,7 +298,7 @@ export class DurablePolicyEpochOwner {
         const path = `${root}.policy-epoch.json`;
         locked(path, () => {
           this.assertRoot(root);
-          const row = read(path, this.#observations); const identity = fileIdentity(root, this.#observations);
+          const row = read(path, this.#observations); const identity = fileIdentity(root, this.#observations, row.version);
           const expected = this.accepted.get(root);
           if (!expected || row.incarnation !== expected.incarnation) throw new Error('Configuration policy owner changed');
           const next = { ...row, fileIdentity: identity };

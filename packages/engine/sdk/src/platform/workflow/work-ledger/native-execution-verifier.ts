@@ -3,6 +3,7 @@ import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, realpat
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import { hashState, recordedJudgmentInputHash, readYesNo, type YesNoBand, type DecisionLog, type EntryType, type JudgmentPort } from '@goodvibes-jev/judgment';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { captureOwnedJson } from '../../gate/judgment-input.js';
 import { assertDurableCheckpoint, parseDurableAdmission } from '../../contract/durable-admission.js';
 import { assertNativeContractSource, nativeContractSourceForAdmission } from '../../contract/native-source.js';
@@ -19,7 +20,7 @@ import { QUALITY_ITEMS, type ContractUnit, type ContractView } from '../../contr
 import type { ContractRunner } from '../../contract/runner.js';
 import type { ReadAccessFilter } from '../../tools/shared/read-access.js';
 import { emptyWorkItemUsage } from '../../orchestration/types.js';
-import { parseNativeWorkExecutionRecord, type NativeWorkExecutionRecord } from './native-execution-types.js';
+import { NativeWorkExecutionError, parseNativeWorkExecutionRecord, type NativeWorkExecutionRecord } from './native-execution-types.js';
 import type { WorkEvidenceReference } from './types.js';
 import { assertNativeRecordedDecision } from './native-recorded-decision.js';
 import { nativeJudgeBatches, nativeQuestionBatches } from './native-judge-proof.js';
@@ -29,6 +30,9 @@ export type { NativeWorkAttestation } from './native-settlement-types.js';
 function freeze<T>(value: T): T {
   if (value !== null && typeof value === 'object') { for (const child of Object.values(value)) freeze(child); Object.freeze(value); }
   return value;
+}
+function assertSynchronousGuard(result: unknown): void {
+  if (result !== undefined) { drainOwned(result); throw new NativeWorkExecutionError('invalid'); }
 }
 function contained(root: string, path: string): string {
   if (isAbsolute(path)) throw new Error('Native artifact path must be relative');
@@ -121,7 +125,7 @@ export async function verifyNativeWorkExecution(options: {
   if (!record.receipt || record.state !== 'launch-claimed') throw new Error('Native execution has no claimed durable receipt');
   const admission = parseDurableAdmission({ ...record.receipt, input: record.request.input }, record.request);
   const source = record.request.input.nativeSource!;
-  const current = () => { options.signal.throwIfAborted(); options.assertCurrent(); options.signal.throwIfAborted(); };
+  const current = () => { options.signal.throwIfAborted(); assertSynchronousGuard(options.assertCurrent()); options.signal.throwIfAborted(); };
   current(); await options.runner.join(admission.contractId); current();
   const raw = options.runner.get(admission.contractId);
   if (!raw) throw new Error('Native runner checkpoint is unavailable');
@@ -345,7 +349,7 @@ export async function verifyNativeWorkExecution(options: {
   const pending = new Set<Promise<unknown>>();
   const checkPort: JudgmentPort = { ...options.port, ask(request) {
     const operation = Promise.resolve().then(async () => {
-      const active = () => { checkSignal.throwIfAborted(); assertCurrent(); request.signal?.throwIfAborted(); request.beforeAttempt?.(); assertCurrent(); checkSignal.throwIfAborted(); };
+      const active = () => { checkSignal.throwIfAborted(); assertCurrent(); request.signal?.throwIfAborted(); assertSynchronousGuard(request.beforeAttempt?.()); assertCurrent(); checkSignal.throwIfAborted(); };
       const state = freeze(structuredClone({ ...(request.state as Record<string, EntryType>), originalSource })) as unknown as EntryType;
       const questions = freeze(structuredClone(request.questions));
       const site = request.context?.site;

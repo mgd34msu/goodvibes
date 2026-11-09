@@ -477,6 +477,22 @@ test('saved target counters must match the original independently recorded nativ
   expect(f.storage.current(f.key).ledger.revision).toBe(2); expect(f.storage.current(f.key).settlement).toBeNull();
 });
 
+// Regression source UNRUN during the coding-first pass.
+for (const kind of ['async', 'nonvoid'] as const) test(`standalone native verification refuses a ${kind} owner guard before new readings or publication`, async () => {
+  const f = await fixture(), started = await f.host.start(f.target, f.authority);
+  await completed(f.harness, started.admission.contractId);
+  const execution = f.storage.current(f.key).record!;
+  const before = f.log.query({ site: 'contract.check.unit-judge', limit: 100 }).map(entry => entry.id);
+  await expect(verifyNativeWorkExecution({ execution, runner: f.harness.runner, port: f.hostOptions.port,
+    decisionLog: f.log, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true,
+    signal: new AbortController().signal, assertCurrent: kind === 'async'
+      ? async () => { throw new Error('synthetic rejected asynchronous owner'); }
+      : () => false,
+  })).rejects.toMatchObject({ code: 'invalid' });
+  expect(f.log.query({ site: 'contract.check.unit-judge', limit: 100 }).map(entry => entry.id)).toEqual(before);
+  expect(f.storage.current(f.key).ledger.revision).toBe(2); expect(f.storage.current(f.key).settlement).toBeNull();
+});
+
 for (const mutation of ['revise', 'handoff', 'cancel', 'scope'] as const) test(`${mutation} during verification prevents late evidence without replaying the runner`, async () => {
   let entered!: () => void; const ready = new Promise<void>(resolve => { entered = resolve; });
   let release!: () => void; const hold = new Promise<void>(resolve => { release = resolve; });

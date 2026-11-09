@@ -62,6 +62,9 @@ import { DaemonApprovalStore } from '../sdk/src/platform/payments/host/approval-
 import { DaemonCardStore, type PaymentsSecretStore } from '../sdk/src/platform/payments/host/card-store.js';
 import { DaemonPurchaseLedger } from '../sdk/src/platform/payments/host/purchase-ledger.js';
 import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/operation-store.js';
+import { ProtectedPaymentRequests } from '../sdk/src/platform/payments/host/protected-requests.js';
+import { PairingTokenManager } from '../sdk/src/platform/pairing/pairing-token-store.js';
+import { readPaymentWindowStatus } from '../sdk/src/platform/payments/browser.js';
 import {
   ATTACHED_PAYMENTS_METHOD_IDS,
   UNATTACHED_PAYMENTS_METHOD_IDS,
@@ -115,7 +118,9 @@ interface ComposedPayments {
   readonly storePath: string;
   /** Answers the way a listening daemon's route table does, through the engine's own dispatcher. */
   fetch(path: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<Response>;
-  stop(): void;
+  /** WS-only owner acts also use real authenticated dispatch. */
+  invoke(methodId: string, body: Record<string, unknown>, explicitUserRequest: boolean): Promise<Response>;
+  stop(): Promise<void>;
 }
 
 async function composePayments(input: {
@@ -158,12 +163,15 @@ async function composePayments(input: {
       approvals: new DaemonApprovalStore(join(input.root, 'payments-approvals.json')),
       journal: new MemoryCheckoutJournal(),
       operations: new DurablePaymentOperations(join(input.root, 'operations')),
+      requests: new ProtectedPaymentRequests(join(input.root, 'requests')),
     },
   });
   await registration.ready;
 
-  // Authenticate the same operator token used by both transport fixtures.
-  const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, authToken: () => 'test-operator-token' } as unknown as DaemonControlPlaneContext);
+  const pairing = new PairingTokenManager(join(input.root, 'pairing.json'));
+  const paired = pairing.mint({ name: 'Synthetic gateway payment owner' });
+  const helper = new DaemonControlPlaneHelper({ gatewayMethods: catalog, pairingTokens: pairing, authToken: () => 'test-operator-token',
+    userAuth: { validateSession: () => null } } as unknown as DaemonControlPlaneContext);
 
   const routeFetch: ComposedPayments['fetch'] = async (path, init = {}) => {
     const url = new URL(path, 'http://daemon.local');
@@ -180,16 +188,14 @@ async function composePayments(input: {
       const query: Record<string, unknown> = Object.fromEntries(url.searchParams.entries());
       names.forEach((name, index) => { query[name] = decodeURIComponent(matched[index + 1]!); });
       const headers = init.headers ?? {};
+      const token = headers['authorization'] === 'Bearer test-operator-token' ? 'test-operator-token' : paired.token;
       const result = await helper.invokeGatewayMethodCall({
-        authToken: 'test-operator-token',
+        authToken: token,
         methodId: descriptor.id,
         query,
         body: init.body === undefined ? undefined : JSON.parse(init.body) as unknown,
         context: {
-          principalId: 'shared-token',
-          principalKind: 'token',
-          admin: true,
-          scopes: ['read:payments', 'write:payments'],
+          ...helper.describeAuthenticatedPrincipal(token),
           explicitUserRequest: headers['x-goodvibes-explicit-user-request'] === 'true' ? true : undefined,
         },
       });
@@ -198,7 +204,12 @@ async function composePayments(input: {
     return new Response(JSON.stringify({ error: `No route for ${method} ${url.pathname}` }), { status: 404 });
   };
 
-  return { catalog, settings, storePath, fetch: routeFetch, stop: registration.unregister };
+  return { catalog, settings, storePath, fetch: routeFetch, stop: registration.close,
+    async invoke(methodId, body, explicitUserRequest) {
+      const result = await helper.invokeGatewayMethodCall({ methodId, body, authToken: paired.token,
+        context: { ...helper.describeAuthenticatedPrincipal(paired.token), explicitUserRequest } });
+      return Response.json(result.body, { status: result.status });
+    } };
 }
 
 let fixture: ComposedPayments;
@@ -223,8 +234,8 @@ beforeAll(async () => {
   });
 });
 
-afterAll(() => {
-  fixture?.stop();
+afterAll(async () => {
+  await fixture?.stop();
 });
 
 /** Read a JSON response, keeping the raw text so a body can be searched for a sentinel. */
@@ -262,6 +273,7 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
     const response = await readJson(await fixture.fetch('/api/payments/checkout/begin', {
       method: 'POST',
       body: JSON.stringify({
+        requestId: 'wire-automated',
         sessionId: 'session-that-does-not-exist',
         pageId: 'page-that-does-not-exist',
         merchantDomain: 'example.invalid',
@@ -275,12 +287,9 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
         placeOrderTarget: 'e9',
       }),
     }));
-    // The verb is invokable now (200, not 501): the refusal is the flow's own
-    // honest "not asked for by you directly", the same shape every other
-    // checkPaymentGates refusal takes, not a NOT_INVOKABLE facade.
-    expect(response.status, `answered ${String(response.status)}: ${response.text}`).toBe(200);
-    expect(response.body['outcome']).toBe('refused:not-owner-request');
-    expect(String(response.body['reason'])).toContain('not asked for by you directly');
+    expect(response.status, `answered ${String(response.status)}: ${response.text}`).toBe(403);
+    expect(response.body['code']).toBe('FORBIDDEN');
+    expect(String(response.body['error'])).toContain('explicit request');
   });
 
   test('checkout.begin with owner authority but no approval on file refuses over the wire, naming the approve verb', async () => {
@@ -292,6 +301,7 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
       method: 'POST',
       headers: { 'x-goodvibes-explicit-user-request': 'true' },
       body: JSON.stringify({
+        requestId: 'wire-without-approval',
         sessionId: 'session-that-does-not-exist',
         pageId: 'page-that-does-not-exist',
         merchantDomain: 'example.invalid',
@@ -311,27 +321,35 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
     expect(String(response.body['error'] ?? response.text)).toContain('payments.checkout.approve');
   });
 
-  test('checkout.approve then begin: the approval is spent and begin refuses on the honest next gate', async () => {
+  test('a shared token and explicit-owner header cannot substitute for a paired checkout owner', async () => {
+    const response = await readJson(await fixture.fetch('/api/payments/checkout/begin', {
+      method: 'POST', headers: { 'authorization': 'Bearer test-operator-token', 'x-goodvibes-explicit-user-request': 'true' },
+      body: JSON.stringify({ requestId: 'wire-shared-owner', sessionId: 'missing-session', pageId: 'missing-page',
+        merchantDomain: 'example.invalid', checkoutUrl: 'https://example.invalid/checkout', item: 'nothing at all', cardId: 'missing-card',
+        requestedLines: [{ label: 'nothing at all', quantity: 1 }], lines: [{ label: 'nothing at all', quantity: '1', unitPrice: '1.00' }],
+        shippingOptions: [{ label: 'standard', cost: '0.00' }], cardFields: [{ field: 'number', ref: 'e1' }], placeOrderTarget: 'e9' }),
+    }));
+    expect(response.status).toBe(403); expect(response.body['code']).toBe('FORBIDDEN');
+    expect(String(response.body['error'])).toContain('paired administrative owner');
+  });
+
+  test('checkout.approve then begin: admission acknowledges and durable status records the later gate refusal', async () => {
     // The approve verb is ws-only (no REST binding, see register.ts's
     // CHECKOUT_APPROVE_DESCRIPTOR), so it is minted through the same catalog
     // dispatch the ws methodId arm uses (control-plane.ts invokes
     // gatewayMethods.invoke for handler-backed verbs), against the LIVE
     // composition's persisted store under this fixture's root.
-    const approved = await fixture.catalog.invoke('payments.checkout.approve', {
-      body: { confirm: true, merchantDomain: 'example.invalid', item: 'nothing at all', amount: '20.00' },
-      context: { principalId: 'shared-token', metadata: { explicitUserRequest: true } },
-    } as never) as Record<string, unknown>;
-    expect(approved['approved']).toBe(true);
+    const approved = await readJson(await fixture.invoke('payments.checkout.approve', {
+      confirm: true, merchantDomain: 'example.invalid', item: 'nothing at all', amount: '20.00',
+    }, true));
+    expect(approved.status).toBe(200); expect(approved.body['approved']).toBe(true);
 
-    // Owner-direct with the approval on file: past the approval gate, and
-    // refused on the honest next gate. No card and no address are configured
-    // on this fixture, so `checkPaymentGates` refuses on `no-card` (or, if
-    // the fixture ever gains a default card first, `no-shipping-address`);
-    // either way, never the approval and never `not-owner-request`.
+    // The caller receives durable acceptance before card/address preflight.
     const response = await readJson(await fixture.fetch('/api/payments/checkout/begin', {
       method: 'POST',
       headers: { 'x-goodvibes-explicit-user-request': 'true' },
       body: JSON.stringify({
+        requestId: 'wire-approved-missing-card',
         sessionId: 'session-that-does-not-exist',
         pageId: 'page-that-does-not-exist',
         merchantDomain: 'example.invalid',
@@ -347,8 +365,17 @@ describe('payments.* is attached to this daemon, not a cataloged 501 facade', ()
       }),
     }));
     expect(response.status, `answered ${String(response.status)}: ${response.text}`).toBe(200);
-    expect(String(response.body['outcome'])).toStartWith('refused:');
-    expect(response.body['outcome']).not.toBe('refused:not-owner-request');
+    expect(response.body['outcome']).toBe('accepted');
+    expect(response.body['purchaseId']).toBe('wire-approved-missing-card');
+    const deadline = Date.now() + 2000;
+    for (;;) {
+      const status = await readJson(await fixture.fetch('/api/payments/purchase/status?purchaseId=wire-approved-missing-card'));
+      expect(status.status).toBe(200);
+      const operation = readPaymentWindowStatus(status.body).operations[0];
+      if (operation?.state === 'refused') { expect(operation.outcome).toBe('refused:no-card'); break; }
+      if (Date.now() >= deadline) throw new Error('The detached wire fixture did not record its later refusal');
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
   });
 
   test('checkout.fillCard refuses honestly for a session and page that do not exist', async () => {
@@ -426,7 +453,7 @@ describe('payments.* over the live HTTP routes', () => {
       expect(response.status).toBe(200);
       expect(response.body['isPaymentsLeader']).toBe(false);
     } finally {
-      clustered.stop();
+      await clustered.stop();
     }
   });
 
@@ -593,7 +620,7 @@ describe('the card survives the daemon that stored it', () => {
       // process's, so a restart does not strand the card as unusable.
       expect(found!['materialComplete']).toBe(true);
     } finally {
-      restarted.stop();
+      await restarted.stop();
       await fixture.fetch(`/api/payments/cards/${id}`, { method: 'DELETE' });
     }
   });

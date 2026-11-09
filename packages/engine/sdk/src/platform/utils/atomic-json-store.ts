@@ -56,12 +56,14 @@
  *
  *   2. {@link readJsonFileOrQuarantine}, a file this reader cannot trust
  *      (unparseable JSON, a torn or zero-tailed write, the wrong shape) is
- *      moved aside to `<name>.corrupt-<ISO>-<8char>` with a sibling `.why`
+ *      exclusively linked to `<name>.corrupt-<ISO>-<8char>` with a sibling `.why`
  *      receipt, logged loudly at error level, and reported to the caller as
  *      the ordinary "absent" answer (`null`) so the caller rebuilds instead of
  *      crashing. The original file is never deleted and never overwritten,
- *      only renamed, so the evidence survives for inspection. Quarantine
- *      files are bounded at {@link CORRUPT_QUARANTINE_MAX_FILES} per store,
+ *      unlinked from its old name only after its original inode is archived.
+ *      The private `.why` receipt binds native file observations, not a digest
+ *      or authentication claim. Unknown historical recovery paths remain intact.
+ *      Physically owned archive/receipt pairs are bounded at {@link CORRUPT_QUARANTINE_MAX_FILES} per store,
  *      oldest reaped first, and the reap is disclosed in the newest receipt.
  */
 import {
@@ -73,10 +75,12 @@ import {
   fstatSync,
   fsyncSync,
   lstatSync,
+  linkSync,
   mkdirSync,
   openSync,
   readdirSync,
   readFileSync,
+  readFile,
   readlinkSync,
   realpathSync,
   renameSync,
@@ -569,104 +573,231 @@ export interface QuarantineLoadOptions<T> {
   readonly recovery: string;
 }
 
-/**
- * Read and parse a JSON store file, never throwing on corrupt content.
- *
- * Returns `null` both when the file does not exist and when it existed but
- * could not be trusted, in the latter case the file is quarantined first (see
- * the module docstring). Callers treat `null` as "no store yet" and rebuild.
- *
- * A read failure (permissions, the file vanishing between the exists check and
- * the read) is deliberately NOT caught: there is no content to move aside, so
- * quarantine has nothing to do and the error propagates to the caller.
+/** Original read source. Closing releases the descriptor and raw bytes; the
+ * immutable path observation can still restrict a later synchronous write.
+ * A closed/copy/parsed object cannot be used to move a file into quarantine.
  */
+export class QuarantineEncodingError extends Error { override readonly name = 'QuarantineEncodingError'; constructor() { super('Original store source is not valid UTF-8.'); } }
+export interface QuarantineSource {
+  read(): string;
+  assertCurrent(): void;
+  close(): void;
+}
+interface NativeQuarantineSource {
+  readonly selected: string; readonly path: string; readonly parent: AtomicDirectoryOwner;
+  readonly fd: number; readonly original: BigIntStats;
+  bytes: Buffer | undefined; closed: boolean; consumed: boolean; pendingReads: number; fdClosed: boolean; readFailed: boolean;
+}
+const sourceStates = new WeakMap<QuarantineSource, NativeQuarantineSource>();
+const nativeQuarantineThen = Promise.prototype.then;
+const nativeQuarantineApply = Reflect.apply, nativeSourceGet = WeakMap.prototype.get, nativeSourceSet = WeakMap.prototype.set;
+const sameQuarantineFile = (a: BigIntStats, b: BigIntStats) => a.dev === b.dev && a.ino === b.ino && a.uid === b.uid && a.gid === b.gid && a.birthtimeNs === b.birthtimeNs;
+const absoluteQuarantinePath = (path: string) => isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`;
+function quarantineUnavailable(): never { throw new Error('Original store or recovery ownership is unavailable; existing files were preserved.'); }
+function invokeQuarantineCallback(callback: (() => void) | undefined): void {
+  const result: unknown = callback?.();
+  if (result !== undefined) { if (nodeTypes.isPromise(result)) nativeQuarantineApply(nativeQuarantineThen, result, [undefined, () => {}]); quarantineUnavailable(); }
+}
+function originalQuarantineSource(source: QuarantineSource): NativeQuarantineSource {
+  const original = nativeQuarantineApply(nativeSourceGet, sourceStates, [source]) as NativeQuarantineSource | undefined;
+  if (!original || original.closed || original.consumed) quarantineUnavailable(); return original;
+}
+export function captureQuarantineSource(filePath: string): QuarantineSource | null {
+  const selected = absoluteQuarantinePath(filePath);
+  if (!lstatSync(selected, { throwIfNoEntry: false })) return null;
+  const parent = captureExistingDirectory(dirname(selected)), path = join(parent.canonical, basename(selected));
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  let accepted = false;
+  try {
+    const original = fstatSync(fd, { bigint: true });
+    if (!original.isFile() || original.nlink !== 1n || (process.geteuid && original.uid !== BigInt(process.geteuid()))) quarantineUnavailable();
+    const state: NativeQuarantineSource = { selected, path, parent, fd, original, bytes: undefined, closed: false, consumed: false, pendingReads: 0, fdClosed: false, readFailed: false };
+    const current = () => {
+      parent.assertCurrent(); if (state.consumed || atomicFileStamp(lstatSync(path, { bigint: true })) !== atomicFileStamp(original)
+        || ((!state.closed || state.pendingReads > 0) && atomicFileStamp(fstatSync(fd, { bigint: true })) !== atomicFileStamp(original))) quarantineUnavailable();
+    };
+    current();
+    const source = Object.freeze({ read() { current(); if (state.closed || state.readFailed || state.pendingReads > 0) quarantineUnavailable(); if (!state.bytes) { try { state.bytes = readFileSync(fd); } catch (error) { state.readFailed = true; throw error; } current(); } try { return new TextDecoder('utf8', { fatal: true }).decode(state.bytes); } catch { throw new QuarantineEncodingError(); } }, assertCurrent: current,
+      close() { if (state.closed) return; state.closed = true; state.bytes = undefined; if (state.pendingReads === 0) { state.fdClosed = true; closeSync(fd); } } });
+    nativeQuarantineApply(nativeSourceSet, sourceStates, [source, state]); accepted = true; return source;
+  } finally { if (!accepted) closeSync(fd); }
+}
+/** Verify the genuine original source/path before lending its private bytes. */
+export function readCapturedQuarantineSource(filePath: string, source: QuarantineSource): string {
+  const original = originalQuarantineSource(source); if (original.selected !== absoluteQuarantinePath(filePath)) quarantineUnavailable();
+  source.assertCurrent(); return source.read();
+}
+/** Async read of the same retained original descriptor. Close requests cancel
+ * publication but never release/reuse the descriptor before native read drains.
+ */
+export async function readCapturedQuarantineSourceAsync(filePath: string, source: QuarantineSource): Promise<string> {
+  const original = originalQuarantineSource(source);
+  if (original.selected !== absoluteQuarantinePath(filePath) || original.readFailed || original.pendingReads > 0) quarantineUnavailable();
+  source.assertCurrent(); if (original.bytes) return source.read();
+  original.pendingReads++;
+  try {
+    const bytes = await new Promise<Buffer>((resolve, reject) => { readFile(original.fd, (error, data) => { if (error) { original.readFailed = true; reject(error); } else resolve(data); }); });
+    source.assertCurrent(); if (original.closed) quarantineUnavailable(); original.bytes = bytes;
+    try { return new TextDecoder('utf8', { fatal: true }).decode(bytes); } catch { throw new QuarantineEncodingError(); }
+  } finally {
+    original.pendingReads--; if (original.closed) { original.bytes = undefined; if (!original.fdClosed && original.pendingReads === 0) { original.fdClosed = true; closeSync(original.fd); } }
+  }
+}
+/** Invalid parsed contents are preserved before returning null. Original-read
+ * failures and stale source observations propagate without moving a new file. */
 export function readJsonFileOrQuarantine<T>(filePath: string, options: QuarantineLoadOptions<T>): T | null {
-  if (!existsSync(filePath)) return null;
-
-  const raw = readFileSync(filePath, 'utf-8');
-
+  const label = options.label, recovery = options.recovery, validate = options.validate.bind(options);
+  const source = captureQuarantineSource(filePath); if (!source) return null;
   try {
-    return options.validate(JSON.parse(raw) as unknown);
-  } catch (error) {
-    quarantineCorruptFile(filePath, {
-      label: options.label,
-      reason: error instanceof Error ? error.message : String(error),
-      recovery: options.recovery,
-    });
-    return null;
-  }
+    let raw: string;
+    try { raw = source.read(); } catch (error) { if (!(error instanceof QuarantineEncodingError)) throw error; source.assertCurrent(); quarantineCorruptFile(filePath, { source, label, reason: 'store source is not valid UTF-8', recovery }); return null; }
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw) as unknown; }
+    catch { source.assertCurrent(); quarantineCorruptFile(filePath, { source, label, reason: 'store JSON could not be parsed', recovery }); return null; }
+    let result: T;
+    try { result = validate(parsed); }
+    catch { source.assertCurrent(); quarantineCorruptFile(filePath, { source, label, reason: 'store shape validation failed', recovery }); return null; }
+    if (nodeTypes.isPromise(result)) { nativeQuarantineApply(nativeQuarantineThen, result, [undefined, () => {}]); throw new TypeError('Store validation must complete synchronously.'); }
+    source.assertCurrent(); return result;
+  } finally { source.close(); }
 }
-
 export interface QuarantineOptions {
-  /** Short store name, e.g. `'config/secrets'`. */
   readonly label: string;
-  /** Why the file could not be trusted. */
+  /** Explicit host reason; native parse/validation callers use value-free text. */
   readonly reason: string;
-  /** What happens now that the file is gone, for the `.why` receipt. */
   readonly recovery: string;
+  /** Actual source retained before reading/parsing, never captured in a catch. */
+  readonly source?: QuarantineSource | undefined;
+  readonly assertCurrent?: (() => void) | undefined;
+  readonly onEffect?: ((published?: boolean) => void) | undefined;
+  readonly maxFiles?: number | undefined;
+  readonly maximumAgeMs?: number | undefined;
+  readonly now?: number | undefined;
+}
+export interface QuarantineOutcome { readonly quarantinePath: string; readonly reaped: number; readonly preservedUnknown: number }
+interface QuarantineReceipt {
+  readonly schema: 1; readonly role: 'goodvibes-owned-quarantine'; readonly source: string; readonly archive: string;
+  readonly createdAt: number; readonly physical: string; readonly explanation: string;
+}
+const MAX_QUARANTINE_RECORDS = 2048;
+function receiptDocument(value: unknown, base: string, name: string): QuarantineReceipt | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const row = value as Record<string, unknown>;
+  return Object.keys(row).length === 7 && row['schema'] === 1 && row['role'] === 'goodvibes-owned-quarantine' && row['source'] === base && row['archive'] === name
+    && typeof row['createdAt'] === 'number' && Number.isSafeInteger(row['createdAt']) && row['createdAt'] >= 0
+    && typeof row['physical'] === 'string' && typeof row['explanation'] === 'string' ? row as unknown as QuarantineReceipt : null;
+}
+/** A receipt is local retention metadata, never authentication against another
+ * same-user writer. Full original native facts fence both sides of deletion.
+ */
+export function reapOwnedQuarantines(filePath: string, options: { readonly maxFiles?: number | undefined; readonly maximumAgeMs?: number | undefined; readonly now?: number | undefined; readonly assertCurrent?: (() => void) | undefined; readonly onEffect?: ((published?: boolean) => void) | undefined; readonly currentName?: string | undefined } = {}): { readonly reaped: number; readonly preservedUnknown: number } {
+  const guard = options.assertCurrent?.bind(options), effect = options.onEffect?.bind(options), now = options.now ?? Date.now(), cap = options.maxFiles ?? CORRUPT_QUARANTINE_MAX_FILES, age = options.maximumAgeMs, currentName = options.currentName;
+  if (!Number.isSafeInteger(cap) || cap < 0 || !Number.isFinite(now) || (age !== undefined && (!Number.isFinite(age) || age < 0))) quarantineUnavailable();
+  const absolute = absoluteQuarantinePath(filePath), dir = dirname(absolute), base = basename(absolute), prefix = `${base}.corrupt-`;
+  if (!lstatSync(dir, { throwIfNoEntry: false })) return { reaped: 0, preservedUnknown: 0 };
+  const parent = captureExistingDirectory(dir), current = () => { invokeQuarantineCallback(guard); parent.assertCurrent(); };
+  current(); const names = readdirSync(parent.canonical).filter(name => name.startsWith(prefix)), nameSet = new Set(names);
+  if (names.length > MAX_QUARANTINE_RECORDS * 2) quarantineUnavailable();
+  const rows: Array<{ name: string; path: string; why: string; dataPhysical: string; receiptPhysical: string; createdAt: number }> = [];
+  let preservedUnknown = 0, reaped = 0;
+  for (const name of names.filter(name => !name.endsWith('.why'))) {
+    current(); const path = join(parent.canonical, name), why = `${path}.why`; let data: QuarantineSource | null = null, receipt: QuarantineSource | null = null;
+    try {
+      data = captureQuarantineSource(path); receipt = captureQuarantineSource(why); if (!data || !receipt) { preservedUnknown++; continue; }
+      const native = originalQuarantineSource(data), originalReceipt = originalQuarantineSource(receipt);
+      if (originalReceipt.original.size > 65536n) { preservedUnknown++; continue; }
+      const record = receiptDocument(JSON.parse(receipt.read()) as unknown, base, name);
+      if (!record || atomicFileStamp(native.original) !== record.physical || (native.original.mode & 0o777n) !== 0o600n || (originalReceipt.original.mode & 0o777n) !== 0o600n) { preservedUnknown++; continue; }
+      data.assertCurrent(); receipt.assertCurrent(); rows.push({ name, path, why, dataPhysical: atomicFileStamp(native.original), receiptPhysical: atomicFileStamp(originalReceipt.original), createdAt: record.createdAt });
+    } catch { preservedUnknown++; } finally { try { data?.close(); } finally { receipt?.close(); } }
+  }
+  // Unknown orphan .why paths are preserved too; no name-only unlink.
+  preservedUnknown += names.filter(name => name.endsWith('.why') && !nameSet.has(name.slice(0, -4))).length;
+  rows.sort((a, b) => b.createdAt - a.createdAt || b.name.localeCompare(a.name));
+  const retained = currentName ? rows.filter(row => row.name === currentName).concat(rows.filter(row => row.name !== currentName)) : rows;
+  for (let index = 0; index < retained.length; index++) {
+    const row = retained[index]!;
+    if (row.name === currentName || (index < cap && (age === undefined || now - row.createdAt <= age))) continue;
+    current(); let data: QuarantineSource | null = null, receipt: QuarantineSource | null = null;
+    try {
+      data = captureQuarantineSource(row.path); receipt = captureQuarantineSource(row.why);
+      if (!data || !receipt) { if (data || receipt) preservedUnknown++; continue; }
+      if (atomicFileStamp(originalQuarantineSource(data).original) !== row.dataPhysical || atomicFileStamp(originalQuarantineSource(receipt).original) !== row.receiptPhysical) { preservedUnknown++; continue; }
+      current(); data.assertCurrent(); receipt.assertCurrent();
+      try { unlinkSync(row.path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
+      logger.warn('[atomic-json-store] physically owned quarantine payload removed', { filePath, quarantinePath: row.path });
+      invokeQuarantineCallback(() => effect?.(false)); current(); receipt.assertCurrent();
+      unlinkSync(row.why); invokeQuarantineCallback(() => effect?.(false)); reaped++;
+    } finally { try { data?.close(); } finally { receipt?.close(); } }
+  }
+  current(); return { reaped, preservedUnknown };
 }
 
-/**
- * Move a corrupt store file aside, write a `.why` receipt beside it, log the
- * event loudly, and reap old quarantine files past the bound.
- *
- * Exported for stores that parse in stages and decide for themselves which
- * stage counts as container corruption (`config/secrets.ts` quarantines an
- * unreadable JSON envelope but must never quarantine a decrypt failure, which
- * means the file is intact and the key is wrong).
+/** Preserve the exact already-read file with exclusive link publication. A
+ * failed recovery never reports absent and lets callers overwrite a survivor.
  */
-export function quarantineCorruptFile(filePath: string, options: QuarantineOptions): void {
-  const { label, reason, recovery } = options;
-  const dir = dirname(filePath);
-  const base = basename(filePath);
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const quarantinePath = join(dir, `${base}.corrupt-${timestamp}-${randomUUID().slice(0, 8)}`);
-  const whyPath = `${quarantinePath}.why`;
-
-  let moved = false;
+export function quarantineCorruptFile(filePath: string, options: QuarantineOptions): QuarantineOutcome {
+  const label = options.label, reason = options.reason, recovery = options.recovery;
+  const guard = options.assertCurrent?.bind(options), effect = options.onEffect?.bind(options);
+  const maxFiles = options.maxFiles ?? CORRUPT_QUARANTINE_MAX_FILES, maximumAgeMs = options.maximumAgeMs, now = options.now ?? Date.now();
+  if (!Number.isSafeInteger(maxFiles) || maxFiles < 1 || !Number.isSafeInteger(now) || now < 0) quarantineUnavailable();
+  const borrowed = options.source, source = borrowed ?? captureQuarantineSource(filePath); if (!source) quarantineUnavailable();
+  const native = originalQuarantineSource(source);
+  if (native.selected !== absoluteQuarantinePath(filePath)) quarantineUnavailable();
+  const current = () => { invokeQuarantineCallback(guard); source.assertCurrent(); };
+  let archiveLinked = false;
+  let archive: string | undefined, whyFd: number | undefined, whyOriginal: BigIntStats | undefined, why: string | undefined;
   try {
-    renameSync(filePath, quarantinePath);
-    moved = true;
-  } catch (renameError) {
-    logger.error(`[${label}] could not move a corrupt store file aside; leaving it in place`, {
-      filePath,
-      reason,
-      renameError: renameError instanceof Error ? renameError.message : String(renameError),
-    });
-  }
-
-  // The just-quarantined file is excluded from reaping by name: its .why is
-  // written only after the reap, so on a filesystem with coarse mtimes an
-  // all-tie sort could otherwise pick it as the "oldest" victim and leave the
-  // receipt written below orphaned, the exact failure a matrix runner caught.
-  const reapResult = moved
-    ? reapCorruptQuarantineFiles(dir, base, basename(quarantinePath))
-    : { scanned: 0, reaped: 0 };
-
-  if (moved) {
-    const whyLines = [
-      `The ${label} store file at ${filePath} failed to load: ${reason}.`,
-      `The corrupt file was moved to ${basename(quarantinePath)} for inspection and is never parsed again.`,
-      recovery,
-      reapResult.reaped > 0
-        ? `${reapResult.reaped} older quarantined file(s) beyond the ${CORRUPT_QUARANTINE_MAX_FILES}-file bound were deleted (oldest first) to keep this quarantine from growing without limit.`
-        : null,
-    ].filter((line): line is string => line !== null);
-    try {
-      writeFileSync(whyPath, `${whyLines.join('\n')}\n`, 'utf-8');
-    } catch (whyError) {
-      logger.error(`[${label}] could not write the .why receipt beside a quarantined store file`, {
-        whyPath,
-        whyError: whyError instanceof Error ? whyError.message : String(whyError),
-      });
+    current();
+    const reaped = reapOwnedQuarantines(filePath, { maxFiles: maxFiles - 1, ...(maximumAgeMs === undefined ? {} : { maximumAgeMs }), now, assertCurrent: current, onEffect: effect }); current();
+    const dir = native.parent.canonical, base = basename(native.path), timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    if (readdirSync(dir).filter(name => name.startsWith(`${base}.corrupt-`)).length >= MAX_QUARANTINE_RECORDS * 2) quarantineUnavailable();
+    archive = join(dir, `${base}.corrupt-${timestamp}-${randomUUID().slice(0, 8)}`); why = `${archive}.why`;
+    // Refuse a collision on either member before changing the source. Native
+    // open/link exclusivity also protects a collision after this observation.
+    if (lstatSync(archive, { throwIfNoEntry: false }) || lstatSync(why, { throwIfNoEntry: false })) quarantineUnavailable();
+    whyFd = openSync(why, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600); whyOriginal = fstatSync(whyFd, { bigint: true }); fchmodSync(whyFd, 0o600);
+    const emptyReceipt = atomicFileStamp(fstatSync(whyFd, { bigint: true }));
+    invokeQuarantineCallback(() => effect?.(false)); current();
+    if (atomicFileStamp(fstatSync(whyFd, { bigint: true })) !== emptyReceipt || atomicFileStamp(lstatSync(why, { bigint: true })) !== emptyReceipt) quarantineUnavailable();
+    linkSync(native.path, archive); archiveLinked = true;
+    let linked = fstatSync(native.fd, { bigint: true });
+    if (!sameQuarantineFile(linked, native.original) || linked.nlink !== 2n || linked.size !== native.original.size || linked.mtimeNs !== native.original.mtimeNs
+      || atomicFileStamp(lstatSync(archive, { bigint: true })) !== atomicFileStamp(linked) || atomicFileStamp(lstatSync(native.path, { bigint: true })) !== atomicFileStamp(linked)) quarantineUnavailable();
+    // Only our exact original source is removed; the archive already names it.
+    native.parent.assertCurrent(); if (atomicFileStamp(lstatSync(native.path, { bigint: true })) !== atomicFileStamp(linked)) quarantineUnavailable(); unlinkSync(native.path); native.consumed = true;
+    fchmodSync(native.fd, 0o600); linked = fstatSync(native.fd, { bigint: true });
+    const archived = atomicFileStamp(linked);
+    const archiveCurrent = () => { invokeQuarantineCallback(guard); native.parent.assertCurrent(); if (atomicFileStamp(fstatSync(native.fd, { bigint: true })) !== archived || atomicFileStamp(lstatSync(archive!, { bigint: true })) !== archived) quarantineUnavailable(); };
+    invokeQuarantineCallback(() => effect?.(true)); archiveCurrent(); confirmFileDurable(archive); archiveCurrent();
+    const explanation = `The ${label} store file failed to load: ${reason}.\nThe corrupt file was preserved as ${basename(archive)}.\n${recovery}${reaped.reaped > 0 ? `\n${reaped.reaped} older physically owned quarantine pair(s) were deleted under the ${maxFiles}-file retention bound.` : ''}${reaped.preservedUnknown > 0 ? `\n${reaped.preservedUnknown} unverified historical recovery path(s) were preserved for inspection.` : ''}`;
+    const record: QuarantineReceipt = { schema: 1, role: 'goodvibes-owned-quarantine', source: base, archive: basename(archive), createdAt: now, physical: archived, explanation };
+    writeFileSync(whyFd, `${JSON.stringify(record, null, 2)}\n`); fsyncSync(whyFd);
+    const receiptStamp = atomicFileStamp(fstatSync(whyFd, { bigint: true }));
+    archiveCurrent(); if (atomicFileStamp(lstatSync(why, { bigint: true })) !== receiptStamp) quarantineUnavailable(); confirmFileDurable(why); archiveCurrent();
+    if (atomicFileStamp(lstatSync(why, { bigint: true })) !== receiptStamp) quarantineUnavailable();
+    if (reaped.reaped > 0) logger.warn(`[${label}] older physically owned quarantine pairs were deleted`, { filePath, reaped: reaped.reaped });
+    logger.error(`[${label}] store file was quarantined; ${recovery}`, { filePath, quarantinePath: archive, reaped: reaped.reaped, preservedUnknown: reaped.preservedUnknown });
+    return Object.freeze({ quarantinePath: archive, ...reaped });
+  } catch (error) {
+    // A visible archive is forensic evidence, even after an uncertain receipt or
+    // directory sync. No rollback removes it or restores over a new source.
+    throw error;
+  } finally {
+    if (archiveLinked && !native.consumed && archive) {
+      // Undo only our acknowledged extra link while the original source still
+      // exists as the same file. A lost source-removal acknowledgement retains
+      // the visible archive, never removes a replacement source or archive.
+      try { native.parent.assertCurrent(); const original = lstatSync(native.path, { bigint: true, throwIfNoEntry: false }), saved = lstatSync(archive, { bigint: true, throwIfNoEntry: false });
+        if (saved && sameQuarantineFile(saved, native.original)) {
+          if (original && sameQuarantineFile(original, native.original)) { unlinkSync(archive); invokeQuarantineCallback(() => effect?.(false)); }
+          else native.consumed = true;
+        }
+      } catch { /* Uncertain/retired native paths remain intact for recovery. */ }
     }
+    try { if (whyFd !== undefined) { try { if (!native.consumed && why && whyOriginal) { native.parent.assertCurrent(); const actual = lstatSync(why, { bigint: true, throwIfNoEntry: false }); if (actual && sameQuarantineFile(actual, whyOriginal)) unlinkSync(why); } } finally { closeSync(whyFd); } } }
+    finally { if (!borrowed) source.close(); }
   }
-
-  logger.error(`[${label}] store file was corrupt and has been quarantined; ${recovery}, ${reason}`, {
-    filePath,
-    quarantinePath: moved ? quarantinePath : undefined,
-    reaped: reapResult.reaped,
-  });
 }
 
 /** Reclaim only an aged, recognized native temp whose recorded writer is
@@ -728,83 +859,4 @@ function cleanupStaleTempFiles(dir: string, filePath: string, assertCurrent: () 
   let names: string[]; try { names = readdirSync(dir); } catch { return; }
   const staleBefore = Date.now() - STALE_TEMP_FILE_MIN_AGE_MS;
   for (const name of names) cleanupStaleTempFile(dir, filePath, name, staleBefore, assertCurrent, onEffect);
-}
-
-/**
- * Delete `.corrupt-*` files (and their `.why` receipts) beyond
- * {@link CORRUPT_QUARANTINE_MAX_FILES}, oldest first. Runs after every new
- * quarantine so a repeatedly-corrupting writer cannot accumulate files without
- * bound.
- */
-function reapCorruptQuarantineFiles(
-  dir: string,
-  base: string,
-  /** The quarantine file created by the caller in this same pass, never a victim. */
-  currentName?: string,
-): { scanned: number; reaped: number } {
-  const prefix = `${base}.corrupt-`;
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return { scanned: 0, reaped: 0 };
-  }
-
-  const quarantineNames = new Set(names.filter((name) => name.startsWith(prefix) && !name.endsWith('.why')));
-
-  // Self-heal: a .why with no surviving quarantine file discloses nothing and
-  // keeps nothing, delete it, whatever past interruption produced it.
-  for (const name of names) {
-    if (!name.startsWith(prefix) || !name.endsWith('.why')) continue;
-    if (!quarantineNames.has(name.slice(0, -'.why'.length))) {
-      try {
-        unlinkSync(join(dir, name));
-      } catch {
-        // Best-effort.
-      }
-    }
-  }
-
-  const corruptFiles = [...quarantineNames]
-    .filter((name) => name !== currentName)
-    .map((name) => {
-      const full = join(dir, name);
-      let mtimeMs = 0;
-      try {
-        mtimeMs = statSync(full).mtimeMs;
-      } catch {
-        mtimeMs = 0;
-      }
-      return { full, name, mtimeMs };
-    });
-
-  // The cap counts every quarantine file including the current one; only the
-  // older ones are eligible victims.
-  const cap = currentName !== undefined && quarantineNames.has(currentName)
-    ? CORRUPT_QUARANTINE_MAX_FILES - 1
-    : CORRUPT_QUARANTINE_MAX_FILES;
-
-  let reaped = 0;
-  if (corruptFiles.length > cap) {
-    // Oldest first; mtime ties (coarse-mtime filesystems) break by the
-    // millisecond timestamp baked into the quarantine name, so the order is
-    // total and matches creation order.
-    corruptFiles.sort((a, b) => (a.mtimeMs - b.mtimeMs) || a.name.localeCompare(b.name));
-    const excess = corruptFiles.length - cap;
-    for (const victim of corruptFiles.slice(0, excess)) {
-      try {
-        unlinkSync(victim.full);
-        reaped += 1;
-      } catch {
-        // Best-effort, a file another sweeper already removed counts as reclaimed.
-      }
-      try {
-        unlinkSync(`${victim.full}.why`);
-      } catch {
-        // The receipt may not exist (an earlier write failure), not an error.
-      }
-    }
-  }
-
-  return { scanned: quarantineNames.size, reaped };
 }

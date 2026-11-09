@@ -33,12 +33,12 @@
 
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { randomUUID } from 'node:crypto';
-import { existsSync, lstatSync, readdirSync, renameSync, unlinkSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { existsSync, lstatSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '../config/atomic-write.js';
 import { requireSurfaceRoot } from '../runtime/surface-root.js';
-import { captureExistingDirectory } from '../utils/atomic-json-store.js';
-import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
+import { captureExistingDirectory, captureQuarantineSource, readCapturedQuarantineSource, quarantineCorruptFile, reapOwnedQuarantines, type QuarantineSource, QuarantineEncodingError } from '../utils/atomic-json-store.js';
+import { fileObservationIdentity } from '../utils/file-observation.js';
 import { resolveWorkPlanLocation } from './work-plan-location.js';
 
 export type WorkPlanEffectOptions = Pick<AtomicWriteOptions, 'assertCurrent' | 'onEffect'>;
@@ -80,9 +80,6 @@ export const WORK_PLAN_QUARANTINE_CAP = 5;
  * startup-only: a long-lived session keeps sweeping on this cadence.
  */
 export const WORK_PLAN_QUARANTINE_SWEEP_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-
-/** Filename marker for a preserved copy of a plan file that could not be parsed. */
-const QUARANTINE_SUFFIX = '.corrupt-';
 
 export const WORK_PLAN_STATUSES = [
   'pending',
@@ -133,6 +130,10 @@ export interface WorkPlanHousekeeping {
   readonly quarantinePath?: string | undefined;
   /** Quarantined files removed by their own TTL / count cap. */
   readonly quarantinesRemoved?: number | undefined;
+  /** Historical paths without matching native receipts are kept for inspection. */
+  readonly preservedUnverifiedQuarantines?: number | undefined;
+  /** Readonly inspection found damage; no reset or quarantine was performed. */
+  readonly recoveryRequired?: boolean | undefined;
 }
 
 export interface WorkPlan {
@@ -282,6 +283,8 @@ function normalizeHousekeeping(value: unknown): WorkPlanHousekeeping | undefined
     ...(value.resetFromUnreadableFile === true ? { resetFromUnreadableFile: true } : {}),
     ...(quarantinePath ? { quarantinePath } : {}),
     ...(quarantinesRemoved !== undefined ? { quarantinesRemoved } : {}),
+    ...(typeof value.preservedUnverifiedQuarantines === 'number' ? { preservedUnverifiedQuarantines: value.preservedUnverifiedQuarantines } : {}),
+    ...(value.recoveryRequired === true ? { recoveryRequired: true } : {}),
   };
 }
 
@@ -304,6 +307,7 @@ function parsePlanDocument(raw: string): Record<string, unknown> | null {
 /** One-line, content-free disclosure of what the last sweep reclaimed. */
 function formatHousekeeping(record: WorkPlanHousekeeping): string {
   const parts: string[] = [];
+  if (record.recoveryRequired) parts.push('the saved plan requires recovery; readonly inspection left it unchanged');
   if (record.resetFromUnreadableFile) {
     parts.push(record.quarantinePath
       ? `the previous plan file could not be read and was preserved at ${record.quarantinePath}`
@@ -348,6 +352,7 @@ export class WorkPlanStore {
    * first read of the session sweeps, that read IS the recovery point.
    */
   private lastQuarantineSweepAt = 0;
+  private lastUnverifiedQuarantines = 0;
 
   readonly homeDirectory: string;
   private readonly options: WorkPlanStoreOptions;
@@ -489,7 +494,7 @@ export class WorkPlanStore {
     ];
     // Disclosure: whatever the last sweep reclaimed is stated here, so a
     // removal can never be mistaken for silent data loss.
-    if (plan.housekeeping) lines.push(formatHousekeeping(plan.housekeeping));
+    if (plan.housekeeping) { lines.push(formatHousekeeping(plan.housekeeping)); if (plan.housekeeping.preservedUnverifiedQuarantines) lines.push(`${plan.housekeeping.preservedUnverifiedQuarantines} unverified historical recovery path(s) were preserved beside ${this.filePath}; inspect them before manual cleanup.`); }
     if (plan.unassignedPlanPaths?.length) {
       lines.push('Preserved work-plan files could not be assigned to a project. Inspect these before recovering their items:');
       for (const path of plan.unassignedPlanPaths) lines.push(`- ${path}`);
@@ -526,7 +531,7 @@ export class WorkPlanStore {
     const loaded = this.loadFromDisk(effects, readOnly);
     const unassigned = this.unassignedPlanPaths.filter(path => existsSync(path));
     const plan = unassigned.length ? { ...loaded.plan, unassignedPlanPaths: unassigned } : loaded.plan;
-    if (readOnly) return plan;
+    if (readOnly) return loaded.recovery?.recoveryRequired ? { ...plan, housekeeping: loaded.recovery } : plan;
     const swept = this.sweep(plan, loaded.recovery, effects);
     if (swept.changed) this.writePlan(swept.plan, effects);
     return swept.plan;
@@ -538,19 +543,16 @@ export class WorkPlanStore {
    * moved aside (never overwritten in place) and reported as a recovery.
    */
   private loadFromDisk(effects?: WorkPlanEffectOptions, readOnly = false): { plan: WorkPlan; recovery: WorkPlanHousekeeping | null } {
-    let raw: string;
-    try {
-      const parent = captureExistingDirectory(dirname(this.filePath)), source = readFileObservation(this.filePath);
-      this.planReadCurrent = () => { this.locationCurrent(); parent.assertCurrent(); if (fileObservationIdentity(this.filePath) !== source.physical) throw new Error('Original work plan changed before publication.'); };
-      raw = new TextDecoder('utf8', { fatal: true }).decode(source.bytes); this.planReadCurrent();
-    } catch (error) {
-      // Only absence means an empty plan. An I/O/permission failure must not
-      // turn existing work into an empty plan that the next mutation overwrites.
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const heldSource = captureQuarantineSource(this.filePath);
+    if (!heldSource) {
       this.planReadCurrent = () => { this.locationCurrent(); if (lstatSync(this.filePath, { throwIfNoEntry: false })) throw new Error('An unowned work plan appeared before publication.'); };
       this.planReadCurrent(); return { plan: this.createEmptyPlan(), recovery: null };
     }
-    const parsed = parsePlanDocument(raw);
+    this.planReadCurrent = () => { this.locationCurrent(); heldSource.assertCurrent(); };
+    try {
+    let raw: string, invalidEncoding = false;
+    try { raw = readCapturedQuarantineSource(this.filePath, heldSource); } catch (error) { if (!(error instanceof QuarantineEncodingError)) throw error; raw = ''; invalidEncoding = true; } this.planReadCurrent();
+    const parsed = invalidEncoding ? null : parsePlanDocument(raw);
     if (parsed && (('projectId' in parsed && parsed.projectId !== this.options.projectId)
       || ('projectRoot' in parsed && parsed.projectRoot !== this.options.projectRoot))) {
       throw new Error('Saved work plan belongs to a different project; its contents were left untouched.');
@@ -558,15 +560,15 @@ export class WorkPlanStore {
     if (parsed === null) {
       // The file EXISTED but its contents are not a usable plan: zero-byte,
       // truncated mid-write, or otherwise torn. Existence is not validity.
-      const quarantinePath = !readOnly && raw.trim().length > 0 ? this.quarantineUnreadableFile(effects) : undefined;
+      const recovery = !readOnly && (invalidEncoding || raw.trim().length > 0) ? this.quarantineUnreadableFile(heldSource, effects) : undefined;
       return {
         plan: this.createEmptyPlan(),
         recovery: {
           at: nowMs(),
           expiredItems: 0,
           cappedItems: 0,
-          resetFromUnreadableFile: true,
-          ...(quarantinePath ? { quarantinePath } : {}),
+          ...(readOnly ? { recoveryRequired: true } : { resetFromUnreadableFile: true }),
+          ...(recovery ? { quarantinePath: recovery.path, quarantinesRemoved: recovery.reaped, preservedUnverifiedQuarantines: recovery.unknown } : {}),
         },
       };
     }
@@ -594,6 +596,7 @@ export class WorkPlanStore {
       },
       recovery: null,
     };
+    } finally { heldSource.close(); }
   }
 
   /**
@@ -622,9 +625,11 @@ export class WorkPlanStore {
       .sort((a, b) => terminalAgeStamp(b) - terminalAgeStamp(a));
     const capped = new Set<WorkPlanItem>(terminalSurvivors.slice(WORK_PLAN_TERMINAL_ITEM_CAP));
     const kept = survivors.filter((item) => !capped.has(item));
-    const quarantinesRemoved = this.sweepQuarantines(now, effects);
+    const sweep = this.sweepQuarantines(now, effects);
+    const quarantinesRemoved = sweep.removed + (recovery?.quarantinesRemoved ?? 0);
+    const unknownChanged = sweep.unknown !== (plan.housekeeping?.preservedUnverifiedQuarantines ?? 0);
 
-    const changed = expired.size > 0 || capped.size > 0 || recovery !== null || quarantinesRemoved > 0;
+    const changed = expired.size > 0 || capped.size > 0 || recovery !== null || quarantinesRemoved > 0 || unknownChanged;
     if (!changed) return { plan, changed: false };
 
     const housekeeping: WorkPlanHousekeeping = {
@@ -634,6 +639,7 @@ export class WorkPlanStore {
       ...(recovery?.resetFromUnreadableFile ? { resetFromUnreadableFile: true } : {}),
       ...(recovery?.quarantinePath ? { quarantinePath: recovery.quarantinePath } : {}),
       ...(quarantinesRemoved > 0 ? { quarantinesRemoved } : {}),
+      ...(sweep.unknown > 0 ? { preservedUnverifiedQuarantines: sweep.unknown } : {}),
     };
     const activeItemId = plan.activeItemId && kept.some((item) => item.id === plan.activeItemId)
       ? plan.activeItemId
@@ -660,66 +666,32 @@ export class WorkPlanStore {
 
   /**
    * Move an unparseable plan file aside so the user can still recover it.
-   * Returns the quarantine path, or undefined if the rename did not happen
-   * (already moved by a concurrent process, or the directory is not writable).
+   * The shared original-source reader publishes an exclusive archive and an
+   * owned receipt; a failed preservation propagates before any reset.
    */
-  private quarantineUnreadableFile(effects?: WorkPlanEffectOptions): string | undefined {
-    const target = `${this.filePath}${QUARANTINE_SUFFIX}${nowMs()}-${randomUUID().slice(0, 8)}`;
-    this.planReadCurrent(); effects?.assertCurrent?.(); this.planReadCurrent();
-    const parent = captureExistingDirectory(dirname(this.filePath)), original = lstatSync(this.filePath, { bigint: true });
-    if (lstatSync(target, { throwIfNoEntry: false })) throw new Error('Work plan recovery path already exists; existing files were left untouched.');
-    renameSync(this.filePath, target);
-    parent.assertCurrent(); const archived = lstatSync(target, { bigint: true });
-    if (archived.dev !== original.dev || archived.ino !== original.ino || archived.birthtimeNs !== original.birthtimeNs
-      || archived.uid !== original.uid || archived.gid !== original.gid) throw new Error('Original work plan recovery ownership changed.');
-    const physical = fileObservationIdentity(target);
-    effects?.onEffect?.(true); parent.assertCurrent();
-    if (fileObservationIdentity(target) !== physical || lstatSync(this.filePath, { throwIfNoEntry: false })) throw new Error('Work plan recovery changed before confirmation.');
+  private quarantineUnreadableFile(source: QuarantineSource, effects?: WorkPlanEffectOptions): { path: string; reaped: number; unknown: number } {
+    let published = false;
+    const current = () => { effects?.assertCurrent?.(); this.locationCurrent(); if (!published) source.assertCurrent(); };
+    const outcome = quarantineCorruptFile(this.filePath, { source, label: 'workflow/work-plan', reason: 'saved work plan is not a usable JSON document',
+      recovery: 'The local plan is rebuilt empty; the original bytes remain at the reported recovery path.',
+      maxFiles: WORK_PLAN_QUARANTINE_CAP, maximumAgeMs: WORK_PLAN_QUARANTINE_TTL_MS,
+      assertCurrent: current, onEffect: flag => { if (flag) published = true; effects?.onEffect?.(flag); },
+    });
+    this.lastQuarantineSweepAt = nowMs(); this.lastUnverifiedQuarantines = outcome.preservedUnknown;
+    const parent = captureExistingDirectory(dirname(this.filePath));
     this.planReadCurrent = () => { this.locationCurrent(); parent.assertCurrent(); if (lstatSync(this.filePath, { throwIfNoEntry: false })) throw new Error('An unowned work plan appeared before publication.'); };
-    return target;
+    this.planReadCurrent(); return { path: outcome.quarantinePath, reaped: outcome.reaped, unknown: outcome.preservedUnknown };
   }
 
-  /**
-   * Bound the quarantine copies: delete any past WORK_PLAN_QUARANTINE_TTL_MS
-   * and any beyond WORK_PLAN_QUARANTINE_CAP (oldest first). Throttled to
-   * WORK_PLAN_QUARANTINE_SWEEP_INTERVAL_MS per store instance so a long-lived
-   * session keeps sweeping without scanning the directory on every read.
-   */
-  private sweepQuarantines(now: number, effects?: WorkPlanEffectOptions): number {
-    if (now - this.lastQuarantineSweepAt < WORK_PLAN_QUARANTINE_SWEEP_INTERVAL_MS) return 0;
-    this.lastQuarantineSweepAt = now;
-    const directory = dirname(this.filePath);
-    const prefix = `${basename(this.filePath)}${QUARANTINE_SUFFIX}`;
-    let entries: string[];
-    try {
-      entries = readdirSync(directory);
-    } catch {
-      return 0;
-    }
-    const candidates = entries
-      .filter((entry) => entry.startsWith(prefix))
-      .map((entry) => {
-        const stamp = Number.parseInt(entry.slice(prefix.length).split('-')[0] ?? '', 10);
-        return { entry, at: Number.isFinite(stamp) ? stamp : 0 };
-      })
-      .sort((a, b) => b.at - a.at); // newest first
-    let removed = 0;
-    for (let index = 0; index < candidates.length; index += 1) {
-      const candidate = candidates[index]!;
-      const tooOld = now - candidate.at > WORK_PLAN_QUARANTINE_TTL_MS;
-      const overCap = index >= WORK_PLAN_QUARANTINE_CAP;
-      if (!tooOld && !overCap) continue;
-      effects?.assertCurrent?.();
-      try {
-        unlinkSync(join(directory, candidate.entry));
-        removed += 1;
-      } catch {
-        // Already removed by a concurrent sweep, idempotent, not an error, and
-        // not counted so the disclosed number stays truthful.
-      }
-      effects?.onEffect?.();
-    }
-    return removed;
+  /** Only persisted native receipt/payload pairs participate in these bounds.
+   * Unverified historical copies and orphan receipts remain disclosed/intact. */
+  private sweepQuarantines(now: number, effects?: WorkPlanEffectOptions): { removed: number; unknown: number } {
+    if (now - this.lastQuarantineSweepAt < WORK_PLAN_QUARANTINE_SWEEP_INTERVAL_MS) return { removed: 0, unknown: this.lastUnverifiedQuarantines };
+    const result = reapOwnedQuarantines(this.filePath, { now, maxFiles: WORK_PLAN_QUARANTINE_CAP, maximumAgeMs: WORK_PLAN_QUARANTINE_TTL_MS,
+      assertCurrent: () => { effects?.assertCurrent?.(); this.locationCurrent(); this.planReadCurrent(); }, onEffect: effects?.onEffect,
+    });
+    this.lastQuarantineSweepAt = now; this.lastUnverifiedQuarantines = result.preservedUnknown;
+    return { removed: result.reaped, unknown: result.preservedUnknown };
   }
 
   private createEmptyPlan(): WorkPlan {

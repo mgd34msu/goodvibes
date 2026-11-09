@@ -1,3 +1,4 @@
+import { validateCheckpointManifest, CheckpointManifestShapeError, type Manifest } from './manifest.js';
 /**
  * manager.ts
  *
@@ -33,8 +34,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
-import { JsonFileStore } from '../../state/json-file-store.js';
-import { quarantineCorruptFile } from '../../utils/atomic-json-store.js';
+import { JsonFileStore, JsonFileStoreParseError } from '../../state/json-file-store.js';
+import { captureQuarantineSource, quarantineCorruptFile } from '../../utils/atomic-json-store.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { AgentEvent } from '../../../events/agents.js';
@@ -69,10 +70,6 @@ function generateCheckpointId(now: () => number): string {
 /** Default retention class per checkpoint kind when the caller does not specify one. */
 function defaultRetentionClassFor(kind: CheckpointKind): RetentionClass {
   return kind === 'manual' ? 'forensic' : 'standard';
-}
-
-interface Manifest {
-  checkpoints: WorkspaceCheckpoint[];
 }
 
 // Public option/filter shapes live in manager-options.ts (split out to stay
@@ -781,16 +778,19 @@ export class WorkspaceCheckpointManager {
    * remain reachable by ref.
    */
   private async loadManifestOrQuarantine(): Promise<Manifest | null> {
+    const source = captureQuarantineSource(this.manifestPath); if (!source) return null;
     try {
-      return await this.manifestStore.load();
-    } catch (error) {
-      quarantineCorruptFile(this.manifestPath, {
-        label: 'workspace/checkpoints',
-        reason: summarizeError(error),
-        recovery: 'The checkpoint index was rebuilt empty; snapshot commits in the side repo are untouched but are no longer listed',
-      });
-      return null;
-    }
+      try { const loaded = await this.manifestStore.load(source); source.assertCurrent(); return validateCheckpointManifest(loaded); }
+      catch (error) {
+        source.assertCurrent();
+        if (!(error instanceof JsonFileStoreParseError) && !(error instanceof CheckpointManifestShapeError)) throw error;
+        quarantineCorruptFile(this.manifestPath, { source,
+          label: 'workspace/checkpoints', reason: 'checkpoint index JSON or metadata shape is invalid',
+          recovery: 'The checkpoint index was rebuilt empty; snapshot commits in the side repo are untouched but are no longer listed',
+        });
+        return null;
+      }
+    } finally { source.close(); }
   }
 
   private async persistManifest(): Promise<void> {

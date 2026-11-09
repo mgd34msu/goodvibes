@@ -36,7 +36,7 @@
  * Filesystem and clock are injectable so the contract is provable in tests.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { quarantineCorruptFile, writeFileAtomic } from '../utils/atomic-json-store.js';
+import { captureQuarantineSource, readCapturedQuarantineSource, quarantineCorruptFile, writeFileAtomic, type QuarantineSource, QuarantineEncodingError } from '../utils/atomic-json-store.js';
 import { isRecord } from '../utils/record-coerce.js';
 
 export interface LifecycleMarkerIo {
@@ -48,7 +48,9 @@ export interface LifecycleMarkerIo {
    * own fakes) needs no filesystem behaviour; absent, a bad marker is simply
    * read as "no marker" exactly as before.
    */
-  quarantine?(path: string, reason: string): void;
+  quarantine?(path: string, reason: string, source?: QuarantineSource): void;
+  /** Native original read ownership; fake/in-memory adapters need not provide it. */
+  captureSource?(path: string): QuarantineSource | null;
 }
 
 export const realLifecycleMarkerIo: LifecycleMarkerIo = {
@@ -56,8 +58,9 @@ export const realLifecycleMarkerIo: LifecycleMarkerIo = {
   write: (path, contents) => {
     writeFileAtomic(path, contents);
   },
-  quarantine: (path, reason) => {
-    quarantineCorruptFile(path, {
+  captureSource: captureQuarantineSource,
+  quarantine: (path, reason, source) => {
+    quarantineCorruptFile(path, { source,
       label: 'daemon/lifecycle-marker',
       reason,
       recovery: 'The daemon treats this start as if no previous marker existed: the crash streak resets to zero and an automatic rollback that was pending is not resumed.',
@@ -71,13 +74,16 @@ export const realLifecycleMarkerIo: LifecycleMarkerIo = {
  * wrote survives, and the caller still gets the "no marker" answer.
  */
 function readMarkerAt(io: LifecycleMarkerIo, markerPath: string): LifecycleMarker | null {
-  const raw = io.read(markerPath);
-  if (raw === null) return null;
-  const marker = parseMarker(raw);
-  if (!marker) {
-    io.quarantine?.(markerPath, 'marker content is not a valid lifecycle marker');
-  }
-  return marker;
+  const capture = io.captureSource?.bind(io), read = io.read.bind(io), quarantine = io.quarantine?.bind(io);
+  const source = capture?.(markerPath); if (capture && !source) return null;
+  try {
+    let raw: string | null;
+    try { raw = source ? readCapturedQuarantineSource(markerPath, source) : read(markerPath); } catch (error) { if (!(error instanceof QuarantineEncodingError) || !source) throw error; source.assertCurrent(); quarantine?.(markerPath, 'marker source is not valid UTF-8', source); return null; }
+    if (raw === null) return null;
+    const marker = parseMarker(raw); source?.assertCurrent();
+    if (!marker) quarantine?.(markerPath, 'marker content is not a valid lifecycle marker', source ?? undefined);
+    return marker;
+  } finally { source?.close(); }
 }
 
 /**

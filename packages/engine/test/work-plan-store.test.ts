@@ -1,3 +1,4 @@
+import { quarantineCorruptFile } from '../sdk/src/platform/utils/atomic-json-store.ts';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, test } from 'bun:test';
@@ -34,7 +35,7 @@ function writeRawPlanFile(store: WorkPlanStore, contents: string): void {
 function quarantineFiles(store: WorkPlanStore): string[] {
   const prefix = `${basename(store.filePath)}.corrupt-`;
   try {
-    return readdirSync(dirname(store.filePath)).filter((name) => name.startsWith(prefix));
+    return readdirSync(dirname(store.filePath)).filter((name) => name.startsWith(prefix) && !name.endsWith('.why'));
   } catch {
     return [];
   }
@@ -187,24 +188,26 @@ describe('WorkPlanStore crash recovery (content, not existence)', () => {
     expect(store.getActivePlan().housekeeping?.resetFromUnreadableFile).toBe(true);
   });
 
-  test('quarantine copies are themselves bounded by age TTL and count cap', () => {
-    const store = makeStore();
-    const directory = dirname(store.filePath);
-    mkdirSync(directory, { recursive: true });
-    const prefix = `${basename(store.filePath)}.corrupt-`;
-    const now = Date.now();
-    // One well past the 14-day quarantine TTL...
-    writeFileSync(join(directory, `${prefix}${now - 15 * DAY_MS}-aaaaaaaa`), 'old', 'utf8');
-    // ...plus more recent copies than the cap allows.
-    for (let index = 0; index < WORK_PLAN_QUARANTINE_CAP + 2; index += 1) {
-      writeFileSync(join(directory, `${prefix}${now - index * 1000}-b${index}`), 'recent', 'utf8');
-    }
-
-    store.getActivePlan(); // first read of the instance performs the sweep
-
-    expect(quarantineFiles(store)).toHaveLength(WORK_PLAN_QUARANTINE_CAP);
-    expect(store.getActivePlan().housekeeping?.quarantinesRemoved).toBe(3);
+  test('unverified historical quarantine names remain intact and are disclosed', () => {
+    const store = makeStore(); store.getActivePlan();
+    const directory = dirname(store.filePath), prefix = `${basename(store.filePath)}.corrupt-`, now = Date.now();
+    const originals = Array.from({ length: WORK_PLAN_QUARANTINE_CAP + 3 }, (_, index) => `${prefix}${now - (index + 15) * DAY_MS}-historical-${index}`);
+    for (const name of originals) writeFileSync(join(directory, name), 'unverified historical bytes');
+    const reopened = new WorkPlanStore({ homeDirectory: store.homeDirectory, surfaceRoot: SURFACE_ROOT, projectId: 'project:test-workspace', projectRoot: '/tmp/test-workspace' });
+    const plan = reopened.getActivePlan(); expect(quarantineFiles(reopened).sort()).toEqual(originals.sort());
+    expect(plan.housekeeping?.preservedUnverifiedQuarantines).toBe(originals.length); expect(reopened.toMarkdown()).toContain('unverified historical recovery');
   });
+
+  test('real native receipt/payload pairs are bounded by age and count across reopen', () => {
+    const store = makeStore(); store.getActivePlan(); const now = Date.now();
+    for (let index = 0; index < WORK_PLAN_QUARANTINE_CAP + 3; index++) {
+      writeFileSync(store.filePath, `damaged saved source ${index}`);
+      quarantineCorruptFile(store.filePath, { label: 'test/work-plan', reason: 'damaged fixture', recovery: 'fixture recovery', maxFiles: 100, now: index === 0 ? now - 15 * DAY_MS : now - index * 1000 });
+    }
+    const reopened = new WorkPlanStore({ homeDirectory: store.homeDirectory, surfaceRoot: SURFACE_ROOT, projectId: 'project:test-workspace', projectRoot: '/tmp/test-workspace' });
+    const plan = reopened.getActivePlan(); expect(quarantineFiles(reopened)).toHaveLength(WORK_PLAN_QUARANTINE_CAP); expect(plan.housekeeping?.quarantinesRemoved).toBe(3);
+  });
+
 });
 
 describe('WorkPlanStore retention bounds', () => {

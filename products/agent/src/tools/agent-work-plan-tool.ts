@@ -196,6 +196,8 @@ function listOutput(store: WorkPlanStore): string {
     `  project ${plan.projectRoot}`,
     `  items ${plan.items.length}; pending ${counts.get('pending') ?? 0}; active ${counts.get('in_progress') ?? 0}; blocked ${counts.get('blocked') ?? 0}; done ${counts.get('done') ?? 0}`,
   ];
+  if (plan.housekeeping?.recoveryRequired) lines.push('Saved local plan is unreadable and requires recovery; this inspection left the file unchanged.');
+  if (plan.housekeeping?.preservedUnverifiedQuarantines) lines.push(`${plan.housekeeping.preservedUnverifiedQuarantines} unverified historical recovery path(s) were preserved for inspection.`);
   if (plan.unassignedPlanPaths?.length) {
     lines.push('Preserved work-plan files could not be assigned to a project. Inspect these before recovering their items:', ...plan.unassignedPlanPaths);
   }

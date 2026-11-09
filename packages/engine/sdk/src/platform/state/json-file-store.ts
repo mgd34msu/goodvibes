@@ -1,8 +1,11 @@
+import { captureQuarantineSource, readCapturedQuarantineSourceAsync, QuarantineEncodingError, type QuarantineSource } from '../utils/atomic-json-store.js';
 import { randomUUID } from 'node:crypto';
-import { promises as fs, existsSync, mkdirSync } from 'node:fs';
+import { promises as fs, mkdirSync } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { summarizeError } from '../utils/error-display.js';
+
+export class JsonFileStoreParseError extends Error { override readonly name = 'JsonFileStoreParseError'; constructor() { super('JsonFileStore original source is not valid JSON.'); } }
+const parseSavedJson = JSON.parse;
 
 /**
  * JsonFileStore, generic JSON file persistence with atomic writes.
@@ -15,17 +18,16 @@ export class JsonFileStore<T> {
   constructor(private readonly filePath: string) {}
 
   /** Load JSON data from disk, or return null if the file does not exist. */
-  async load(): Promise<T | null> {
-    if (!existsSync(this.filePath)) {
-      return null;
-    }
-
+  async load(observed?: QuarantineSource): Promise<T | null> {
+    const source = observed ?? captureQuarantineSource(this.filePath); if (!source) return null;
     try {
-      const raw = await fs.readFile(this.filePath, 'utf-8');
-      return JSON.parse(raw) as T;
-    } catch (err) {
-      throw new Error(`JsonFileStore failed to load ${this.filePath}: ${summarizeError(err)}`);
-    }
+      let raw: string;
+      try { raw = await readCapturedQuarantineSourceAsync(this.filePath, source); }
+      catch (error) { if (error instanceof QuarantineEncodingError) throw new JsonFileStoreParseError(); throw error; }
+      let value: T;
+      try { value = parseSavedJson(raw) as T; } catch (error) { if (error instanceof SyntaxError) throw new JsonFileStoreParseError(); throw error; }
+      source.assertCurrent(); return value;
+    } finally { if (!observed) source.close(); }
   }
 
   /**

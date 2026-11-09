@@ -84,6 +84,16 @@ describe('checkpoint manifest recovery', () => {
     }
   });
 
+  test('a valid JSON manifest with invalid checkpoint rows is preserved and rebuilt before indexing', async () => {
+    const root = tempWorkspace('wcp-invalid-manifest-shape-');
+    try {
+      mkdirSync(checkpointsDir(root), { recursive: true }); const path = join(checkpointsDir(root), 'index.json'), original = '{"checkpoints":[null]}'; writeFileSync(path, original);
+      const manager = new WorkspaceCheckpointManager({ workspaceRoot: root, preferGitRoot: false });
+      try { await manager.init(); expect(await manager.list()).toEqual([]); const archived = readdirSync(checkpointsDir(root)).find(name => name.startsWith('index.json.corrupt-') && !name.endsWith('.why')); if (!archived) throw Error('Missing preserved original invalid manifest'); expect(readFileSync(join(checkpointsDir(root), archived), 'utf8')).toBe(original); }
+      finally { manager.dispose(); }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test('JsonFileStore.save leaves no temp file behind and round-trips', async () => {
     const dir = tempWorkspace('json-file-store-');
     try {

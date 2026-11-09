@@ -1,5 +1,5 @@
-import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { lstatSync, realpathSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import type { SimpleGit } from 'simple-git';
 import { createSimpleGit } from './optional-simple-git.js';
 import { parseUnifiedDiff, type StructuredDiff } from './structured-diff.js';
@@ -7,6 +7,62 @@ import type { HookDispatcher } from '../hooks/dispatcher.js';
 import type { HookEvent } from '../hooks/types.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { captureExistingDirectory } from '../utils/atomic-json-store.js';
+import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
+
+/** Private native creation facts. Only a successful original Git command can
+ * issue this observation; a branch name or caller DTO cannot manufacture it. */
+export interface GitWorktreeCreationFacts {
+  readonly schema: 1;
+  readonly path: string;
+  readonly branch: string;
+  readonly worktree: { readonly path: string; readonly physical: string };
+  readonly administration: { readonly path: string; readonly physical: string };
+  readonly gitFile: { readonly path: string; readonly physical: string; readonly contents: string };
+  readonly head: { readonly path: string; readonly physical: string };
+}
+export interface GitWorktreeCreationObservation {
+  readonly facts: GitWorktreeCreationFacts;
+  assertCurrent(): void;
+}
+const worktreeCreations = new WeakMap<GitService, GitWorktreeCreationObservation>();
+const creationDirectoryStamp = (path: string): string => {
+  const stat = lstatSync(path, { bigint: true });
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Created worktree directory is unavailable');
+  return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
+};
+function captureWorktreeCreation(path: string, branch: string, workingDirectory: string): GitWorktreeCreationObservation {
+  const root = captureExistingDirectory(resolve(workingDirectory, path)), gitFilePath = join(root.canonical, '.git');
+  root.assertCurrent();
+  const gitFile = readFileObservation(gitFilePath);
+  let contents: string;
+  try { contents = new TextDecoder('utf-8', { fatal: true }).decode(gitFile.bytes); }
+  catch { throw new Error('Created worktree Git binding is invalid'); }
+  if (!contents.startsWith('gitdir: ') || !contents.endsWith('\n')) throw new Error('Created worktree Git binding is invalid');
+  const adminPath = resolve(dirname(gitFilePath), contents.slice('gitdir: '.length, -1));
+  const admin = captureExistingDirectory(adminPath), headPath = join(admin.canonical, 'HEAD');
+  const head = readFileObservation(headPath);
+  if (head.bytes.toString('utf8') !== `ref: refs/heads/${branch}\n`) throw new Error('Created worktree branch changed');
+  const facts: GitWorktreeCreationFacts = Object.freeze({ schema: 1, path, branch,
+    worktree: Object.freeze({ path: root.canonical, physical: creationDirectoryStamp(root.canonical) }),
+    administration: Object.freeze({ path: admin.canonical, physical: creationDirectoryStamp(admin.canonical) }),
+    gitFile: Object.freeze({ path: gitFilePath, physical: gitFile.physical, contents }),
+    head: Object.freeze({ path: headPath, physical: head.physical }) });
+  const observation = Object.freeze({ facts, assertCurrent() {
+    root.assertCurrent(); admin.assertCurrent();
+    if (creationDirectoryStamp(facts.worktree.path) !== facts.worktree.physical
+      || creationDirectoryStamp(facts.administration.path) !== facts.administration.physical
+      || fileObservationIdentity(facts.gitFile.path) !== facts.gitFile.physical
+      || fileObservationIdentity(facts.head.path) !== facts.head.physical) throw new Error('Original created worktree changed');
+  } });
+  observation.assertCurrent(); return observation;
+}
+/** Read-only lookup over the exact service that completed native creation. */
+export function readGitWorktreeCreation(service: GitService, path: string, branch: string): GitWorktreeCreationObservation | undefined {
+  const observation = worktreeCreations.get(service);
+  if (!observation || observation.facts.path !== path || observation.facts.branch !== branch) return undefined;
+  observation.assertCurrent(); return observation;
+}
 
 /**
  * Extract bare repo-relative conflict paths from a failed merge's message.
@@ -475,12 +531,15 @@ export class GitService {
   // ---------------------------------------------------------------------------
 
   async worktreeAdd(path: string, branch: string, startPoint?: string, checkout = true): Promise<void> {
+    worktreeCreations.delete(this);
     await this.firePre('worktreeAdd', { path, branch });
     try {
       // This short-lived client permits only our fixed hook-disabling override, never a caller-provided hook path.
       const rawCheckoutOptions = { baseDir: this.cwd, unsafe: { allowUnsafeHooksPath: true } };
       const git = checkout ? await this.git() : await createSimpleGit(rawCheckoutOptions);
       await mutateWorktree(git, this.cwd, [...(checkout ? [] : ['-c', 'core.hooksPath=/dev/null']), 'worktree', 'add', ...(checkout ? [] : ['--no-checkout']), path, '-b', branch, ...(startPoint === undefined ? [] : [startPoint])]);
+      // Capture before a borrowed post hook can change the new directories.
+      worktreeCreations.set(this, captureWorktreeCreation(path, branch, this.cwd));
       await this.firePost('worktreeAdd', { path, branch });
     } catch (err) {
       await this.fireFail('worktreeAdd', { path, branch, error: summarizeError(err) });

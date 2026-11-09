@@ -21,7 +21,7 @@ let previous: JudgmentPort | undefined;
 const opened: KnowledgeStore[] = [];
 const sqlite = (store: KnowledgeStore) => (store as unknown as { sqlite: SQLiteStore }).sqlite;
 beforeEach(() => { root = mkdtempSync(join(tmpdir(), 'knowledge-compile-atomic-')); previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); opened.splice(0).forEach((store) => sqlite(store).close()); rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); await Promise.all(opened.splice(0).map((store) => store.close())); rmSync(root, { recursive: true, force: true }); });
 function settled() { const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port); return fake; }
 function state(store: KnowledgeStore) {
   const byId = <T extends { readonly id: string }>(rows: T[]) => rows.sort((left, right) => left.id.localeCompare(right.id));
@@ -77,7 +77,7 @@ describe('atomic knowledge compilation', () => {
       const SQL = await loadSqlJsEngine(), originalRun = SQL.Database.prototype.run;
       let edges = 0, nodeWrites = 0, extractionWrites = 0, revisions = 0;
       const write = spyOn(SQL.Database.prototype, 'run').mockImplementation(function(this: InstanceType<typeof SQL.Database>, sql, params) {
-        if (sql.includes('INSERT OR REPLACE INTO knowledge_nodes')) nodeWrites++;
+        if (sql.includes('INSERT INTO knowledge_nodes')) nodeWrites++;
         if (sql.includes('INSERT OR REPLACE INTO knowledge_extractions')) extractionWrites++;
         if (sql.includes('INTO knowledge_node_revisions')) revisions++;
         if (sql.includes('INSERT OR REPLACE INTO knowledge_edges') && ++edges === 2) throw new Error('fixture late compile SQL failure');

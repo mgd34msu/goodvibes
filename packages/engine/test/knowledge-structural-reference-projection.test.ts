@@ -17,9 +17,9 @@ const actualClaimId = historicalSemanticFactId({ spaceId, kind: 'specification',
 // A synthetic protected-shaped label tests path specificity; it is not a card.
 const generatedSubjectId = 'sem-entity-4111111111111111';
 let previous: JudgmentPort | undefined;
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function readings() { const fake = fakePort((name, question) => {
     if (name === 'factTrust' || name === 'sourceSupport' || name === 'subjectSupport') return scoreAnswer(question, 4, 0.99); // Authored supported synthetic facts; grading behavior has separate controls.
     return noulAnswer(0.99);
@@ -100,12 +100,18 @@ describe('engine-generated structural reference projection', () => {
     await expect(prepareGeneratedFactSupport([candidate])).rejects.toBeInstanceOf(KnowledgeGeneratedFactSupportHeldError);
     expect(fake.requests).toHaveLength(0);
   });
-  test('the actual repair-profile caller writes the reproduced ID without transmitting it', async () => {
+  test('the actual repair-profile caller preserves the saved historical ID without transmitting it', async () => {
     const root = mkdtempSync(join(tmpdir(), 'goodvibes-structural-id-')); roots.push(root);
-    const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); const fake = readings();
+    const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); stores.push(store); const fake = readings();
     const subject = await store.upsertNode({ id: 'synthetic-repro-subject-767', kind: 'knowledge_entity', slug: 'ac-7', title: 'AC-7', status: 'active', metadata: { knowledgeSpaceId: spaceId } });
     const source = await store.upsertSource({ id: 'synthetic-source', connectorId: 'synthetic', sourceType: 'manual', title: 'AC-7 reference', status: 'indexed', metadata: { knowledgeSpaceId: spaceId } });
     const extraction = await store.upsertExtraction({ sourceId: source.id, extractorId: 'synthetic', format: 'text', excerpt: 'AC-7 has four HDMI ports.', metadata: { knowledgeSpaceId: spaceId } });
+    // The historical recipe remains meaningful only for a real saved row.
+    // Fresh producers allocate opaque labels; exact tuple lookup adopts this
+    // old protected-shaped label without granting it structural authority.
+    await store.upsertNode({ id: actualClaimId, kind: 'fact', slug: 'historical-hdmi-ports', title: 'HDMI ports',
+      summary: 'AC-7 has four HDMI ports.', sourceId: source.id, status: 'draft', metadata: { knowledgeSpaceId: spaceId,
+        semanticKind: 'fact', factKind: 'specification', value: 'four hdmi ports', subjectIds: [subject.id], sourceIds: [source.id] } });
     const prepared = await prepareSourceLinkedRepairProfileFacts([{ store, spaceId, source, extraction, subjects: [subject], authority: 'secondary',
       title: 'HDMI ports', summary: 'AC-7 has four HDMI ports.', evidence: 'AC-7 has four HDMI ports.', extractor: 'synthetic',
       classification: { kind: 'specification', title: 'HDMI ports', summary: 'AC-7 has four HDMI ports.', value: 'four hdmi ports', labels: [], aliases: [] },

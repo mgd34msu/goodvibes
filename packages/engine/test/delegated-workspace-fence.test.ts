@@ -277,7 +277,7 @@ test('a retired native writer cannot publish a delegated review receipt', async 
   const f = await fixture(() => { if (retired) throw new Error('Fixture native writer retired'); });
   const host = f.construct(); await host.configure(configuration, f.authority);
   const pending = await f.accept(host) as PendingSource; retired = true;
-  expect(await host.decide({ ...pending, approved: true, choices }, f.authority)).toMatchObject({ outcome: 'unknown' });
+  expect(await host.decide({ ref: pending.ref, approvalId: pending.approvalId, approved: true, choices }, f.authority)).toMatchObject({ outcome: 'unknown' });
   expect((await host.list(f.authority)).records).toEqual([]);
   expect(await host.status(pending.ref, f.authority, true)).not.toHaveProperty('original');
   expect(existsSync(join(f.directory, NATIVE_READER_REQUIREMENT_FILE))).toBe(false);

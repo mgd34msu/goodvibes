@@ -83,7 +83,7 @@ async function fixture(persistedPairing = false) {
     configurationLifetimeMs: 60_000, onExpiry: 'release-original-and-hold', ...overrides });
   const updateDeps = () => ({ acquireSourceAccount: lease.acquire });
   const ingress = async (text = original, id = 1) => (await processTelegramUpdate({ update_id: id, message: { message_id: id, chat: { id: 42, type: 'private' }, from: { id: 99 }, text } }, context, updateDeps())).json() as Promise<{ ref: NativeInboundSourceRef; approvalId: string; outcome: string; reason?: string }>;
-  const decide = (pending: { ref: NativeInboundSourceRef; approvalId: string }, overrides: Record<string, unknown> = {}) => invoke('decide', { ...pending, approved: true, choices, ...overrides });
+  const decide = (pending: { ref: NativeInboundSourceRef; approvalId: string }, overrides: Record<string, unknown> = {}) => invoke('decide', { ref: pending.ref, approvalId: pending.approvalId, approved: true, choices, ...overrides });
   return { directory, broker, approvals, host, hostDeps, catalog, invoke, authority, context, policyInputs, configure, ingress, decide, sent, accounts, providerCalls,
     get updateDeps() { return updateDeps(); }, sourceReads: () => sourceReads,
     spawned: () => spawned, changeAccount: () => { lease = attachAccount(456, 'replacement_bot', '456:synthetic-replacement'); },
@@ -530,4 +530,15 @@ test('review startup finishing after close cannot restore retention timers', asy
     // async load settles must not recreate that retention timer afterward.
     expect(timers.mock.calls.some(([, delay]) => typeof delay === 'number' && delay > 10_000)).toBe(false);
   } finally { timers.mockRestore(); }
+});
+
+
+test('status response metadata is rejected as a decision request without consuming its pending source', async () => {
+  const f = await fixture(); await f.configure(); const pending = await f.ingress();
+  const reads = f.sourceReads();
+  await expect(f.invoke('decide', { ...pending, approved: true, choices })).rejects.toThrow();
+  expect(f.sourceReads()).toBe(reads);
+  expect(f.spawned()).toBe(0); expect(f.sent).toEqual([]);
+  expect(await f.decide(pending)).toMatchObject({ outcome: 'transferred' });
+  expect(await f.invoke('read', { ref: pending.ref })).toMatchObject({ original: { text: original } });
 });

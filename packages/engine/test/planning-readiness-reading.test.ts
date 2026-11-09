@@ -27,9 +27,9 @@ function contentRequests(fake: Pick<ReturnType<typeof fakePort>, 'requests'>) {
   });
 }
 
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fileSnapshot(path: string): Buffer | null {
   try { return readFileSync(path); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
@@ -46,6 +46,7 @@ async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'planning-readiness-')); roots.push(root);
   const path = join(root, 'knowledge.sqlite');
   const store = new KnowledgeStore({ dbPath: path });
+  stores.push(store);
   const bus = new RuntimeEventBus();
   const service = new ProjectPlanningService(store, { runtimeBus: bus });
   await store.init();
@@ -111,17 +112,19 @@ for (const target of ['state', 'work-plan'] as const) {
   test(`another handle’s same-value ${target} replacement retires the original observation`, async () => {
     const f = await fixture(); install();
     const seeded = await f.service.upsertState(input());
-    const other = new KnowledgeStore({ dbPath: f.path }); await other.init();
+    const other = new KnowledgeStore({ dbPath: f.path }); stores.push(other); await other.init();
     const source = target === 'state' ? seeded.source! : other.listSources(100).find(row => row.metadata.planningArtifactKind === 'work-plan')!;
     const generation = other.getSourceGeneration(source.id);
     const held = delayed(); const pending = f.service.upsertState(input({ goal: 'Add jitter to retry delays.' }));
+    // Keep rejection observed while the independent writer retires the pass.
+    void pending.catch(() => {});
     await held.entered.promise;
     const originalRow = other.getSourceSnapshot({ id: source.id }).raw!;
     // Low-level same-row injection retains exact canonical stored clocks.
     // The public source read model has numeric compatibility clocks instead.
     await other.replaceSourceRecord({ ...source, createdAt: originalRow.created_at,
       updatedAt: originalRow.updated_at } as unknown as typeof source);
-    expect(other.getSourceGeneration(source.id)).toBe(generation);
+    expect(other.getSourceGeneration(source.id)).not.toBe(generation);
     const bytes = fileSnapshot(f.path); held.gate.resolve();
     await expect(pending).rejects.toThrow();
     expect(fileSnapshot(f.path)).toEqual(bytes);
@@ -251,8 +254,8 @@ for (const mode of ['upsert', 'action'] as const) {
     await f.service.upsertState(input());
     const source = await f.service.getState({ projectId: input().projectId });
     const bytes = readFileSync(f.path), requests = contentRequests(fake).length;
-    const original = f.store.getSourceSnapshot.bind(f.store); let replaced = false;
-    f.store.getSourceSnapshot = (selector) => {
+    const original = f.store.getPlanningSourceSnapshot.bind(f.store); let replaced = false;
+    f.store.getPlanningSourceSnapshot = (selector) => {
       const snapshot = original(selector);
       if (!replaced && snapshot.source?.id === source.source!.id) {
         replaced = true;

@@ -397,7 +397,12 @@ describe('canonical knowledge scope lifecycle', () => {
         writer.run('UPDATE knowledge_edges SET from_id=?,to_id=? WHERE id=?', [source.id, node.id, outside.id]); await writer.save();
         writer.run('UPDATE knowledge_edges SET from_id=?,to_id=? WHERE id=?', [outside.fromId, outside.toId, outside.id]); await writer.save();
       }
-      expect(store.getEdgeSnapshot(edge.id).raw).toEqual(original.raw);
+      const restored = store.getEdgeSnapshot(edge.id);
+      // A restored payload is still a new native writer generation. The edge
+      // window must reject the ABA even though all original content is back.
+      expect({ ...restored.raw, gv_revision: undefined }).toEqual({ ...original.raw, gv_revision: undefined });
+      if (mode === 'replace and restore') expect(restored.generation).not.toBe(original.generation);
+      else expect(restored.generation).toBe(original.generation);
       expect(store.listEdges().find(record => record.id === edge.id)).toBe(edge);
       expect(assertEdgesCurrent).toThrow('Knowledge scope selection held: stale');
     } finally { writer.close(); }

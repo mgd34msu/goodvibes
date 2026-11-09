@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Match Agent end-to-end completion fixtures to the actual text-only target
+  adapter and remove diagnostic-only payload hashes. Saved static-source checks
+  stop after a matching wire format and reject wrong metadata before hashing
+  request state or questions. Historical captured wire records remain intact.
+
 - Skip repair-candidate hashing for shared/session work, whose planner output
   cannot be reused after restart. Keep the existing saved comparison only when
   an immutable worktree result actually supports candidate reuse.

@@ -16,6 +16,18 @@ import { checkAnswers, type Questions } from '@goodvibes-jev/judgment';
 import { fieldKind, redactionCredential, residualCredential } from '@goodvibes-jev/engine/sdk/platform/utils';
 import { noticeSeverity } from '@goodvibes-jev/engine/terminal-shell';
 
+/** Keep recorded old envelopes intact; derive this adapter's current subjects. */
+function currentTargets<T extends { questions: Record<string, { instructions: { nativeTargets: object } }> }>(captured: T): T {
+  const current = structuredClone(captured);
+  for (const question of Object.values(current.questions)) {
+    for (const name of ['proposedAnswer', 'currentUserRequest']) {
+      const target: unknown = Reflect.get(question.instructions.nativeTargets, name);
+      if (target && typeof target === 'object') Reflect.deleteProperty(target, 'digest');
+    }
+  }
+  return current;
+}
+
 const diagnosticQuestions: Readonly<Record<string, Questions>> = {
   'diagnostic-field-kind': { kind: fieldKind.items.kind.question },
   'diagnostic-residual': { credentialRemains: residualCredential.items.credentialRemains.question },
@@ -83,11 +95,12 @@ test('headless applicability retains the real question and rejects changed instr
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
   try {
-    const response = await ask(applicability);
+    const original = currentTargets(applicability);
+    const response = await ask(original);
     expect(response.status).toBe(200);
     expect((await response.json()).answers.completion_required.noul).toBe(0.99);
     for (const change of ['request', 'instructions', 'requirements', 'question'] as const) {
-      const body = structuredClone(applicability);
+      const body = structuredClone(original);
       if (change === 'request') body.state.request = 'Another task';
       else if (change === 'instructions') body.state.instructions.push('An additional original obligation');
       else if (change === 'requirements') body.state.requirements.originalTask = 'Another task';
@@ -99,7 +112,7 @@ test('headless applicability retains the real question and rejects changed instr
 
 for (const product of ['agent', 'tui'] as const) test(`${product} scripted completion accepts only its complete recorded request and authored reply`, async () => {
   const server = startE2EJudgments();
-  const original = structuredClone(headlessCompletion);
+  const original = currentTargets(headlessCompletion);
   if (product === 'tui') original.state.tools = tuiCompletionTools;
   server.expectTextOnlyCompletion(original.state.request, original.state.response, product);
   const ask = (body: unknown) => fetch(`${server.baseURL}/v1/systemone`, {
@@ -149,6 +162,7 @@ for (const product of ['agent', 'tui'] as const) test(`${product} scripted compl
     expect((await ask(changedNotice)).status).toBe(422);
   } finally { server.stop(); }
 });
+
 
 function diagnosticBody(contract: typeof diagnostics.contracts[number], state: unknown, ownedRoot: string): unknown {
   return JSON.parse(JSON.stringify({ model: contract.model, questions: contract.questions, state })

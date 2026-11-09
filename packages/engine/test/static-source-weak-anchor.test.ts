@@ -1,4 +1,5 @@
-import { expect, test } from 'bun:test';
+import { expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { canonicalJson, choice, defineSelector, noul, DEFAULT_MODEL, SqliteDecisionLog, STAKES_BANDS, toJson, withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureStaticInputs, parseStaticSourceReadings, readStaticInput, revalidateStaticInput, sha256, STATIC_SITE, staticDecisionSourceHash, staticDecisionSourceManifest, staticInputCaptureComplete, staticInputKey, staticInputStanding, staticSelectionCandidates, staticSelectionContext, type StaticSourceReadings } from '../scripts/static-source-readings.ts';
@@ -62,6 +63,25 @@ test('current and historical selector receipts keep their own exact state/questi
   expect(standing({ stateHash, questionsHash })).toEqual({ kind: 'clear' });
   expect(standing({ stateHash, questionsHash: selection.questionsHash }).kind).toBe('held');
   expect(standing({ stateHash: selection.stateHash, questionsHash }).kind).toBe('held');
+});
+
+test('a current selector receipt does not also hash the historical selector wire', async () => {
+  const { captured, receipt, readings } = await selected(0.5, 'none', 0.99, 0.01);
+  const legacyState = { context: staticSelectionContext(captured), candidates: staticSelectionCandidates(captured) };
+  const legacyQuestions = { pick: choice(STATIC_WEAK_ANCHOR_INSTRUCTIONS, { candidate: null, none: 'None of the candidates does what is needed.' }),
+    fits_0: noul({ question: STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS, candidate: '`candidates[0]` (id "candidate")' }) };
+  const legacy = { ...readings, readings: { [staticInputKey(captured)]: { ...receipt, selection: { ...receipt.selection!,
+    stateHash: sha256(canonicalJson(toJson(legacyState))), questionsHash: sha256(canonicalJson(toJson(legacyQuestions))) } } } };
+  const hashing = spyOn(crypto, 'createHash'), nativeHashing = spyOn(Bun.CryptoHasher, 'hash');
+  const count = () => hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length
+    + nativeHashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
+  try {
+    expect(staticInputStanding(captured, readings)).toEqual({ kind: 'clear' });
+    const currentCount = count();
+    hashing.mockClear(); nativeHashing.mockClear();
+    expect(staticInputStanding(captured, legacy)).toEqual({ kind: 'clear' });
+    expect(count()).toBeGreaterThan(currentCount);
+  } finally { hashing.mockRestore(); nativeHashing.mockRestore(); }
 });
 
 test('weak exhaustive negative fits keep the original high band and every contradictory or absent fit holds', async () => {

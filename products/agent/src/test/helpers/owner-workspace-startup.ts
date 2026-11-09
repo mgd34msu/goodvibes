@@ -1,5 +1,4 @@
 /** Pairing-fixture readiness evidence, read only from its isolated home. */
-import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { WORKSPACE_REGISTRATION_QUESTION } from '../../shell/workspace-registration-question.ts';
@@ -12,9 +11,9 @@ export function observeOwnedWorkspaceDecline(home: Home) {
   catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (code !== 'ENOENT') throw error;
-    return { present: false, byteCount: 0, sha256: null, readable: false, ownedDecline: false };
+    return { present: false, byteCount: 0, readable: false, ownedDecline: false };
   }
-  const evidence = { present: true, byteCount: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') };
+  const evidence = { present: true, byteCount: bytes.length };
   let record: { version?: unknown; declines?: unknown };
   try { record = JSON.parse(bytes.toString('utf8')); }
   catch { return { ...evidence, readable: false, ownedDecline: false }; }

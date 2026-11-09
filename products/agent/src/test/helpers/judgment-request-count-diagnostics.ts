@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { types } from 'node:util';
 import { installJudgmentPort as nativeInstallJudgmentPort, judgmentPort } from '@goodvibes-jev/engine/errors';
 import type { fakePort } from '@goodvibes-jev/judgment/testing';
@@ -41,44 +40,39 @@ function dataField(value: unknown, key: string): unknown {
   return descriptor && 'value' in descriptor ? descriptor.value : undefined;
 }
 
-function fingerprint(value: unknown) {
-  const hash = createHash('sha256'), seen = new WeakSet<object>();
-  const append = (text: string) => { hash.update(`${Buffer.byteLength(text)}:`).update(text); };
+/** Diagnostic structure only; no content checksum, private keys or value text. */
+function summarizeShape(value: unknown) {
+  const seen = new WeakSet<object>();
   const shape = { nodes: 0, objects: 0, arrays: 0, strings: 0, stringCharacters: 0,
     dataSlots: 0, accessors: 0, proxies: 0, functions: 0, complete: true };
   function visit(item: unknown, depth: number): void {
-    if (shape.nodes >= 4096 || depth > 64) { shape.complete = false; append('bounded'); return; }
+    if (shape.nodes >= 4096 || depth > 64) { shape.complete = false; return; }
     shape.nodes++;
-    append(typeof item);
-    if (item === null) { append('null'); return; }
-    if (typeof item === 'string') { shape.strings++; shape.stringCharacters += item.length; append(JSON.stringify(item)); return; }
-    if (typeof item === 'number' || typeof item === 'bigint') { append(String(item)); return; }
-    if (typeof item === 'boolean') { append(item ? 'true' : 'false'); return; }
+    if (item === null) return;
+    if (typeof item === 'string') { shape.strings++; shape.stringCharacters += item.length; return; }
     if (typeof item === 'symbol') shape.complete = false;
     if (!object(item)) return;
-    if (types.isProxy(item)) { shape.proxies++; shape.complete = false; append('proxy'); return; }
+    if (types.isProxy(item)) { shape.proxies++; shape.complete = false; return; }
     if (typeof item === 'function') { shape.functions++; shape.complete = false; return; }
-    if (seen.has(item)) { append('repeat'); return; }
+    if (seen.has(item)) return;
     seen.add(item); shape.objects++;
     if (Array.isArray(item)) shape.arrays++;
     for (const key of Reflect.ownKeys(item)) {
-      if (shape.nodes >= 4096) { shape.complete = false; append('bounded'); break; }
-      append(typeof key === 'string' ? key : 'symbol-key');
+      if (shape.nodes >= 4096) { shape.complete = false; break; }
       if (typeof key === 'symbol') shape.complete = false;
       const descriptor = Object.getOwnPropertyDescriptor(item, key);
-      if (!descriptor) { shape.complete = false; append('missing'); continue; }
-      append(JSON.stringify([descriptor.enumerable, descriptor.configurable, descriptor.writable]));
+      if (!descriptor) { shape.complete = false; continue; }
       if ('value' in descriptor) { shape.dataSlots++; visit(descriptor.value, depth + 1); }
-      else { shape.accessors++; shape.complete = false; append('accessor'); }
+      else { shape.accessors++; shape.complete = false; }
     }
   }
   visit(value, 0);
-  return { sha256: hash.digest('hex'), shape };
+  return { shape };
 }
 
 function named(value: unknown, known: ReadonlySet<string>) {
   return typeof value === 'string' && known.has(value)
-    ? { kind: 'known', id: value } : { kind: 'opaque', ...fingerprint(value) };
+    ? { kind: 'known', id: value } : { kind: 'opaque', ...summarizeShape(value) };
 }
 
 function requestSummary(request: unknown) {
@@ -88,7 +82,7 @@ function requestSummary(request: unknown) {
     for (const key of Reflect.ownKeys(questions)) ids.push(named(key, questionNames));
   }
   return { battery: named(dataField(context, 'battery'), batteryNames), questionIds: ids,
-    context: fingerprint(context), questions: fingerprint(questions), state: fingerprint(dataField(request, 'state')) };
+    context: summarizeShape(context), questions: summarizeShape(questions), state: summarizeShape(dataField(request, 'state')) };
 }
 
 /** Attribution only: no reading captures, request wrappers, or answer changes. */

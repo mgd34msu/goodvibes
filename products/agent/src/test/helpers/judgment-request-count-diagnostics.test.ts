@@ -40,9 +40,10 @@ test.each(['private', 'accessor', 'proxy'])('%s request diagnostics expose no pr
   expect(f.lines).toHaveLength(1); expect(f.lines.join('')).not.toContain(sensitive); expect(touched).toBe(0);
   const report: unknown = JSON.parse(f.lines[0] ?? 'null');
   expect(report).toMatchObject({ expected: 0, actual: 1, requests: [{
-    battery: { kind: 'opaque', sha256: expect.any(String) }, questionIds: [{ kind: 'opaque', sha256: expect.any(String) }],
-    state: { sha256: expect.any(String), shape: kind === 'proxy' ? { proxies: 1 } : kind === 'accessor' ? { accessors: 1 } : { objects: 1 } },
+    battery: { kind: 'opaque', shape: { strings: 1 } }, questionIds: [{ kind: 'opaque', shape: { strings: 1 } }],
+    state: { shape: kind === 'proxy' ? { proxies: 1 } : kind === 'accessor' ? { accessors: 1 } : { objects: 1 } },
   }] });
+  expect(f.lines[0]).not.toContain('sha256');
   expect(f.fake.requests).toHaveLength(1);
 });
 

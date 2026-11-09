@@ -36,7 +36,7 @@ test('owner startup cannot acknowledge composer echo before the real decline is 
     release(); await decline;
     const committed = ownerWorkspaceStartupReadiness('┃  x', home);
     expect(committed.ready).toBe(true); expect(committed.registration.ownedDecline).toBe(true);
-    expect(committed.registration.byteCount).toBeGreaterThan(0); expect(committed.registration.sha256).toHaveLength(64);
+    expect(committed.registration.byteCount).toBeGreaterThan(0); expect(committed.registration).not.toHaveProperty('sha256');
     expect(ownerWorkspaceStartupReadiness(`${WORKSPACE_REGISTRATION_QUESTION}\n┃  x`, home).ready).toBe(false);
     const other = join(root, 'other'); mkdirSync(other);
     expect(ownerWorkspaceStartupReadiness('┃  x', { ...home, workspace: other }).ready).toBe(false);
@@ -54,7 +54,7 @@ test('startup diagnostics identify malformed registry bytes without exposing the
     writeFileSync(join(home.home, '.goodvibes/shared/workspace-registrations.json'), 'not-json-sensitive-fixture-marker');
     const evidence = observeOwnedWorkspaceDecline(home);
     expect(evidence).toMatchObject({ present: true, readable: false, ownedDecline: false });
-    expect(evidence.byteCount).toBeGreaterThan(0); expect(evidence.sha256).toHaveLength(64);
+    expect(evidence.byteCount).toBeGreaterThan(0); expect(evidence).not.toHaveProperty('sha256');
     expect(JSON.stringify(evidence)).not.toContain('sensitive-fixture-marker');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

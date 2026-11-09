@@ -5,7 +5,6 @@ import conversationRoute from '../fixtures/e2e-judgments/conversation-route.json
 import modelIdentity from '../fixtures/e2e-judgments/model-identity.json';
 import modelTier from '../fixtures/e2e-judgments/model-tier.json';
 import turnQuestions from '../fixtures/e2e-judgments/turn-questions.json';
-import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import unavailableModelRoutes from '../fixtures/e2e-judgments/unavailable-model-routes.json';
 import cancelledTurnTimings from '../fixtures/e2e-judgments/cancelled-turn-timings.json';
@@ -218,13 +217,12 @@ export function startE2EJudgments(options: { readonly ownedRoot?: string } = {})
       const questions = structuredClone(headlessCompletion.questions);
       // Match the native target adapter for this exact authored task and reply.
       // Never retain the captured marmot task's targets for a different case.
-      const target = (text: string) => ({ text, digest: createHash('sha256').update(JSON.stringify(text))
-        .digest('hex').replace(/\d/g, digit => 'ghijklmnop'[Number(digit)]!) });
+      const target = (text: string) => ({ text });
       for (const question of Object.values(questions)) {
-        const targets = question.instructions.nativeTargets;
-        if (response.length <= 4_000) targets.proposedAnswer = target(response);
+        const targets: Record<string, unknown> = question.instructions.nativeTargets;
+        if (response.length <= 4_000) targets['proposedAnswer'] = target(response);
         else Reflect.deleteProperty(targets, 'proposedAnswer');
-        if (request.length <= 4_000) targets.currentUserRequest = target(request);
+        if (request.length <= 4_000) targets['currentUserRequest'] = target(request);
         else Reflect.deleteProperty(targets, 'currentUserRequest');
       }
       const completion = { ...headlessCompletion, questions, state: { ...headlessCompletion.state,

@@ -189,8 +189,8 @@ async function fixture(environmentOverride = false) {
         let registration: unknown;
         try {
           const observed = observeOwnedWorkspaceDecline(home);
-          registration = { byteCount: observed.byteCount, sha256: observed.sha256, ownedDecline: observed.ownedDecline };
-        } catch { registration = { byteCount: null, sha256: null, ownedDecline: false }; }
+          registration = { present: observed.present, byteCount: observed.byteCount, readable: observed.readable, ownedDecline: observed.ownedDecline };
+        } catch { registration = { present: null, byteCount: null, readable: false, ownedDecline: false }; }
         let diagnostic = `${String(error)}\nregistration=${JSON.stringify(registration)}\nrestart=${isRestart} exit=${session.child.exitCode} signal=${session.child.signalCode} bytes=${session.output().length}\n--- current terminal ---\n${session.screen()}`;
         for (const token of [daemon.token, ...authTokens.map(value => value?.replace(/^Bearer\s+/i, ''))]) {
           if (token) diagnostic = diagnostic.replaceAll(token, '[fixture credential]');

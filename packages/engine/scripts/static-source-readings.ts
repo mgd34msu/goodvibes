@@ -614,14 +614,21 @@ function currentEvidence(value: unknown, input: StaticSourceInput, selection: bo
     || !(value.requestId === null || nonempty(value.requestId)) || !object(value.answers)
     || (value.captureDecisionSourceHash !== undefined && !nonempty(value.captureDecisionSourceHash))) return null;
   const decision = selection ? (weakSelection ? staticWeakAnchor : staticOffendingAnchor) : batteryFor(input.kind);
+  if (value.battery !== decision.name || value.version !== decision.version || value.site !== `${STATIC_SITE}.${input.kind}`) return null;
   const current = selection ? selectionInput(input, weakSelection)
     : { state: staticInputState(input), questions: { violation: batteryFor(input.kind).items.violation.question } };
   const variants = selection ? [current, { state: { context: staticSelectionContext(input), candidates: staticSelectionCandidates(input) },
     questions: legacySelectionQuestions(input, weakSelection) }] : [current];
-  const exact = variants.map(wire => ({ stateHash: hashState(wire.state), questionsHash: sha256(canonicalJson(toJson(wire.questions))) }))
-    .find(wire => wire.stateHash === value.stateHash && wire.questionsHash === value.questionsHash);
-  if (value.battery !== decision.name || value.version !== decision.version || value.site !== `${STATIC_SITE}.${input.kind}`
-    || !exact) return null;
+  let exact: { stateHash: string; questionsHash: string } | undefined;
+  for (const wire of variants) {
+    const stateHash = hashState(wire.state);
+    if (stateHash !== value.stateHash) continue;
+    const questionsHash = sha256(canonicalJson(toJson(wire.questions)));
+    if (questionsHash !== value.questionsHash) continue;
+    exact = { stateHash, questionsHash };
+    break;
+  }
+  if (!exact) return null;
   if (selection && selectionAnswer(value.answers, input) === null) return null;
   return { id: value.id, at: value.at, battery: decision.name, version: decision.version, site: `${STATIC_SITE}.${input.kind}`,
     stateHash: exact.stateHash, questionsHash: exact.questionsHash, requestedModel: DEFAULT_MODEL,

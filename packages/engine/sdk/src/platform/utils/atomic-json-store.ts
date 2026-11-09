@@ -38,7 +38,8 @@
  *     , a real crash that killed a running agent. With a per-write name,
  *      writer A and writer B never share a path; with an age-gated sweep, a
  *      temp file young enough to belong to a write still in progress is left
- *      alone and only genuine crash leftovers are reclaimed.
+ *      alone. Reclamation additionally requires a recognized native PID that
+ *      no longer exists; age alone cannot identify a crashed writer.
  *
  *      There is deliberately NO in-process write lock. Every step above is a
  *      synchronous `node:fs` call with no await between them, so two writes of
@@ -66,6 +67,8 @@
 import {
   chmodSync,
   closeSync,
+  constants,
+  fchmodSync,
   existsSync,
   fstatSync,
   fsyncSync,
@@ -85,7 +88,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
 import { basename, dirname, isAbsolute, join, parse, sep } from 'node:path';
-import type { Stats } from 'node:fs';
+import type { BigIntStats, Stats } from 'node:fs';
 import { logger } from './logger.js';
 
 /**
@@ -96,19 +99,9 @@ import { logger } from './logger.js';
  */
 export const CORRUPT_QUARANTINE_MAX_FILES = 5;
 
-/**
- * How old a `<name>.tmp-*` file must be before the pre-write sweep will delete
- * it.
- *
- * The sweep cannot tell a crash leftover from another writer's work in
- * progress by name alone, so it uses age: a temp file written within the last
- * minute may still belong to a live write (another process, or this one on a
- * worker thread) and is left strictly alone. One minute is far longer than any
- * store here takes to serialize, open, write, fsync, chmod and rename, a few
- * hundred kilobytes of JSON at most, so a leftover from a process that really
- * did die becomes eligible on the next write a minute later, while a live
- * writer is never robbed of its temp file.
- */
+/** Minimum age before a proven-dead native writer's temporary file can be
+ * reclaimed. Age alone never proves that a paused or slow writer has exited;
+ * live, inaccessible and unrecognized writer identities remain untouched. */
 export const STALE_TEMP_FILE_MIN_AGE_MS = 60_000;
 
 /** Default mode for a store file: owner read/write only. */
@@ -259,54 +252,161 @@ export function confirmFileDurable(filePath: string): void {
   }
 }
 
+interface AtomicDirectoryOwner { readonly canonical: string; assertCurrent(): void; assertPhysicalCurrent(): void }
+const atomicDirectoryStamp = (stat: BigIntStats): string => {
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Atomic file parent is not a physical directory');
+  return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
+};
+const atomicFileStamp = (stat: BigIntStats): string => [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink,
+  stat.size, stat.mtimeNs, stat.ctimeNs, stat.birthtimeNs].join(':');
+function atomicMissing(error: unknown): boolean { return error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT'; }
+
+/** Plan the actual parent lookup, including configured existing aliases and
+ * symlink-aware '..', before creating anything. Never create a dangling alias's
+ * target. Original directories and links stay pinned through publication. */
+function prepareAtomicDirectory(absolute: string, assertOwner: () => void): AtomicDirectoryOwner {
+  const directories = new Map<string, string>(), links: Array<{ path: string; identity: string; target: string }> = [];
+  const absent = new Set<string>();
+  let cursor = parse(absolute).root, pending = absolute.slice(cursor.length).split(sep);
+  directories.set(cursor, atomicDirectoryStamp(lstatSync(cursor, { bigint: true })));
+  const observe = (path: string) => {
+    const stat = lstatSync(path, { bigint: true }), identity = atomicDirectoryStamp(stat), previous = directories.get(path);
+    if (previous !== undefined && previous !== identity) throw new Error('Atomic file parent changed during capture');
+    directories.set(path, identity);
+  };
+  while (pending.length) {
+    const component = pending.shift(); if (!component || component === '.') continue;
+    if (component === '..') { cursor = dirname(cursor); if (!absent.has(cursor)) observe(cursor); continue; }
+    const path = join(cursor, component);
+    let stat: BigIntStats;
+    try { stat = lstatSync(path, { bigint: true }); }
+    catch (error) { if (!atomicMissing(error)) throw error; absent.add(path); cursor = path; continue; }
+    if (stat.isSymbolicLink()) {
+      if (links.length >= 40) throw new Error('Atomic file parent has too many aliases');
+      const target = readlinkSync(path), identity = atomicFileStamp(stat);
+      if (atomicFileStamp(lstatSync(path, { bigint: true })) !== identity || !statSync(realpathSync(path)).isDirectory()) throw new Error('Atomic file parent alias is unavailable');
+      links.push({ path, identity, target });
+      if (isAbsolute(target)) { cursor = parse(target).root; observe(cursor); }
+      pending = [...target.slice(isAbsolute(target) ? parse(target).root.length : 0).split(sep), ...pending];
+      continue;
+    }
+    observe(path); cursor = path;
+  }
+  const canonical = cursor;
+  const current = (checkAbsent = true) => {
+    for (const [path, identity] of directories) if (atomicDirectoryStamp(lstatSync(path, { bigint: true })) !== identity) throw new Error('Atomic file parent changed');
+    for (const link of links) if (atomicFileStamp(lstatSync(link.path, { bigint: true })) !== link.identity || readlinkSync(link.path) !== link.target) throw new Error('Atomic file parent alias changed');
+    for (const path of checkAbsent ? absent : []) {
+      try { lstatSync(path); } catch (error) { if (atomicMissing(error)) continue; throw error; }
+      throw new Error('Atomic file parent appeared during capture');
+    }
+  };
+  current();
+  for (const path of [...absent]) {
+    assertOwner(); current(); mkdirSync(path);
+    const created = lstatSync(path, { bigint: true });
+    directories.set(path, atomicDirectoryStamp(created)); absent.delete(path); current(false);
+    // Retain inherited group/special bits while ensuring the creator can finish
+    // a nested write even under a restrictive umask.
+    const mode = Number(created.mode & 0o7777n) | 0o700;
+    if (Number(created.mode & 0o7777n) !== mode) {
+      chmodSync(path, mode); const after = lstatSync(path, { bigint: true });
+      if (after.dev !== created.dev || after.ino !== created.ino) throw new Error('Atomic file created parent changed');
+      directories.set(path, atomicDirectoryStamp(after));
+    }
+    current();
+  }
+  current(); if (realpathSync(absolute) !== canonical) throw new Error('Atomic file parent lookup changed');
+  const physical: Array<{ path: string; identity: string }> = [];
+  for (let path = canonical;; path = dirname(path)) {
+    const identity = directories.get(path); if (identity === undefined) throw new Error('Atomic physical parent proof is unavailable');
+    physical.push({ path, identity }); if (dirname(path) === path) break;
+  }
+  return { canonical,
+    assertCurrent() { current(); if (realpathSync(absolute) !== canonical) throw new Error('Atomic file parent lookup changed'); },
+    assertPhysicalCurrent() { for (const parent of physical) if (atomicDirectoryStamp(lstatSync(parent.path, { bigint: true })) !== parent.identity) throw new Error('Atomic physical parent changed'); },
+  };
+}
+
+function ownsAtomicFile(stat: BigIntStats | undefined, original: BigIntStats | undefined): boolean {
+  return !!stat && !!original && stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n
+    && stat.dev === original.dev && stat.ino === original.ino && stat.uid === original.uid && stat.gid === original.gid && stat.birthtimeNs === original.birthtimeNs;
+}
 /**
  * Write `contents` to `filePath` atomically, creating parent directories as
  * needed. See the module docstring for the mechanics and why they matter.
  */
 export function writeFileAtomic(filePath: string, contents: string | Uint8Array, options: AtomicWriteOptions = {}): void {
-  // Strings are immutable; detach binary input before any borrowed guard runs.
-  // Preserve exact bytes, including NUL and invalid UTF-8, without text coercion.
   const input = typeof contents === 'string' ? contents : Buffer.from(contents);
-  const guard = options.assertCurrent;
+  const expected = typeof input === 'string' ? Buffer.from(input, 'utf8') : input;
+  const guard = options.assertCurrent?.bind(options), mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
+  const durable = options.durable === true, sweep = options.cleanupStaleTemps !== false;
+  const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
+  const leaf = basename(absolute);
+  let parent: AtomicDirectoryOwner | undefined, tmpPath: string | undefined;
+  let fd: number | undefined, original: BigIntStats | undefined, prepared: BigIntStats | undefined;
+  let published = false, attempted = false;
   const current = () => {
     const result: unknown = guard?.();
     if (result !== undefined) {
       if (nodeTypes.isPromise(result)) Reflect.apply(Promise.prototype.then, result, [undefined, () => {}]);
       throw new Error('Atomic file operation currentness is unavailable.');
     }
+    parent?.assertCurrent();
   };
-  const mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
-  const dir = dirname(filePath);
-  let tmpPath: string | undefined;
-  let published = false;
+  const assertTemporary = () => {
+    parent?.assertCurrent();
+    if (fd === undefined || !tmpPath || !original) throw new Error('Atomic staging ownership is unavailable');
+    const descriptor = fstatSync(fd, { bigint: true }), selected = lstatSync(tmpPath, { bigint: true, throwIfNoEntry: false });
+    if (!ownsAtomicFile(descriptor, original) || !ownsAtomicFile(selected, original)
+      || (prepared !== undefined && (atomicFileStamp(descriptor) !== atomicFileStamp(prepared) || !selected || atomicFileStamp(selected) !== atomicFileStamp(prepared)))) throw new Error('Atomic staging source changed');
+  };
+  const cleanup = () => {
+    if (!parent || !tmpPath || !original || published) return;
+    try { parent.assertPhysicalCurrent(); if (ownsAtomicFile(lstatSync(tmpPath, { bigint: true, throwIfNoEntry: false }), original)) unlinkSync(tmpPath); }
+    catch { /* Preserve unknown/foreign paths. Cleanup never supplies authority. */ }
+  };
   try {
-    current();
-    mkdirSync(dir, { recursive: true });
-    if (options.cleanupStaleTemps !== false) cleanupStaleTempFiles(dir, filePath);
-    tmpPath = createAtomicTempPath(filePath);
-    current();
-    const fd = openSync(tmpPath, 'w', mode);
-    try {
-      current();
-      const written = typeof input === 'string' ? writeSync(fd, input, null, 'utf-8') : writeSync(fd, input, 0, input.byteLength, null);
-      if (written !== (typeof input === 'string' ? Buffer.byteLength(input, 'utf-8') : input.byteLength)) {
-        throw new Error('Incomplete atomic file write');
+    if (!leaf || leaf === '.' || leaf === '..' || absolute.endsWith(sep) || absolute.includes('\0')) throw new Error('Atomic publication requires a file target');
+    parent = prepareAtomicDirectory(dirname(absolute), current); current();
+    const target = join(parent.canonical, leaf);
+    if (sweep) cleanupStaleTempFiles(parent.canonical, target, current);
+    tmpPath = createAtomicTempPath(target); current();
+    fd = openSync(tmpPath, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW | constants.O_NONBLOCK, DEFAULT_STORE_FILE_MODE);
+    original = fstatSync(fd, { bigint: true }); current(); assertTemporary();
+    fchmodSync(fd, mode); current(); assertTemporary();
+    const written = typeof input === 'string' ? writeSync(fd, input, null, 'utf8') : writeSync(fd, input, 0, input.byteLength, null);
+    if (written !== expected.byteLength) throw new Error('Incomplete atomic file write');
+    prepared = fstatSync(fd, { bigint: true });
+    if (prepared.size !== BigInt(expected.byteLength)) throw new Error('Atomic staging size changed');
+    current(); assertTemporary(); fsyncSync(fd);
+    current(); assertTemporary();
+    // The prepared nanosecond file stamp detects edits by a borrowed guard;
+    // publication does not need to read back or hash the completed file.
+    // No borrowed callback or async gap is allowed between the identity proof
+    // and the native rename into the retained original physical parent.
+    attempted = true; renameSync(tmpPath, target); published = true;
+    parent.assertCurrent();
+    if (!ownsAtomicFile(lstatSync(target, { bigint: true }), original)) throw new Error('Atomic publication is not the original staged file');
+    if (durable) {
+      try { confirmFileDurable(absolute); }
+      catch (error) {
+        if (error instanceof AtomicWriteDurabilityError && error.filePath !== filePath) throw new AtomicWriteDurabilityError(filePath, error.phase, error.cause);
+        throw error;
       }
-      current();
-      fsyncSync(fd);
-    } finally { closeSync(fd); }
-    current();
-    chmodSync(tmpPath, mode);
-    current();
-    renameSync(tmpPath, filePath);
-    published = true;
-    if (options.durable === true) confirmFileDurable(filePath);
-  } catch (error) {
-    if (tmpPath !== undefined && !published) {
-      try { unlinkSync(tmpPath); }
-      catch { /* Best-effort temp cleanup; never restore the previous image. */ }
     }
-    if (options.durable === true) {
+    parent.assertCurrent();
+    if (!ownsAtomicFile(lstatSync(target, { bigint: true }), original)) throw new Error('Atomic publication changed during confirmation');
+    closeSync(fd); fd = undefined;
+  } catch (error) {
+    if (!published && attempted) {
+      // A thrown rename is only pre-publication when the exact original stage
+      // still exists under the original parent. Otherwise retain uncertainty.
+      try { assertTemporary(); } catch { published = true; }
+    }
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* The original error remains the diagnostic. */ } fd = undefined; }
+    cleanup();
+    if (durable) {
       if (error instanceof AtomicWriteDurabilityError) throw error;
       throw new AtomicWriteDurabilityError(filePath, published ? 'published-indeterminate' : 'before-publication', error);
     }
@@ -316,13 +416,15 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
 
 /** Serialize `value` as JSON and write it atomically via {@link writeFileAtomic}. */
 export function writeJsonFileAtomic(filePath: string, value: unknown, options: AtomicJsonWriteOptions = {}): void {
+  const durable = options.durable === true;
   try {
     const indent = options.indent === undefined ? 2 : options.indent;
     const trailingNewline = options.trailingNewline ?? true;
     const serialized = indent === null ? JSON.stringify(value) : JSON.stringify(value, null, indent);
+    if (serialized === undefined) throw new Error('Atomic JSON input did not serialize to a value');
     writeFileAtomic(filePath, trailingNewline ? `${serialized}\n` : serialized, options);
   } catch (error) {
-    if (options.durable === true && !(error instanceof AtomicWriteDurabilityError)) {
+    if (durable && !(error instanceof AtomicWriteDurabilityError)) {
       throw new AtomicWriteDurabilityError(filePath, 'before-publication', error);
     }
     throw error;
@@ -523,53 +625,34 @@ export function quarantineCorruptFile(filePath: string, options: QuarantineOptio
   });
 }
 
-/**
- * Remove `<basename>.tmp-*` files beside `filePath` that are old enough to be
- * crash leftovers, and only those.
- *
- * Age is the only signal available: the name says which process and which
- * write produced a temp file, but not whether that write is still running. A
- * temp file modified within {@link STALE_TEMP_FILE_MIN_AGE_MS} may belong to a
- * write in progress in another process, or in this one, on a worker thread,
- * and deleting it makes that writer's own `chmod` or `rename` fail with
- * ENOENT. That is exactly how a live agent process died, so the young ones are
- * left strictly alone here; the next write a minute later reclaims anything
- * that really was abandoned.
- *
- * A temp file whose age cannot be read at all (it vanished between the
- * directory listing and the stat, or its metadata is unreadable) is skipped
- * for the same reason: an unknown age is not evidence of abandonment.
- */
-function cleanupStaleTempFiles(dir: string, filePath: string): void {
+/** Reclaim only aged native temporary files whose recorded writer is proven
+ * dead. Hold the original directory and exact regular-file metadata through
+ * unlink; a live, inaccessible, unknown, aliased or replaced source is retained. */
+function cleanupStaleTempFiles(dir: string, filePath: string, assertCurrent: () => void): void {
   const prefix = `${basename(filePath)}.tmp-`;
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return;
-  }
+  let names: string[]; try { names = readdirSync(dir); } catch { return; }
   const staleBefore = Date.now() - STALE_TEMP_FILE_MIN_AGE_MS;
   for (const name of names) {
     if (!name.startsWith(prefix)) continue;
-    const stalePath = join(dir, name);
-    let modifiedAtMs: number;
+    const writer = /^([1-9]\d*)(?:-|$)/.exec(name.slice(prefix.length));
+    if (!writer) continue;
+    const pid = Number(writer[1]); if (!Number.isSafeInteger(pid) || pid <= 0) continue;
+    try { process.kill(pid, 0); continue; }
+    catch (error) { if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ESRCH') continue; }
+    const stalePath = join(dir, name); assertCurrent();
+    let before: BigIntStats;
+    try { before = lstatSync(stalePath, { bigint: true }); } catch { continue; }
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || Number(before.mtimeMs) > staleBefore
+      || (process.geteuid && before.uid !== BigInt(process.geteuid()))) continue;
+    // Permission/source failures abort the publication; they are not swallowed
+    // as an optional failure to inspect one stale candidate.
+    assertCurrent();
     try {
-      modifiedAtMs = statSync(stalePath).mtimeMs;
-    } catch {
-      continue;
-    }
-    if (modifiedAtMs > staleBefore) continue;
-    try {
+      const after = lstatSync(stalePath, { bigint: true });
+      if (atomicFileStamp(after) !== atomicFileStamp(before)) continue;
       unlinkSync(stalePath);
-      logger.warn('[atomic-json-store] removed a stale temp file left by a previous crash', {
-        filePath,
-        stalePath,
-        ageMs: Math.max(0, Date.now() - modifiedAtMs),
-      });
-    } catch {
-      // Best-effort, a concurrent writer or a permissions issue must not
-      // block this save.
-    }
+      logger.warn('[atomic-json-store] removed a stale temp file left by a dead writer', { filePath, stalePath, ageMs: Math.max(0, Date.now() - Number(before.mtimeMs)) });
+    } catch { /* Unknown ownership or replacement leaves the source untouched. */ }
   }
 }
 

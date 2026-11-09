@@ -1,5 +1,6 @@
 /** Original daemon scorer/pipeline assertions, adapted to the inventoried Jev contract. */
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { labelToTag } from '../sdk/src/platform/intake/triage/evidence.js';
 import { scoreInboxTriage } from '../sdk/src/platform/intake/triage/scorer.js';
@@ -75,6 +76,28 @@ describe('original triage code assertions with recorded readings', () => {
     expect(enriched[0]?.triage?.label).toBe('priority');
     expect(enriched[1]).toEqual(unscored);
     expect(owner.reads).toEqual([['scored', 'unscored']]);
+  });
+
+  // Regression source UNRUN: hashing is reserved for an actual saved match.
+  test('inbox refresh skips input hashes for absent, held, unavailable and invalid receipts', async () => {
+    const owner = memory(), current = item('current');
+    await runInboxTriage([current], { store: owner.store, port: recorded(.01, .99).port });
+    await runInboxTriage([item('held')], { store: owner.store, port: recorded(.5, .5).port });
+    await runInboxTriage([item('unavailable')], { store: owner.store });
+    const saved = owner.rows.get(current.id)!;
+    owner.rows.set('invalid', { latest: { ...saved.latest, id: 'invalid', inputHash: 'invalid' }, settled: saved.settled });
+    const unscored = [...Array.from({ length: 20 }, (_, index) => item(`missing-${index}`)), item('held'), item('unavailable'), item('invalid')];
+    const hashes = spyOn(crypto, 'createHash');
+    const count = () => hashes.mock.calls.filter(([algorithm]) => algorithm === 'sha256').length;
+    try {
+      expect((await readTriageMetadataBatch(unscored, owner.store)).size).toBe(0);
+      expect(count()).toBe(0);
+      expect((await readTriageMetadataBatch([current, ...unscored], owner.store)).get(current.id)?.label).toBe('priority');
+      expect(count()).toBe(1);
+      expect((await readTriageMetadataBatch([{ ...current, subject: 'Actually changed input' }], owner.store)).size).toBe(0);
+      expect(count()).toBe(2);
+    } finally { hashes.mockRestore(); }
+    expect(owner.reads).toEqual([unscored.map(input => input.id), [current.id, ...unscored.map(input => input.id)], [current.id]]);
   });
 
   test('dry run and empty pipeline/enrichment do not read, write or close borrowed storage', async () => {

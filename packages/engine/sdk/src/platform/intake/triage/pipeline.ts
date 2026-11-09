@@ -20,24 +20,27 @@ export async function runInboxTriage(items: readonly TriageInput[], options: Run
 /** One batched read; historical evidence is projected only when the latest receipt still agrees. */
 export async function readTriageMetadataBatch(items: readonly TriageInput[], store: TriageStore): Promise<ReadonlyMap<string, TriageEvidence>> {
   const input = captureTriageInputs(items);
-  // Only persisted receipt matching needs this commitment; live owned source fences compare exact captured input.
-  const current = new Map(input.map(item => [item.id, triageBinding(item)]));
+  const current = new Map(input.map(item => [item.id, item]));
   if (!current.size) return new Map();
   const records = await store.readBatch([...current.keys()]);
   const out = new Map<string, TriageEvidence>();
   // Native iteration rejects forged/proxy Maps and ignores overridden getters/iterators.
   const entries = Map.prototype.entries.call(records) as IterableIterator<[string, TriageStoredRecord]>;
   for (const [id, raw] of entries) {
-    const binding = current.get(id);
-    if (!binding) continue;
+    const original = current.get(id);
+    if (!original) continue;
     try {
       const captured = captureTriageData(raw);
       if (!captured || typeof captured !== 'object' || Array.isArray(captured)) continue;
       const record = captured as unknown as TriageStoredRecord;
       const latest = checkTriageReceipt(record.latest);
-      if (latest.status !== 'settled' || latest.id !== id || latest.inputHash !== binding.inputHash) continue;
+      if (latest.status !== 'settled' || latest.id !== id) continue;
       const settled = checkTriageReceipt(record.settled);
-      if (settled.status === 'settled' && isDeepStrictEqual(settled, latest)) out.set(id, settled);
+      // Absent, held, unavailable or invalid evidence has no current label to
+      // match. Only a genuine candidate receipt needs the persisted commitment;
+      // do not hash every unscored message during routine inbox refreshes.
+      if (settled.status === 'settled' && isDeepStrictEqual(settled, latest)
+        && latest.inputHash === triageBinding(original).inputHash) out.set(id, settled);
     } catch { /* Invalid stored evidence is never converted into a current label. */ }
   }
   return out;

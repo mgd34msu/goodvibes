@@ -13,8 +13,10 @@
  * complete and had no caller, so `runCheckout` was unreachable and the daemon
  * had no way to begin a purchase at all.
  *
- * So this file drives the chain through the REAL control-plane verbs, resolved
- * from the live catalog by id, with the real handlers bound to the real service.
+ * This file exercises the primitive SDK route handlers over the real service.
+ * Native detached admission, paired authority and status/restart handling are
+ * covered separately by payments-host-gateway-verbs and payments-detached-*.
+ * The primitive handlers are resolved from the live catalog by id.
  * Nothing here reaches into `runCheckout` directly. If a verb is missing, its
  * schema is wrong, or the service is not wired, these fail, which is the point.
  *
@@ -182,6 +184,7 @@ async function buildHarness(options: { readonly established?: boolean } = {}): P
 async function beginParams(): Promise<Record<string, unknown>> {
   const reading = await readFixtureCheckout(merchant);
   return {
+    requestId: 'owner-chain-fixture',
     sessionId: 'session-1',
     pageId: 'page-1',
     merchantDomain: 'www.bestbuy.com',
@@ -229,7 +232,7 @@ describe('the verbs exist and are reachable', () => {
     const schema = descriptor?.inputSchema as unknown as { required: string[] };
     // A handler stricter than its published contract is a 400 no consumer
     // could have predicted from the schema.
-    for (const field of ['sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item', 'cardId', 'lines', 'shippingOptions', 'cardFields', 'placeOrderTarget']) {
+    for (const field of ['requestId', 'sessionId', 'pageId', 'merchantDomain', 'checkoutUrl', 'item', 'cardId', 'lines', 'shippingOptions', 'cardFields', 'placeOrderTarget']) {
       expect(schema.required).toContain(field);
     }
   });

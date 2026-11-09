@@ -31,6 +31,8 @@
  *
  * What is NOT simulated: the driver, the guard, the composition, the service,
  * the verbs, their handlers, the decision order, the fill order or the redaction.
+ * These are primitive SDK route/service seam tests. Native detached admission,
+ * paired authority and status/restart handling have separate host suites.
  */
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -998,6 +1000,7 @@ async function sevenVerbComposition(options: SevenVerbCompositionOptions = {}): 
 /** The begin payload, as the model would report a checkout it had snapshotted. */
 function beginParams(): Record<string, unknown> {
   return {
+    requestId: 'browser-seam-fixture',
     sessionId: 'session-1',
     pageId: 'page-1',
     merchantDomain: 'www.bestbuy.com',

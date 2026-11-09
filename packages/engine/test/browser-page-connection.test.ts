@@ -82,7 +82,9 @@ test('actual native snapshot and protocol observations are retained together thr
     const snapshot = await engine.snapshot(target);
     const recovery = await engine.captureCheckoutRecovery(target, ['e1'], {});
     expect(recovery?.connection.endpoint).toBe(endpoint);
-    expect(recovery?.controls.snapshotId).toBe(snapshot['snapshotId']);
+    const snapshotId = snapshot['snapshotId'];
+    if (typeof snapshotId !== 'string') throw new Error('The engine returned no original snapshot identity.');
+    expect(recovery?.controls.snapshotId).toBe(snapshotId);
     expect(recovery?.controls.controls[0]).toMatchObject({ ref: 'e1', selector: '#original-submit',
       metadata: { name: 'Place order', documentUrl: 'https://merchant.example/checkout' } });
     expect(requests).toEqual([]);

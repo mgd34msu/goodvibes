@@ -63,6 +63,7 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s retains one compact r
   try {
     expect((await run(f.deps))[0]?.success).toBe(true);
     const source = prepare.mock.calls[0]?.[0];
+    if (typeof source !== 'string') throw new Error('The admitted tool has no original replay source.');
     expect(source).toMatch(/^[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
     await expect(run({ ...f.deps })).rejects.toThrow('claimed');
     await expect(run({ ...f.deps }, { commands: [{ cmd: 'a different action under the same call' }] })).rejects.toThrow('claimed');

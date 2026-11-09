@@ -134,7 +134,7 @@ describe('the embedded speexdsp module is the artifact it says it is', () => {
     expect(bytes.length).toBe(SPEEXDSP_WASM_BYTES);
     expect(Buffer.from(bytes).toString('base64')).toBe(SPEEXDSP_WASM_BASE64);
     expect(WebAssembly.validate(bytes)).toBe(true);
-    expect(SPEEXDSP_PREPROCESS.moduleBytes).toBe(bytes.length);
+    expect(bytes.length).toBe(SPEEXDSP_PREPROCESS.moduleBytes);
   });
 
   test('the license is BSD-3-Clause and its NOTICE is carried where the manifest says', () => {

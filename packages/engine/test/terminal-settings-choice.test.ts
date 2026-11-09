@@ -1,3 +1,4 @@
+import { captureDecisionRouterSettings } from '@goodvibes-jev/engine/sdk/browser/decision-router';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -164,7 +165,7 @@ test('a stale Decision Router advanced editor cannot overwrite a newer category 
   const old = f.modal.items[0]?.id;
   expect(old).toBeDefined();
   const replacement = { categories: { general: { target: { provider: 'answer', model: 'newer' } } } };
-  f.config.set('provider.decisionRouter', replacement);
+  f.config.set('provider.decisionRouter', captureDecisionRouterSettings(replacement));
   f.choose(old!);
   expect(f.config.get('provider.decisionRouter').categories['general']?.target?.model).toBe('newer');
   expect(f.errors[0]).toContain('Routing settings changed');
@@ -174,7 +175,7 @@ test('a stale Decision Router category picker cannot clear a newer override', ()
   const f = fixture('decision-policy');
   const context = { ...f.context, provider: { providerRegistry: { listModels: () => [] } } };
   openDecisionRouterSettings(context); f.choose('research');
-  f.config.set('provider.decisionRouter', { categories: { research: { target: { provider: 'answer', model: 'newer' } } } });
+  f.config.set('provider.decisionRouter', captureDecisionRouterSettings({ categories: { research: { target: { provider: 'answer', model: 'newer' } } } }));
   f.choose('__general__');
   expect(f.config.get('provider.decisionRouter').categories['research']?.target?.model).toBe('newer');
   expect(f.errors[0]).toContain('Routing settings changed');

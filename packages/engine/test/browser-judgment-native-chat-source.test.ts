@@ -50,7 +50,9 @@ test('HTTP history revisions bind actual code and speech readers and expire acro
     expect(response?.status).toBe(200);
     const history = await response!.json() as { messages: { id: string; sessionId: string; content: string; contentRevision: string }[] };
     const message = history.messages[0]!;
-    expect(message.contentRevision).toBe(manager.getMessages('native-chat')[0]!.contentRevision);
+    const originalRevision = manager.getMessages('native-chat')[0]?.contentRevision;
+    if (typeof originalRevision !== 'string') throw new Error('The native chat did not expose its current content revision.');
+    expect(message.contentRevision).toBe(originalRevision);
     expect(message.contentRevision).not.toBe('foreign-disk-revision');
     const binding = { sessionId: message.sessionId, messageId: message.id, contentRevision: message.contentRevision };
     const code: BrowserJudgmentRequest<'webui.code.language'> = { protocolVersion: 1, requestId: crypto.randomUUID(),

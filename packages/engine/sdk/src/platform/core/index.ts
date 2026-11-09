@@ -31,3 +31,5 @@ export * from './tool-reconciliation.js';
 export * from './transcript-events/index.js';
 
 export { hydrateConversationUsage, isConversationContextAvailable, isConversationUsageAvailable } from './conversation-usage.js';
+
+export { bindVerificationTargets } from './verification/targets.js';

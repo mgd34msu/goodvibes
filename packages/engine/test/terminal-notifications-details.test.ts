@@ -34,7 +34,7 @@ for (const [width, height] of [[80, 24], [120, 40]] as const) {
       const scrolled = f.frame(width, height);
       expect(f.modal.selectedIndex).toBe(1); expect(f.modal.contextScroll).toBeGreaterThan(0);
       expect(scrolled.some(line => line.includes('Second notice detail-8'))).toBe(true);
-      expect(scrolled.findIndex(line => line.includes('Third notice') && !line.includes('detail-'))).toBe(titleRows[0]);
+      expect(scrolled.findIndex(line => line.includes('Third notice') && !line.includes('detail-'))).toBe(titleRows[0]!);
       f.press('down'); expect(f.modal.contextScroll).toBe(0);
       expect(f.frame(width, height).some(line => line.includes('First notice detail-0'))).toBe(true);
     } finally { f.host.close(f.modal); }

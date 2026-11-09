@@ -12,7 +12,11 @@
     "scripts/**/*.ts",
     "../judgment/scripts/process-owner.ts",
     "../../products/agent/src/config/host-settings.ts",
-    "../../products/tui/src/config/host-settings.ts"
+    "../../products/tui/src/config/host-settings.ts",
+    "../../products/agent/src/runtime/native-data-writer.ts",
+    "../../products/agent/src/version.ts",
+    "../../products/tui/src/runtime/native-data-writer.ts",
+    "../../products/tui/src/version.ts"
   ],
   // test/types/** is the CONSUMER-vantage type-test project. It resolves
   // everything through the package NAME, which is the only vantage point from

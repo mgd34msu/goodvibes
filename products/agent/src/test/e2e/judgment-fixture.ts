@@ -1,20 +1,20 @@
-import presentationRequests from '../fixtures/e2e-judgments/presentation.json';
-import nativeRoute from '../fixtures/e2e-judgments/native-route.json';
-import nativeTurn from '../fixtures/e2e-judgments/native-turn.json';
-import conversationRoute from '../fixtures/e2e-judgments/conversation-route.json';
-import modelIdentity from '../fixtures/e2e-judgments/model-identity.json';
-import modelTier from '../fixtures/e2e-judgments/model-tier.json';
-import turnQuestions from '../fixtures/e2e-judgments/turn-questions.json';
+import presentationRequests from '../fixtures/e2e-judgments/presentation.json' with { type: "json" };
+import nativeRoute from '../fixtures/e2e-judgments/native-route.json' with { type: "json" };
+import nativeTurn from '../fixtures/e2e-judgments/native-turn.json' with { type: "json" };
+import conversationRoute from '../fixtures/e2e-judgments/conversation-route.json' with { type: "json" };
+import modelIdentity from '../fixtures/e2e-judgments/model-identity.json' with { type: "json" };
+import modelTier from '../fixtures/e2e-judgments/model-tier.json' with { type: "json" };
+import turnQuestions from '../fixtures/e2e-judgments/turn-questions.json' with { type: "json" };
 import { join } from 'node:path';
-import unavailableModelRoutes from '../fixtures/e2e-judgments/unavailable-model-routes.json';
-import cancelledTurnTimings from '../fixtures/e2e-judgments/cancelled-turn-timings.json';
-import cancelledTurnPending from '../fixtures/e2e-judgments/cancelled-turn-pending.json';
-import privacyNegative from '../fixtures/e2e-judgments/privacy-negative.json';
-import diagnosticFixtures from '../fixtures/e2e-judgments/ci-diagnostics.json';
-import headlessCompletion from '../fixtures/e2e-judgments/headless-completion.json';
-import completionApplicability from '../fixtures/e2e-judgments/completion-applicability.json';
-import ambientDraftGate from '../fixtures/e2e-judgments/ambient-draft-gate.json';
-import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json';
+import unavailableModelRoutes from '../fixtures/e2e-judgments/unavailable-model-routes.json' with { type: "json" };
+import cancelledTurnTimings from '../fixtures/e2e-judgments/cancelled-turn-timings.json' with { type: "json" };
+import cancelledTurnPending from '../fixtures/e2e-judgments/cancelled-turn-pending.json' with { type: "json" };
+import privacyNegative from '../fixtures/e2e-judgments/privacy-negative.json' with { type: "json" };
+import diagnosticFixtures from '../fixtures/e2e-judgments/ci-diagnostics.json' with { type: "json" };
+import headlessCompletion from '../fixtures/e2e-judgments/headless-completion.json' with { type: "json" };
+import completionApplicability from '../fixtures/e2e-judgments/completion-applicability.json' with { type: "json" };
+import ambientDraftGate from '../fixtures/e2e-judgments/ambient-draft-gate.json' with { type: "json" };
+import tuiCompletionTools from '../fixtures/e2e-judgments/tui-completion-tools.json' with { type: "json" };
 
 const prompts = ['first words in a brand new workspace', 'please answer the e2e marmot question'] as const;
 // Native TUI startup may finish after the original turn-entry snapshot. Keep

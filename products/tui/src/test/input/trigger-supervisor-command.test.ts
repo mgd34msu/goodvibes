@@ -43,7 +43,7 @@ async function fixture() {
     try {
       const input = body && typeof body === 'object' && 'body' in body ? body.body : body;
       return Response.json(await catalog.invoke(matched[1]!, { context: { principalId, principalKind: 'token', admin: true, scopes },
-        body: input, signal: request.signal, isAuthorized: required => required.every(scope => scopes.includes(scope)) }));
+        body: input, signal: request.signal, isAuthorized: required => (required ?? []).every(scope => scopes.includes(scope)) }));
     } catch (error) {
       if (error && typeof error === 'object' && 'status' in error && typeof error.status === 'number') {
         return Response.json({ error: 'Fixture operator refusal', code: 'code' in error ? error.code : 'UNKNOWN' }, { status: error.status });
@@ -62,7 +62,7 @@ async function fixture() {
   let selection: Parameters<OpenSelection>[3] | undefined, selectionSignal: AbortSignal | undefined;
   const context = { print: (message: string) => messages.push(message), renderRequest() {}, invokedByModel: false,
     platform: { configManager: config }, workspace: { shellPaths: { homeDirectory: root } },
-    openSelection: ((_title, _items, options, callback) => { selection = callback; selectionSignal = options.signal; }) as OpenSelection,
+    openSelection: ((_title, _items, options, callback) => { selection = callback; selectionSignal = options?.signal; }) as OpenSelection,
   } as unknown as CommandContext;
   const registry = new CommandRegistry(); registerTriggerCommands(registry);
   cleanup.push(async () => { selection?.(null); supervisor.shutdown(); await supervisor.join(); await server.stop(true); rmSync(root, { recursive: true, force: true }); });

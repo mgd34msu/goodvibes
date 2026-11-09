@@ -36,7 +36,7 @@ function serve(options: { corrupt?: 'app' | 'addon' } = {}) {
     if (path === '/releases/latest') return new Response(null, { status: 302, headers: { location: `${GITHUB}/releases/tag/${TAG}` } });
     const name = path.split('/').at(-1)!;
     if (name === 'SHA256SUMS.txt') return new Response(manifest);
-    const bytes = release.assets.get(name); return new Response(bytes ?? 'missing', { status: bytes ? 200 : 404 });
+    const bytes = release.assets.get(name); return new Response(bytes ? Uint8Array.from(bytes) : 'missing', { status: bytes ? 200 : 404 });
   } }); servers.push(server);
   return { base: `http://127.0.0.1:${server.port}`, nextSource };
 }

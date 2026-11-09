@@ -20,8 +20,9 @@ function fixture() {
   const fetchImpl: UpdateFetchLike = async url => {
     requests.push(url);
     const name = url.split('/').at(-1)!;
+    const bytes = release.assets.get(name);
     const response = name === 'latest' ? new Response(null, { status: 302, headers: { location: `https://github.com/mgd34msu/goodvibes/releases/tag/v${NEXT}` } })
-      : name === 'SHA256SUMS.txt' ? new Response(manifest()) : new Response(release.assets.get(name) ?? 'missing', { status: release.assets.has(name) ? 200 : 404 });
+      : name === 'SHA256SUMS.txt' ? new Response(manifest()) : new Response(bytes ? Uint8Array.from(bytes) : 'missing', { status: bytes ? 200 : 404 });
     Object.defineProperty(response, 'url', { value: url }); return response;
   };
   const options = { fetchImpl, execPath: installed.appPath, platform: 'linux' as const, arch: 'x64', currentVersion: OLD,

@@ -39,7 +39,10 @@ test('the actual TUI apply and rollback paths include Agent, daemon, native comp
   expect(readFileSync(join(f.webui, 'index.html'), 'utf8')).toBe('New WebUI');
   expect(f.printed.some(line => line.includes('goodvibes-agent') && line.includes('goodvibes-daemon'))).toBe(true);
   rollbackUpdate(f.options);
-  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  for (const [path, bytes] of f.original) {
+    if (bytes === undefined) throw new Error('Original suite fixture member is missing');
+    expect(bytes).toEqual(readFileSync(path));
+  }
   expect(readFileSync(join(f.webui, 'original.txt'), 'utf8')).toBe('Retained original directory');
 });
 
@@ -57,7 +60,10 @@ test('an already-current TUI can repair peers left at the previous suite version
 test('a missing required macOS companion refuses every live replacement', async () => {
   const f = fixture(); f.release.delete('sqlite-darwin-x64.dylib.json');
   await expect(applyUpdate(f.options)).rejects.toThrow('missing');
-  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  for (const [path, bytes] of f.original) {
+    if (bytes === undefined) throw new Error('Original suite fixture member is missing');
+    expect(bytes).toEqual(readFileSync(path));
+  }
   expect(f.progress.begun).toBe(false); expect(f.progress.committed).toBe(false);
 });
 
@@ -65,13 +71,19 @@ test('the original served WebUI selection is checked after latest-release lookup
   const f = fixture(); let selected = f.webui;
   const fetchImpl: UpdateFetchLike = async (url, init) => { const response = await f.options.fetchImpl(url, init); if (url === LATEST) selected = join(f.root, 'webui', 'other'); return response; };
   await expect(applyUpdate({ ...f.options, fetchImpl, configManager: { get: () => selected } })).rejects.toThrow('selection changed');
-  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  for (const [path, bytes] of f.original) {
+    if (bytes === undefined) throw new Error('Original suite fixture member is missing');
+    expect(bytes).toEqual(readFileSync(path));
+  }
 });
 
 test('an aborted update performs no publication', async () => {
   const f = fixture(), owner = new AbortController(); owner.abort();
   await expect(applyUpdate({ ...f.options, signal: owner.signal })).rejects.toThrow(UPDATE_ABORTED_MESSAGE);
-  for (const [path, bytes] of f.original) expect(readFileSync(path)).toEqual(bytes);
+  for (const [path, bytes] of f.original) {
+    if (bytes === undefined) throw new Error('Original suite fixture member is missing');
+    expect(bytes).toEqual(readFileSync(path));
+  }
 });
 
 test('version check reports the actual release tag', async () => {

@@ -39,7 +39,7 @@ function serve(options: { corrupt?: 'app' | 'addon'; stallApp?: boolean } = {}) 
     const name = path.split('/').at(-1)!;
     if (name === 'SHA256SUMS.txt') return new Response(manifest);
     if (options.stallApp && name === release.payload.asset) return new Promise<Response>(() => {});
-    const bytes = release.assets.get(name); return new Response(bytes ?? 'missing', { status: bytes ? 200 : 404 });
+    const bytes = release.assets.get(name); return new Response(bytes ? new Uint8Array(bytes) : 'missing', { status: bytes ? 200 : 404 });
   } }); servers.push(server);
   return { base: `http://127.0.0.1:${server.port}`, nextSource };
 }
@@ -59,7 +59,7 @@ describe.if(supported)('TUI suite launch update, actual filesystem and respawn',
     expect(output.stdout).not.toContain('UNEXPECTED-FETCH'); expect(readFileSync(f.appPath, 'utf8')).toBe(release.nextSource);
     expect(readFileSync(f.addonPath, 'utf8')).toBe('new-addon'); expect(readFileSync(join(f.driver, 'index.js'), 'utf8')).toBe('new-driver');
     expect(readFileSync(join(f.webui, 'index.html'), 'utf8')).toBe('new-webui');
-    const lines: string[] = []; rollbackUpdate({ execPath: f.appPath, platform: process.platform, arch: process.arch, currentVersion: NEXT,
+    const lines: string[] = []; rollbackUpdate({ execPath: f.appPath, platform: process.platform, arch: process.arch,
       configManager: { get: key => key === 'controlPlane.webui.bundleDir' ? f.webui : undefined }, print: line => lines.push(line) });
     expect(lines.join('\n')).toContain(`Restored GoodVibes ${OLD}: goodvibes.`);
     expect(readFileSync(f.appPath, 'utf8')).toBe(f.oldSource); expect(readFileSync(f.addonPath, 'utf8')).toBe('old-addon');

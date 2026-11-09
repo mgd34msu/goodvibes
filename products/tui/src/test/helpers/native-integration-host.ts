@@ -12,7 +12,7 @@ async function within<T>(promise: Promise<T>, label: string, milliseconds: numbe
 interface HostReady { baseUrl: string; token: string; identity: NativeWorkExecutionIdentity; contractId: string; projectRoot?: string; commitsBefore?: number }
 
 export interface NativeReviewedProof {
-  checks: { id: string; trigger: string; result: string; evidenceDigest: string; sourceRead: 'fixed' | 'buggy' | 'missing'; answered: boolean }[];
+  checks: { id: string; trigger: string; result: string; evidenceDigest?: string; decisionIds: string[]; sourceRead: 'fixed' | 'buggy' | 'missing'; answered: boolean }[];
   decisions: { stage: string; outcome: string; sourceBound: boolean; answered: boolean }[];
   fixRounds: number; fixWorkers: number; fixPlans: number; escalations: number; status: string;
   commit: { status: string; hash?: string; note?: string } | null;
@@ -73,8 +73,10 @@ export function launchNativeIntegrationHost(withoutInspection = false, scenario:
       const record = (input: unknown): input is Record<string, unknown> => input !== null && typeof input === 'object' && !Array.isArray(input);
       const strings = (input: unknown): input is string[] => Array.isArray(input) && input.every(item => typeof item === 'string');
       if (!Array.isArray(value.checks) || !value.checks.every(check => record(check) && typeof check.id === 'string'
-          && typeof check.trigger === 'string' && typeof check.result === 'string' && typeof check.evidenceDigest === 'string'
-          && /^[a-f0-9]{64}$/.test(check.evidenceDigest) && ['fixed', 'buggy', 'missing'].includes(String(check.sourceRead)) && typeof check.answered === 'boolean')
+          && typeof check.trigger === 'string' && typeof check.result === 'string'
+          && (check.evidenceDigest === undefined || typeof check.evidenceDigest === 'string' && /^[a-f0-9]{64}$/.test(check.evidenceDigest))
+          && strings(check.decisionIds) && check.decisionIds.every(id => id.length > 0)
+          && ['fixed', 'buggy', 'missing'].includes(String(check.sourceRead)) && typeof check.answered === 'boolean')
         || !Array.isArray(value.decisions) || !value.decisions.every(decision => record(decision) && ['stall', 'fix-plan'].includes(String(decision.stage))
           && ['act', 'revise', 'defer', 'reject'].includes(String(decision.outcome)) && typeof decision.sourceBound === 'boolean' && typeof decision.answered === 'boolean')
         || ![value.fixRounds, value.fixWorkers, value.fixPlans, value.escalations].every(count => typeof count === 'number' && Number.isSafeInteger(count) && count >= 0)

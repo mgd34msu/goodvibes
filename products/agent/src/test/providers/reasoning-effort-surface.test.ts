@@ -14,8 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, test } from 'bun:test';
-import type { ReasoningEffortSpec } from '@goodvibes-jev/engine/sdk/platform/providers';
-import type { LLMProvider } from '@goodvibes-jev/engine/sdk';
+import type { LLMProvider, ReasoningEffortSpec } from '@goodvibes-jev/engine/sdk/platform/providers';
 import { createTestProviderRegistry } from '../helpers/test-managers.ts';
 import {
   describeConfiguredEffort,

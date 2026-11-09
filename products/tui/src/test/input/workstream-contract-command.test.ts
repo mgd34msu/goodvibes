@@ -11,10 +11,10 @@ function fixture(records: ContractView[], overrides: Partial<OperatorContractRun
   const runner: OperatorContractRunner = {
     list: filter => records.filter(record => !filter?.sessionId || record.sessionId === filter.sessionId),
     get: id => records.find(record => record.id === id) ?? null,
-    start: input => {
+    start: async input => {
       actions.push(['start', input]);
       const contract = contractFixture({ id: 'new-contract', ask: input.ask, sessionId: input.sessionId, status: 'queued' });
-      return { contract, owner: { id: contract.ownerAgentId, task: input.ask, template: 'engineer', status: 'running', startedAt: 1, tools: [], toolCallCount: 0, orchestrationDepth: 0, executionProtocol: 'direct', reviewMode: 'contract', communicationLane: 'parent-only' } };
+      return { contract, settled: Promise.resolve(), owner: { id: contract.ownerAgentId, task: input.ask, template: 'engineer', status: 'running', startedAt: 1, tools: [], toolCallCount: 0, orchestrationDepth: 0, executionProtocol: 'direct', reviewMode: 'contract', communicationLane: 'parent-only' } };
     },
     cancel: (id, reason) => { actions.push(['cancel', id, reason]); return true; },
     reply: async (id, escalationId, text) => { actions.push(['reply', id, escalationId, text]); return { escalationId, reading: 'approve', outcome: 'act', action: 'approved' }; },

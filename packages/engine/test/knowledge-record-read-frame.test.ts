@@ -1870,7 +1870,7 @@ test.each(['writer rollback', 'native alias restore', 'identical file replacemen
     alias.run('ATTACH DATABASE ? AS original', [main]);
     const bytes = readFileSync(store.storagePath), freeze = Object.freeze;
     let changed = false, published = false;
-    const observing = spyOn(Object, 'freeze').mockImplementation(value => {
+    const observing = spyOn(Object, 'freeze').mockImplementation((value: unknown) => {
       const result = freeze(value);
       // Observe the actual complete raw-row tuple construction, after the
       // removed row serialization path. Mutation occurs before the next group.

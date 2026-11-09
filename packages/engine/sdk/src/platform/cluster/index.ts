@@ -265,3 +265,7 @@ export type {
   ClusterTransportDescription,
   SignedClusterMessage,
 } from './types.js';
+
+/** A custom SurfaceElection host must declare the exact ranking behavior in
+ * its existing signed nodeVersion, as ClusterElection does automatically. */
+export { CLUSTER_RANK_FEATURE, CLUSTER_V1_PEER_RANK_FEATURE, clusterRankingWireVersion, clusterProductVersion } from './ranking-feature.js';

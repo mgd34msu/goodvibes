@@ -26,6 +26,7 @@
  * serialization a HEARTBEAT landing mid-`start()` could interleave a second
  * transition into a half-applied one.
  */
+import { hasCurrentClusterRanking } from './ranking-feature.js';
 import { OwnedClusterDrainError } from './owned-drain-error.js';
 import {
   compareStableRank,
@@ -59,11 +60,16 @@ import type {
 export interface SurfaceElectionHost {
   readonly nodeId: string;
   readonly version: string;
+  /** Actual per-node wire behavior after accepting an existing v1 peer. */
+  readonly ranking?: 'v1-peer' | undefined;
   readonly logger: ClusterLogger;
   readonly clock: ClusterClock;
   readonly timing: ClusterTiming;
   readonly ledger: ClusterHoldingsLedger;
-  /** Broadcast a datagram stamped with this surface's digest. */
+  /** Broadcast a datagram stamped with this surface's digest. Custom hosts
+   * encode nodeVersion with clusterRankingWireVersion(version, ranking ===
+   * 'v1-peer') and adopt v1 behavior before delivering an accepted v1 peer.
+   * ClusterElection owns this automatically for all built-in consumers. */
   send(type: ClusterMessageType, surfaceId: string): Promise<void>;
   /**
    * Can this node serve the surface RIGHT NOW, gate registered, credential
@@ -774,9 +780,11 @@ export class SurfaceElection {
   // ── plumbing ──────────────────────────────────────────────────────────────
 
   private selfRank(): ClusterSpreadRankable {
+    const ranking = this.host.ranking;
     return {
       nodeId: this.host.nodeId,
       version: this.host.version,
+      ...(ranking ? { ranking } : {}),
       holdings: this.host.ledger.holdingsOf(this.host.nodeId, this.host.clock.monotonicNow()),
     };
   }
@@ -785,6 +793,7 @@ export class SurfaceElection {
     return {
       nodeId: message.nodeId,
       version: message.nodeVersion,
+      ...(hasCurrentClusterRanking(message.nodeVersion) ? {} : { ranking: 'v1-peer' as const }),
       holdings: this.host.ledger.holdingsOf(message.nodeId, this.host.clock.monotonicNow()),
     };
   }

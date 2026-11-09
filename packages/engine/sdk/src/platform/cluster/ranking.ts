@@ -32,14 +32,20 @@
  * heals. Holdings are observed from traffic, so two nodes can briefly hold
  * different counts; a reconciliation decided on a disputed number could have
  * both sides believing they lost, or both believing they won. Version and a
- * hash are computed from the datagram itself and can never disagree.
+ * advertised ranking behavior are computed from the datagram itself. Current
+ * nodes switch monotonically to v1 compatibility after accepting an existing
+ * v1 peer, so a mixed group does not form cyclic pairwise preferences.
  */
 import { stableSurfaceHash } from './surface-id.js';
+import { existingV1PeerSurfaceRank } from './ranking-v1-peer.js';
 
 /** The fields ranking reads from a message or a local snapshot. */
 export interface ClusterRankable {
   readonly nodeId: string;
   readonly version: string;
+  /** Set by the incoming-message adapter only when that peer omitted the
+   * authenticated current ranking declaration. Local callers default current. */
+  readonly ranking?: 'v1-peer' | undefined;
 }
 
 /** A candidate plus its observed load. */
@@ -89,9 +95,9 @@ function splitVersion(raw: string): { release: number[]; prerelease: string } {
 /**
  * Version, then the per-surface stable hash, then nodeId.
  *
- * The nodeId is a last resort that can only be reached by a SHA-256 collision
- * on 256 bits; it is there so the ordering is provably total rather than
- * "total in practice".
+ * The exact nodeId resolves possible noncryptographic 32-bit rank collisions,
+ * keeping the ordering total. A deployed v1 peer selects its old ordering for
+ * both tuples, so a mixed pair agrees during split-brain reconciliation.
  */
 export function compareStableRank(a: ClusterRankable, b: ClusterRankable, surfaceId: string): number {
   const byVersion = compareVersions(a.version, b.version);
@@ -113,8 +119,11 @@ export function compareSpreadRank(
 
 function compareHashThenId(a: ClusterRankable, b: ClusterRankable, surfaceId: string): number {
   if (a.nodeId === b.nodeId) return 0;
-  const hashA = stableSurfaceHash(a.nodeId, surfaceId);
-  const hashB = stableSurfaceHash(b.nodeId, surfaceId);
+  // Compatibility is pair-wide. Comparing an old SHA score to a current
+  // 32-bit score would not reproduce either peer's actual ordering.
+  const rank = a.ranking === 'v1-peer' || b.ranking === 'v1-peer' ? existingV1PeerSurfaceRank : stableSurfaceHash;
+  const hashA = rank(a.nodeId, surfaceId);
+  const hashB = rank(b.nodeId, surfaceId);
   if (hashA !== hashB) return hashA < hashB ? -1 : 1;
   return a.nodeId < b.nodeId ? -1 : 1;
 }

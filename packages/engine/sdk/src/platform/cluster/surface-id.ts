@@ -18,12 +18,13 @@
  * would change every time the group key rotated, which would silently reset
  * every election in the cluster at rotation time: every node would suddenly
  * see a set of surfaces nobody holds and re-elect all of them at once. The
- * digest is a stable matching token; confidentiality of the group's traffic is
- * the signing layer's job, not this function's.
+ * digest is a stable matching token. It avoids broadcasting a capability's
+ * literal spelling; it is not encryption or anonymity. Predictable topics can
+ * still be guessed offline, and signatures authenticate rather than encrypt
+ * the LAN traffic.
  *
- * The plaintext key stays available LOCALLY as a label for this host's logs and
- * its own `/status`, a topic name in a log file on the machine that already
- * holds the topic's credentials discloses nothing new.
+ * The plaintext key remains local to the configured consumer. The ordinary
+ * log/status label below uses only the kind and a short wire-id prefix.
  */
 import { createHash } from 'node:crypto';
 
@@ -52,7 +53,7 @@ export interface ClusterSurfaceKey {
  */
 const SURFACE_ID_DOMAIN = 'goodvibes/cluster/surface/v1';
 
-/** 128 bits of a SHA-256, hex. Collision-free at any plausible surface count. */
+/** Existing v1 wire selector: 128 bits of a SHA-256, hex. */
 const SURFACE_ID_HEX_LENGTH = 32;
 
 const SURFACE_ID_PATTERN = /^[0-9a-f]{32}$/;
@@ -70,7 +71,10 @@ export function canonicalSurfaceKey(key: ClusterSurfaceKey): string {
   return `${String(key.kind).trim().toLowerCase()}:${String(key.discriminator).trim()}`;
 }
 
-/** The digest that goes on the wire as `surfaceId`. */
+/** Existing cross-node wire identity for capability-bearing ntfy topics and
+ * provider accounts. Peers independently derive this same opaque selector;
+ * changing the derivation would split one live consumer election into two.
+ * This privacy/compatibility boundary does not justify hashing local revisions. */
 export function surfaceIdFor(key: ClusterSurfaceKey): string {
   return createHash('sha256')
     .update(SURFACE_ID_DOMAIN)
@@ -146,15 +150,19 @@ export function providerSurface(kind: ClusterSurfaceKind, discriminator: string)
  * the hash makes each surface prefer a different node, so a two-node cluster
  * with three surfaces splits them instead of stacking them.
  *
- * It is a hash, not randomness: every node computes the same value for the
- * same pair, forever, with no coordination.
+ * It is deterministic noncryptographic mixing: every node implementing this
+ * declared algorithm computes the same value for the same pair. The election
+ * explicitly preserves v1 ordering when an existing v1 peer is present.
  */
 export function stableSurfaceHash(nodeId: string, surfaceId: string): string {
-  return createHash('sha256')
-    .update('goodvibes/cluster/spread/v1')
-    .update('\u0000')
-    .update(String(nodeId))
-    .update('\u0000')
-    .update(String(surfaceId))
-    .digest('hex');
+  // FNV-1a over the exact tuple, followed by a fixed 32-bit avalanche. Ranking
+  // needs deterministic spread, not a cryptographic commitment. Collisions are
+  // resolved by the existing exact nodeId tiebreak in ranking.ts.
+  const value = JSON.stringify([String(nodeId), String(surfaceId)]);
+  let rank = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) rank = Math.imul(rank ^ value.charCodeAt(index), 0x01000193);
+  rank ^= rank >>> 16; rank = Math.imul(rank, 0x85ebca6b);
+  rank ^= rank >>> 13; rank = Math.imul(rank, 0xc2b2ae35);
+  rank ^= rank >>> 16;
+  return (rank >>> 0).toString(16).padStart(8, '0');
 }

@@ -21,6 +21,7 @@
  * otherwise ignored, so the group's other traffic passes through without
  * being mistaken for an election message.
  */
+import { clusterProductVersion, clusterRankingWireVersion, hasCurrentClusterRanking } from './ranking-feature.js';
 import { SurfaceElection, type SurfaceElectionHost } from './election.js';
 import { ClusterHoldingsLedger } from './holdings.js';
 import { decodeMessage, encodeMessage } from './protocol.js';
@@ -73,6 +74,11 @@ export class ClusterElection {
   private readonly elections = new Map<string, SurfaceElection>();
   private readonly peers = new Map<string, TrackedPeer>();
   private readonly host: SurfaceElectionHost;
+  private readonly wireVersion: string;
+  private readonly v1PeerWireVersion: string;
+  /** Monotonic during this instance. Switching back merely because a peer is
+   * temporarily unheard would give a partition mixed pairwise orderings. */
+  private v1PeerRanking = false;
 
   private running = false;
   private seq = 0;
@@ -98,6 +104,9 @@ export class ClusterElection {
   private lastTickMono = 0;
 
   constructor(private readonly options: ClusterElectionOptions) {
+    this.wireVersion = clusterRankingWireVersion(options.version);
+    this.v1PeerWireVersion = clusterRankingWireVersion(options.version, true);
+    const ranking = () => this.v1PeerRanking ? 'v1-peer' as const : undefined;
     this.timing = deriveClusterTiming(options.settings);
     this.ledger = new ClusterHoldingsLedger({
       holderTtlMs: this.timing.masterTimeoutMs,
@@ -106,6 +115,7 @@ export class ClusterElection {
     this.host = {
       nodeId: options.nodeId,
       version: options.version,
+      get ranking() { return ranking(); },
       logger: options.logger,
       clock: options.clock,
       timing: this.timing,
@@ -297,6 +307,7 @@ export class ClusterElection {
     // through the identical mechanism, which means we also hear ourselves.
     if (message.nodeId === this.options.nodeId) return;
     if (!this.recordPeer(message)) return;
+    if (!hasCurrentClusterRanking(message.nodeVersion)) this.v1PeerRanking = true;
     this.recordHoldings(message);
     if (message.surfaceId === null) return;
     // Recorded above either way: a surface this node cannot serve still tells
@@ -321,7 +332,7 @@ export class ClusterElection {
     }
     this.peers.set(message.nodeId, {
       nodeId: message.nodeId,
-      version: message.nodeVersion,
+      version: clusterProductVersion(message.nodeVersion),
       lastSeenAt: this.options.clock.now(),
       lastMessageType: message.type,
       lastSeq: message.seq,
@@ -416,7 +427,7 @@ export class ClusterElection {
       type,
       surfaceId,
       nodeId: this.options.nodeId,
-      nodeVersion: this.options.version,
+      nodeVersion: this.v1PeerRanking ? this.v1PeerWireVersion : this.wireVersion,
       seq: this.seq,
       ts: this.options.clock.now(),
     };

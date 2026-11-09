@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Give fresh explicit work submissions an opaque source identity. Concurrent
+  retries and restarts adopt the exact original request receipt, preserving
+  source text, ordered criteria and old submission identities. New source
+  writes require their installed-reader capability before ledger publication.
+
 - Replace repeated native conversational-intake identity and transcript hashing
   with opaque labels and exact original-source comparisons. Saved source and
   requirement-range commitments still bind replay; existing saved identities

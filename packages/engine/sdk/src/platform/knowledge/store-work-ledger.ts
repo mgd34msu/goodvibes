@@ -1,4 +1,5 @@
 import { knowledgeSchemaColumns } from './store-schema-validation-data.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { readKnowledgeSourceSnapshot } from './store-source-generation.js';
 import type { SQLiteStore, SqlDatabase } from '../state/sqlite-store.js';
 import { createEmptyWorkLedgerState, readWorkLedgerState, migrateLegacyWorkLedgerState } from '../workflow/work-ledger/service.js';
@@ -49,7 +50,7 @@ export function readKnowledgeWorkLedger(db: Pick<SqlDatabase, 'exec'>, projectId
 export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId: string, refresh: () => void, hooks?: {
   beforeDecision(db: SqlDatabase): void;
   beforeCommit(db: SqlDatabase, current: WorkLedgerState, next: WorkLedgerState): void;
-}): KnowledgeWorkLedgerStorage {
+}, beforeExplicitSourceWrite?: () => void): KnowledgeWorkLedgerStorage {
   createEmptyWorkLedgerState(projectId); // Validate even before the first row exists.
   let closed = false;
   let closePromise: Promise<void> | undefined;
@@ -94,6 +95,10 @@ export function createKnowledgeWorkLedgerStorage(sqlite: SQLiteStore, projectId:
             throw new Error('Extracted conversation sources require atomic capture publication');
           }
           hooks?.beforeCommit(db, current, next);
+          if (next.history.slice(current.history.length).some(event => event.type === 'submit_native' && event.work.source?.version === 3)) {
+            const declared: unknown = beforeExplicitSourceWrite?.();
+            if (declared !== undefined) { drainOwned(declared); throw new Error('Explicit source publication requires a synchronous native owner'); }
+          }
           db.run('INSERT INTO work_ledgers(project_id, format_version, revision, state_json) VALUES (?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET format_version=excluded.format_version, revision=excluded.revision, state_json=excluded.state_json', [projectId, next.version, next.revision, JSON.stringify(next)]);
         }
         return { changed: decision.next !== null, value: decision.value };

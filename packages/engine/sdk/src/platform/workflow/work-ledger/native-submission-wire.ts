@@ -27,7 +27,10 @@ export const nativeWorkSubmissionLookupRequestSchema = strictObject({ requestId:
 export const nativeWorkSubmissionReceiptSchema = strictObject({
   projectId: id, requestId: id, inputId: id, ledgerRevision: revision, workId: id, attemptId: id,
   expectedRevision: strictObject({ work: revision, criteria: revision, attempt: revision }),
-  source: strictObject({ version: literal(1), sourceId: id, sourceRevision: id, sessionId: id }),
+  source: union([
+    strictObject({ version: literal(1), sourceId: id, sourceRevision: id, sessionId: id }),
+    strictObject({ version: literal(3), sourceId: string().regex(/^[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/), sourceRevision: string().regex(/^[a-f0-9]{64}$/), sessionId: id }),
+  ]),
   goal: text, criteria,
 }).refine(value => bounded(value, NATIVE_WORK_SUBMISSION_MAX_RESPONSE_BYTES), 'Receipt exceeds byte limit');
 

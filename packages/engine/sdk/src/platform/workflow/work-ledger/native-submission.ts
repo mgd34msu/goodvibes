@@ -1,5 +1,7 @@
 /** Explicit original-source submission. This service never starts an executor. */
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { realpathSync } from 'node:fs';
 import type { NativeExecutionScopeOwner, NativePairedExecutionAuthority, NativePairedExecutionSnapshot } from './native-execution.js';
 import type { WorkLedgerAuthority, WorkLedgerEvent, WorkLedgerService } from './types.js';
@@ -28,7 +30,11 @@ export interface NativeWorkSubmissionHost {
   close(): Promise<void>;
 }
 const REQUIRED_SCOPES = ['read:work-ledger', 'write:work-ledger'] as const;
-const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+/** Historical source-id recipe, used only for existing explicit v1 events. */
+const historicalSourceId = (projectId: string, principalId: string, inputId: string) => createHash('sha256').update(JSON.stringify({ projectId, principalId, inputId })).digest('hex');
+/** The actual saved/client-held source commitment. Receipt lookup checks the
+ * exact original input/ordered criteria; this is not an authorization token. */
+const originalInputCommitment = (version: 1 | 3, inputId: string, goal: string, criteria: readonly string[]) => createHash('sha256').update(JSON.stringify({ version, inputId, goal, criteria })).digest('hex');
 function paired(authority: NativePairedExecutionAuthority): NativePairedExecutionSnapshot {
   const current = authority.current();
   if (!current || current.kind !== 'pairing-token' || current.principalId !== current.authorityId || current.authorityRevision !== current.tokenId
@@ -40,13 +46,17 @@ function bounded(value: unknown, limit: number): void {
   try { json = JSON.stringify(value); } catch { throw new NativeWorkSubmissionError('invalid'); }
   if (json === undefined || new TextEncoder().encode(json).byteLength > limit) throw new NativeWorkSubmissionError('invalid');
 }
-function receipt(event: WorkLedgerEvent, projectId: string, sessionId: string): NativeWorkSubmissionReceipt {
-  if (event.type !== 'submit_native' || event.work.source?.version !== 1 || !event.attemptId) throw new NativeWorkSubmissionError('unavailable');
+function receipt(event: WorkLedgerEvent, projectId: string, sessionId: string, principalId: string,
+  issued?: { readonly request: NativeWorkSubmissionRequest; readonly sourceId: string; readonly sourceRevision: string }): NativeWorkSubmissionReceipt {
+  if (event.type !== 'submit_native' || (event.work.source?.version !== 1 && event.work.source?.version !== 3) || !event.attemptId || event.actorId !== principalId) throw new NativeWorkSubmissionError('unavailable');
   const attempt = event.attempts.find(value => value.id === event.attemptId && value.workId === event.workId);
-  if (!attempt) throw new NativeWorkSubmissionError('unavailable');
+  if (!attempt || attempt.ownerId !== principalId || attempt.state !== 'active' || attempt.predecessorId !== null) throw new NativeWorkSubmissionError('unavailable');
   const { inputId, ...source } = event.work.source;
-  if (source.sessionId !== sessionId || source.sourceId !== hash({ projectId, principalId: event.actorId, inputId })
-    || source.sourceRevision !== hash({ version: 1, inputId, goal: event.work.goal, criteria: event.work.criteria })) throw new NativeWorkSubmissionError('unavailable');
+  if (source.sessionId !== sessionId || (source.version === 1 && source.sourceId !== historicalSourceId(projectId, event.actorId, inputId))) throw new NativeWorkSubmissionError('unavailable');
+  if (issued) {
+    if (source.version !== 3 || source.sourceId !== issued.sourceId || source.sourceRevision !== issued.sourceRevision
+      || inputId !== issued.request.inputId || event.work.goal !== issued.request.goal || !isDeepStrictEqual(event.work.criteria, issued.request.criteria)) throw new NativeWorkSubmissionError('unavailable');
+  } else if (source.sourceRevision !== originalInputCommitment(source.version, inputId, event.work.goal, event.work.criteria)) throw new NativeWorkSubmissionError('unavailable');
   const value = nativeWorkSubmissionReceiptSchema.parse({ projectId, requestId: event.requestId, inputId,
     ledgerRevision: event.sequence, workId: event.workId, attemptId: attempt.id,
     expectedRevision: { work: event.work.revision, criteria: event.work.criteriaRevision, attempt: attempt.revision },
@@ -107,19 +117,31 @@ export function createNativeWorkSubmissionHost(deps: {
       const captured = parsed.data; bounded(captured, NATIVE_WORK_SUBMISSION_MAX_REQUEST_BYTES);
       return track(() => withOwner(authority, options, async (actor, isAuthorized, signal) => {
         const identity = paired(authority);
-        const source = { version: 1 as const, inputId: captured.inputId, sessionId: deps.sessionId,
-          sourceId: hash({ projectId: deps.projectId, principalId: identity.principalId, inputId: captured.inputId }),
-          sourceRevision: hash({ version: 1, inputId: captured.inputId, goal: captured.goal, criteria: captured.criteria }) };
+        const replay = (event: WorkLedgerEvent): NativeWorkSubmissionResult => {
+          if (event.type !== 'submit_native' || event.requestId !== captured.requestId || event.sequence !== captured.expectedRevision + 1 || event.work.source?.inputId !== captured.inputId
+            || event.work.title !== captured.goal.trim() || event.work.goal !== captured.goal || !isDeepStrictEqual(event.work.criteria, captured.criteria)) throw new NativeWorkSubmissionError('request-conflict');
+          return { kind: 'submitted', replayed: true, receipt: receipt(event, deps.projectId, deps.sessionId, identity.principalId) };
+        };
+        const existing = await deps.service.lookupSubmission(captured.requestId, actor);
+        signal.throwIfAborted(); if (!isAuthorized()) throw new NativeWorkSubmissionError('forbidden');
+        if (existing) return replay(existing);
+        const source = { version: 3 as const, inputId: captured.inputId, sessionId: deps.sessionId,
+          sourceId: opaqueUuid(), sourceRevision: originalInputCommitment(3, captured.inputId, captured.goal, captured.criteria) };
         const result = await deps.service.execute({ type: 'submit_native', requestId: captured.requestId, expectedRevision: captured.expectedRevision,
           title: captured.goal.trim(), goal: captured.goal, criteria: captured.criteria, source }, actor, { signal, isAuthorized });
         if (result.kind === 'indeterminate') throw new NativeWorkSubmissionError('indeterminate');
         if (result.kind === 'rejected') {
+          if (result.code === 'request_conflict') {
+            const raced = await deps.service.lookupSubmission(captured.requestId, actor);
+            signal.throwIfAborted(); if (!isAuthorized()) throw new NativeWorkSubmissionError('forbidden');
+            if (raced) return replay(raced);
+          }
           const code = result.code === 'request_conflict' ? 'request-conflict' : result.code === 'conflict' ? 'conflict'
             : result.code === 'forbidden' ? 'forbidden' : result.code === 'closed' ? 'closed'
             : result.code === 'invalid_command' ? 'invalid' : 'unavailable';
           throw new NativeWorkSubmissionError(code);
         }
-        return { kind: 'submitted', replayed: result.replayed, receipt: receipt(result.event, deps.projectId, deps.sessionId) };
+        return { kind: 'submitted', replayed: result.replayed, receipt: receipt(result.event, deps.projectId, deps.sessionId, identity.principalId, { request: captured, sourceId: source.sourceId, sourceRevision: source.sourceRevision }) };
       }));
     },
     get(input, authority, options = {}) {
@@ -129,7 +151,7 @@ export function createNativeWorkSubmissionHost(deps: {
       const requestId = parsed.data.requestId;
       return track(() => withOwner(authority, options, async (actor, _isAuthorized, signal) => {
         signal.throwIfAborted(); const event = await deps.service.lookupSubmission(requestId, actor);
-        return event ? { kind: 'found', receipt: receipt(event, deps.projectId, deps.sessionId) } : { kind: 'not-found' };
+        return event ? { kind: 'found', receipt: receipt(event, deps.projectId, deps.sessionId, paired(authority).principalId) } : { kind: 'not-found' };
       }));
     },
     close() {

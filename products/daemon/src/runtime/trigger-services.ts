@@ -32,7 +32,9 @@ export function createTriggerServices(deps: {
 }): TriggerManager {
   const { configManager } = deps;
   return new TriggerManager({
-    storePath: deps.shellPaths.resolveProjectPath(deps.surfaceRoot, 'triggers.json'),
+    nativeDataWriter: configManager.getNativeDataWriter(),
+    storePath: deps.shellPaths.resolveProjectPath(deps.surfaceRoot, 'triggers-v2.json'),
+    previousStorePath: deps.shellPaths.resolveProjectPath(deps.surfaceRoot, 'triggers.json'),
     config: () => ({
       enabled: configManager.get('watchers.triggers.enabled'),
       backoffLadderMs: configManager.get('watchers.triggers.backoffLadderMs'),

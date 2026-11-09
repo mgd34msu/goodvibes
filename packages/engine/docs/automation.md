@@ -229,3 +229,36 @@ watcher.
 - [Runtime Orchestration](./runtime-orchestration.md)
 - [Feature settings](./feature-settings.md)
 - [Defaults](./defaults.md)
+
+## Trigger state and multiple terminal windows
+
+The trigger family (`watchers.triggers.enabled`) saves current snapshots in
+`triggers-v2.json` under its selected surface directory. Fresh snapshots use
+validated records and durable atomic replacement. The previous `triggers.json`
+and its recovery report remain read-only so older installed readers cannot
+mistake the new format for a corrupt file and erase it.
+
+One current process owns trigger execution for each surface. Additional terminal
+windows can inspect the stored triggers and grants without sweeping, rewriting,
+or running them; their manager reports `executionOwnership: other-process`.
+Mutating an owned family returns an explicit ownership error. Closing the owner
+drains admitted starts and actions before releasing its claim; a new supervisor
+can then own that surface. This does not turn a remembered PID into execution
+authority or terminate processes owned by an unrelated terminal.
+
+Runnable state from `triggers.json` requires an explicit migration after closing
+older GoodVibes instances. Until that operation is performed, inspection and
+unrelated chat remain available and the family reports `migration-required`.
+The engine exposes `migratePrevious({ olderInstancesClosed: true })` for an
+operator control; it treats that acknowledgement as an operator statement, not
+as proof that another OS process has stopped. Terminal-only history can migrate
+without admitting old actions. The migration receipt binds the original source
+and records completed cutover; missing or corrupt new state cannot silently
+replay the preserved old actions. Changes to the original old source stop the
+new owner instead of being silently imported again.
+
+A one-shot action is durably reserved before invoking its executor. If a crash
+or cancellation prevents the executor's completion acknowledgement, its saved
+history reports that completion was not observed; the action is not automatically
+repeated. This is an admission rule, not a guarantee of exactly-once external
+effects after a network or process failure.

@@ -512,7 +512,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       configManager, shellPaths, surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,
       agentManager, processManager, sessionBroker,
     });
-    disposalScope.ownUntilRegistered('trigger manager', () => triggerManager.shutdown());
+    disposalScope.ownUntilRegistered('trigger manager', async () => { triggerManager.shutdown(); await triggerManager.join(); });
     // External protocols share the daemon's recorded owner and live policy.
     const permissionManager = createBrokeredPermissionManager({
       workspaceTrust: workspaceTrustManager,

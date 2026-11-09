@@ -193,7 +193,7 @@ describe('persisted state is content-validated, never existence-validated', () =
     expect(existsSync(path)).toBe(false);
   });
 
-  test('a truncated write fails the checksum instead of being served', () => {
+  test('a truncated v2 write fails complete parsing instead of being served', () => {
     const path = tempStore();
     saveTriggerSnapshot(path, { daemonBootId: 'boot-a', triggers: [record()], grants: [], eventLog: [], now: 1_000 });
     const good = readFileSync(path, 'utf-8');

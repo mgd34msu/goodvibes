@@ -23,6 +23,7 @@ import {
 import { useFailureReadings } from './_helpers/failure-readings.js';
 
 const roots: string[] = [];
+const managers: TriggerManager[] = [];
 
 function tempStore(): string {
   const root = join(tmpdir(), `gv-cond-${randomUUID()}`);
@@ -31,7 +32,8 @@ function tempStore(): string {
   return join(root, 'triggers.json');
 }
 
-afterEach(() => {
+afterEach(async () => {
+  for (const manager of managers.splice(0)) { manager.shutdown(); await manager.join(); }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -82,7 +84,7 @@ function conditionDefinition(overrides: Record<string, unknown> = {}) {
 }
 
 function managerWith(io: ProbeIo, executor: RecordingExecutor, clock: { t: number }, storePath = tempStore()) {
-  return new TriggerManager({
+  const manager = new TriggerManager({
     storePath,
     config: { enabled: true, defaultCheckIntervalMs: 30_000, breakerStrikes: 5 },
     actions: executor,
@@ -90,6 +92,7 @@ function managerWith(io: ProbeIo, executor: RecordingExecutor, clock: { t: numbe
     now: () => clock.t,
     daemonBootId: 'boot-1',
   });
+  managers.push(manager); return manager;
 }
 
 describe('a condition check runs probe -> extract -> rule with no model in the loop', () => {
@@ -307,6 +310,7 @@ describe('recovery through the manager', () => {
     await first.create(conditionDefinition());
     await first.runCheck('queue-depth');
 
+    first.shutdown(); await first.join();
     const second = managerWith(scriptedIo({ bodies: [] }), new RecordingExecutor(), clock, storePath);
     const report = second.load();
     expect(report.triggersLoaded).toBe(1);
@@ -320,6 +324,7 @@ describe('recovery through the manager', () => {
     const first = managerWith(scriptedIo({ bodies: ['{"depth": 1}'] }), new RecordingExecutor(), clock, storePath);
     await first.create(conditionDefinition({ ownerSessionId: 'session-a' }));
 
+    first.shutdown(); await first.join();
     const second = new TriggerManager({
       storePath,
       config: { enabled: true },
@@ -329,6 +334,7 @@ describe('recovery through the manager', () => {
       daemonBootId: 'boot-2',
       sessionIsLive: () => false,
     });
+    managers.push(second);
     const report = second.load();
     expect(report.reapedIds).toEqual(['queue-depth']);
     expect(second.get('queue-depth')).toBeNull();

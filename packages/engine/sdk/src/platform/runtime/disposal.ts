@@ -130,7 +130,7 @@ export interface RuntimePollerOwners {
    */
   readonly cancelHostedAgentRuns: () => number;
   /** Absent in compositions that build no trigger family. */
-  readonly triggerManager?: { shutdown(): void } | undefined;
+  readonly triggerManager?: { shutdown(): void; join?(): Promise<void> } | undefined;
 }
 
 /**
@@ -155,7 +155,7 @@ export function registerRuntimePollers(registry: AsyncDisposalRegistry, owners: 
   registry.add('memory governor', () => owners.memoryGovernor.stop());
   registry.add('agent orchestrator tool registries', () => owners.agentOrchestrator.dispose());
   const triggers = owners.triggerManager;
-  if (triggers) registry.add('trigger manager', () => triggers.shutdown());
+  if (triggers) registry.add('trigger manager', async () => { triggers.shutdown(); await triggers.join?.(); });
   // Registered LAST so it runs FIRST (the scope unwinds in reverse). A running
   // agent keeps making tool calls into the fleet registry, orchestration engine
   // and process registry, so it has to be told to stop BEFORE those are taken

@@ -24,6 +24,8 @@ export interface StreamRuntime {
   readonly processor: StreamLineProcessor;
   streamId: string | null;
   timer: ReturnType<typeof setInterval> | null;
+  ready?: boolean;
+  pendingExit?: { readonly code: number | null };
 }
 
 /** Exactly what the stream lifecycle needs from the supervisor. */
@@ -35,6 +37,8 @@ export interface StreamOwner {
   config(): TriggerManagerConfig;
   now(): number;
   persist(): void;
+  readonly deferActivation?: boolean;
+  assertCurrent?(id: string, runtime: StreamRuntime): void;
   fireAction(
     id: string,
     reason: string,
@@ -61,7 +65,7 @@ export async function startStreamTrigger(
     ...(config.streamBatchIntervalMs !== undefined ? { batchIntervalMs: config.streamBatchIntervalMs } : {}),
     ...(config.streamQueueLimit !== undefined ? { queueLimit: config.streamQueueLimit } : {}),
   }));
-  const runtime: StreamRuntime = { processor, streamId: null, timer: null };
+  const runtime: StreamRuntime = { processor, streamId: null, timer: null, ready: false };
   owner.streams.set(id, runtime);
 
   const started = await host.start({
@@ -70,29 +74,48 @@ export async function startStreamTrigger(
     args: spec.args ?? [],
     ...(spec.cwd !== undefined ? { cwd: spec.cwd } : {}),
     onChunk: (chunk: string) => {
+      if (owner.streams.get(id) !== runtime) return;
       processor.push(chunk, owner.now());
-      drainStreamTrigger(owner, id);
+      if (runtime.ready) drainStreamTrigger(owner, id);
     },
     onExit: (exitCode: number | null) => {
+      if (owner.streams.get(id) !== runtime) return;
       processor.finish(owner.now());
-      drainStreamTrigger(owner, id, true);
-      handleStreamExit(owner, id, exitCode);
+      if (runtime.ready) { drainStreamTrigger(owner, id, true); handleStreamExit(owner, id, exitCode); }
+      else runtime.pendingExit = { code: exitCode };
     },
   });
   runtime.streamId = started.streamId;
-
-  const interval = Math.max(50, spec.batchIntervalMs ?? config.streamBatchIntervalMs ?? 1_000);
-  runtime.timer = setInterval(() => { drainStreamTrigger(owner, id); }, interval);
-  runtime.timer.unref?.();
+  try { owner.assertCurrent?.(id, runtime); }
+  catch (error) { host.stop(started.streamId); runtime.streamId = null; if (owner.streams.get(id) === runtime) owner.streams.delete(id); throw error; }
+  if (!owner.deferActivation) {
+    if (!owner.records.has(id)) owner.records.set(id, { ...record, state: 'running', nextCheckAt: now, updatedAt: now });
+    activateStreamTrigger(owner, id);
+  }
 
   return { ...record, state: 'running', nextCheckAt: now, updatedAt: now };
+}
+
+/** Native manager calls this only after the actual running record is durable. */
+export function activateStreamTrigger(owner: StreamOwner, id: string): void {
+  const runtime = owner.streams.get(id), record = owner.records.get(id);
+  if (!runtime || !record || record.definition.spec.kind !== 'stream' || runtime.ready) return;
+  owner.assertCurrent?.(id, runtime);
+  runtime.ready = true;
+  const config = owner.config(), spec = record.definition.spec;
+  const interval = Math.max(50, spec.batchIntervalMs ?? config.streamBatchIntervalMs ?? 1_000);
+  runtime.timer = setInterval(() => { drainStreamTrigger(owner, id); }, interval); runtime.timer.unref?.();
+  if (runtime.pendingExit) {
+    const { code } = runtime.pendingExit; delete runtime.pendingExit;
+    drainStreamTrigger(owner, id, true); handleStreamExit(owner, id, code);
+  } else drainStreamTrigger(owner, id);
 }
 
 /** Emits whatever batches are ready. An agent runs only when one is. */
 export function drainStreamTrigger(owner: StreamOwner, id: string, force = false): void {
   const runtime = owner.streams.get(id);
   const record = owner.records.get(id);
-  if (!runtime || !record || record.definition.spec.kind !== 'stream') return;
+  if (!runtime || !record || record.definition.spec.kind !== 'stream' || runtime.ready === false || !owner.config().enabled) return;
   const spec = record.definition.spec;
   for (;;) {
     const batch = runtime.processor.takeBatch(owner.now(), force);

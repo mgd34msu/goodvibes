@@ -9,6 +9,7 @@
  * long-lived command, arrives through one of these interfaces.
  */
 
+import type { NativeDataWriteOwner } from '../runtime/native-reader-compatibility.js';
 import type { TriggerProcessHost } from './process-triggers.js';
 import type { ProbeIo } from './probes.js';
 import { DEFAULT_RETENTION, type TriggerRetentionPolicy } from './store.js';
@@ -66,6 +67,10 @@ export interface TriggerManagerConfig {
 
 export interface TriggerManagerOptions {
   readonly storePath: string;
+  /** Read-only original v1 source; never overwritten by new installed readers. */
+  readonly previousStorePath?: string | undefined;
+  /** Actual admitted installed reader owner; declares v2 before publication. */
+  readonly nativeDataWriter?: NativeDataWriteOwner | undefined;
   /**
    * A snapshot, or a function read on every access. Hosts pass the function
    * form so `watchers.triggers.enabled` is genuinely runtime-toggleable: with

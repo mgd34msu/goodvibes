@@ -516,6 +516,16 @@ function refreshLockMtime(fd: number): void {
  */
 const inProcessTails = new Map<string, Promise<void>>();
 
+const synchronousOwners = new WeakMap<() => void, () => void>();
+/** Prove the actual original descriptor acquired by the synchronous native
+ * claim. A release-shaped function or re-opened pathname cannot mint this proof.
+ */
+export function assertCrossProcessLockCurrent(release: () => void): void {
+  const owner = synchronousOwners.get(release);
+  if (!owner) throw new Error('Original native lock ownership is unavailable');
+  owner();
+}
+
 /** One synchronous attempt for short boot-time transactions. Only proven-dead owners are replaced. */
 export function tryAcquireCrossProcessLock(lockPath: string, options: { readonly assertCurrent?: (() => void) | undefined } = {}): (() => void) | null {
   const assertCurrent = options.assertCurrent?.bind(options);
@@ -526,21 +536,33 @@ export function tryAcquireCrossProcessLock(lockPath: string, options: { readonly
   const fd = createLockAtomically(lockPath, token, true)
     ?? tryTakeOverStaleLock(lockPath, Infinity, token, true);
   if (fd === null) return null;
-  const owned = fstatSync(fd);
+  const owned = fstatSync(fd, { bigint: true });
+  const stamp = (value: ReturnType<typeof fstatSync> | import('node:fs').BigIntStats): string =>
+    [value.dev, value.ino, value.mode, value.uid, value.gid, value.nlink, value.size,
+      'birthtimeNs' in value ? value.birthtimeNs : value.birthtimeMs,
+      'mtimeNs' in value ? value.mtimeNs : value.mtimeMs,
+      'ctimeNs' in value ? value.ctimeNs : value.ctimeMs].join(':');
+  const original = stamp(owned);
+  const assertOriginal = () => {
+    assertCurrent?.();
+    const current = lstatSync(lockPath, { bigint: true });
+    if (!current.isFile() || current.isSymbolicLink() || stamp(current) !== original || stamp(fstatSync(fd, { bigint: true })) !== original) throw new Error('Original native lock owner changed');
+  };
   let released = false;
-  return () => {
+  const release = () => {
     if (released) return;
     released = true;
     try {
       // Retired physical parents withhold all pathname cleanup while the
       // descriptor still closes in finally. The replacement tree is foreign.
-      assertCurrent?.();
-      const current = lstatSync(lockPath);
-      if (current.isFile() && !current.isSymbolicLink() && current.ino === owned.ino && current.dev === owned.dev) unlinkSync(lockPath);
+      assertOriginal();
+      unlinkSync(lockPath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    } finally { closeSync(fd); }
+    } finally { synchronousOwners.delete(release); closeSync(fd); }
   };
+  synchronousOwners.set(release, () => { if (released) throw new Error('Original native lock ownership is unavailable'); assertOriginal(); });
+  return release;
 }
 
 /**

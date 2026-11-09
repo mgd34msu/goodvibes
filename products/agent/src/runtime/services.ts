@@ -1792,7 +1792,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
   // on-exit child inherits the same credential-env scrub, live output
   // collection and SIGTERM/SIGKILL watchdog as any other background command.
   const triggerManager = new TriggerManager({
-    storePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'triggers.json'),
+    nativeDataWriter: configManager.getNativeDataWriter(),
+    storePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'triggers-v2.json'),
+    previousStorePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'triggers.json'),
     config: () => ({
       enabled: configManager.get('watchers.triggers.enabled'),
       backoffLadderMs: configManager.get('watchers.triggers.backoffLadderMs'),

@@ -844,6 +844,7 @@ export class DaemonServer {
     if (this.configManager.get('watchers.enabled')) { try { this.watcherRegistry.stopWatcher('daemon-heartbeat', 'daemon-stopped'); } catch (error) { logger.warn('DaemonServer: heartbeat watcher stop failed', { error: summarizeError(error) }); } }
     // Optional-chained: a host that composed its own RuntimeServices without a trigger family must shut down cleanly, not throw. When present, shutdown() is safe even if start() never ran or the family is disabled.
     this.triggerManager?.shutdown();
+    await this.triggerManager?.join();
     this.channelHealth.stop();
     if (this.replyPoller !== null) {
       clearInterval(this.replyPoller);

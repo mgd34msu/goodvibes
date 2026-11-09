@@ -45,6 +45,7 @@ import { useToolReadings } from './_helpers/tool-readings.ts';
 useToolReadings();
 
 const roots: string[] = [];
+const managers: TriggerManager[] = [];
 
 function tempStore(): string {
   const root = join(tmpdir(), `gv-onexit-${randomUUID()}`);
@@ -53,7 +54,8 @@ function tempStore(): string {
   return join(root, 'triggers.json');
 }
 
-afterEach(() => {
+afterEach(async () => {
+  for (const manager of managers.splice(0)) { manager.shutdown(); await manager.join(); }
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
@@ -116,7 +118,7 @@ class RecordingExecutor implements TriggerActionExecutor {
 }
 
 function managerWith(host: FakeProcessHost, executor: RecordingExecutor, storePath: string, bootId: string, clock = { t: 1_000 }) {
-  return new TriggerManager({
+  const manager = new TriggerManager({
     storePath,
     config: { enabled: true, onExitMaxDurationMs: 60_000, outputTailBytes: 64 },
     actions: executor,
@@ -124,6 +126,7 @@ function managerWith(host: FakeProcessHost, executor: RecordingExecutor, storePa
     daemonBootId: bootId,
     now: () => clock.t,
   });
+  managers.push(manager); return manager;
 }
 
 const onExitDefinition = {
@@ -331,6 +334,7 @@ describe('daemon restart', () => {
     await firstManager.create(onExitDefinition);
     expect(firstManager.get('nightly-build')?.state).toBe('running');
 
+    firstManager.shutdown(); await firstManager.join();
     // A new daemon comes up against the same store with a different boot id.
     clock.t = 100_000;
     const secondHost = new FakeProcessHost();
@@ -345,6 +349,7 @@ describe('daemon restart', () => {
     expect(secondExecutor.turns[0]?.prompt).toContain('UNKNOWN');
     expect(secondManager.get('nightly-build')?.state).toBe('fired');
 
+    secondManager.shutdown(); await secondManager.join();
     // A third boot must not fire it again, the fired one-shot is retired.
     const thirdExecutor = new RecordingExecutor();
     const thirdManager = managerWith(new FakeProcessHost(), thirdExecutor, storePath, 'boot-3', clock);
@@ -399,7 +404,7 @@ describe('action grants', () => {
     } finally { hash.mockRestore(); }
   });
 
-  test('reconfirming metadata preserves a valid pin, while changing the approved action retires it across restart', () => {
+  test('reconfirming metadata preserves a valid pin, while changing the approved action retires it across restart', async () => {
     const path = tempStore(), first = managerWith(new FakeProcessHost(), new RecordingExecutor(), path, 'boot-1');
     const input = { id: 'compile', description: 'Compile', command: 'make', args: ['all'], confirmedBy: 'owner' };
     const initial = first.registerGrant(input);
@@ -407,11 +412,13 @@ describe('action grants', () => {
     const updated = first.registerGrant({ ...input, description: 'Compile the project', confirmedBy: 'owner again' });
     expect(updated.digest).toBe(initial.digest);
     expect(updated.approvedAction).toEqual(initial.approvedAction);
+    first.shutdown(); await first.join();
     const restarted = managerWith(new FakeProcessHost(), new RecordingExecutor(), path, 'boot-2');
     expect(verifyGrant(restarted.listGrants(), initial.id, initial.digest, originalPin.approvedAction).ok).toBe(true);
     const changed = restarted.registerGrant({ ...input, args: ['clean'] });
     expect(changed.digest).not.toBe(initial.digest);
     expect(verifyGrant(restarted.listGrants(), initial.id, initial.digest, originalPin.approvedAction).ok).toBe(false);
+    restarted.shutdown(); await restarted.join();
     const final = managerWith(new FakeProcessHost(), new RecordingExecutor(), path, 'boot-3');
     expect(verifyGrant(final.listGrants(), initial.id, initial.digest, originalPin.approvedAction).ok).toBe(false);
     const changedPin = captureRegisteredGrantAction([changed], { kind: 'action-grant', grantId: changed.id, digest: changed.digest });
@@ -450,6 +457,7 @@ describe('action grants', () => {
     host.finish({ exitCode: 0 }); await manager.pollProcesses();
     expect(executor.grants).toEqual([old.id]);
     expect(manager.history('nightly-build').filter(run => run.outcome === 'fired')).toHaveLength(1);
+    manager.shutdown(); await manager.join();
     const restarted = managerWith(new FakeProcessHost(), new RecordingExecutor(), path, 'third-boot');
     expect(verifyGrant(restarted.listGrants(), old.id, old.digest).ok).toBe(true);
     expect(verifyGrant(restarted.listGrants(), fresh.id, fresh.digest, freshPin.approvedAction).ok).toBe(true);
@@ -487,6 +495,7 @@ describe('action grants', () => {
     if (!saved?.approvedAction) throw new Error('Missing original registry approval');
     const replacement = field === 'args' ? ['clean'] : field === 'cwd' ? '/b' : 'other-command';
     Reflect.set(saved, field, replacement); Reflect.set(saved.approvedAction, field, replacement);
+    manager.shutdown(); await manager.join();
     saveTriggerSnapshot(path, { ...snapshot, now: 1001 });
     const restarted = managerWith(new FakeProcessHost(), executor, path, 'boot-2');
     restarted.load(); await restarted.pollProcesses();

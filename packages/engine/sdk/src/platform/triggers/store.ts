@@ -9,9 +9,9 @@
  *   2. Bound everything, count cap AND age TTL on run history, observations
  *      and the shared event log. An unbounded append-only store is a leak with
  *      a nicer name.
- *   3. Validate by content, never by existence, the snapshot carries a
- *      checksum written last; a torn, truncated or zero-filled file fails the
- *      checksum and is quarantined instead of being served as good state.
+ *   3. Validate the complete envelope and records, never existence alone.
+ *      Fresh v2 snapshots publish atomically without a redundant document hash;
+ *      actual saved v1 inputs retain their original read-only checksum check.
  *   4. Reap periodically, the supervisor runs the same sweep on a timer,
  *      because a long-lived daemon that only sweeps at boot never sweeps.
  *   5. Disclose what was reaped, every sweep returns a report and the startup
@@ -23,29 +23,41 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { resolveSharedDirectory } from '../runtime/surface-root.js';
-import { summarizeError } from '../utils/error-display.js';
-import { logger } from '../utils/logger.js';
-import type {
-  TriggerActionGrant,
-  TriggerEventLogEntry,
-  TriggerRecord,
-  TriggerRecoveryReport,
-} from './types.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { TriggerFileOwner, TriggerStoreError } from './store-owner.js';
+import { isTriggerEvent, isTriggerGrant, isTriggerRecord, isTriggerReport, snapshotJson } from './snapshot-validation.js';
+import type { TriggerActionGrant, TriggerEventLogEntry, TriggerRecord, TriggerRecoveryReport } from './types.js';
+export { TriggerStoreError, TriggerStoreOwnershipError } from './store-owner.js';
 
-export const TRIGGER_STORE_VERSION = 1;
-
-export interface TriggerStoreSnapshot {
-  readonly version: typeof TRIGGER_STORE_VERSION;
+export const TRIGGER_STORE_VERSION = 2;
+export interface PreviousTriggerSnapshot { readonly version: 1; readonly checksum: string; readonly daemonBootId: string; readonly savedAt: number }
+interface SnapshotBody {
+  readonly version: 1 | 2;
   readonly daemonBootId: string;
   readonly savedAt: number;
   readonly triggers: readonly TriggerRecord[];
   readonly grants: readonly TriggerActionGrant[];
   readonly eventLog: readonly TriggerEventLogEntry[];
-  /** sha256 over the canonical body, written last. Absent = torn write. */
-  readonly checksum: string;
+  readonly previousSource?: PreviousTriggerSnapshot;
+}
+export type TriggerStoreSnapshot = SnapshotBody & ({ readonly version: 1; readonly checksum: string } | { readonly version: 2; readonly checksum?: never });
+interface TriggerCutover { readonly version: 1; readonly phase: 'prepared' | 'committed'; readonly previousSource: PreviousTriggerSnapshot | null; readonly migration: 'terminal-history' | 'operator-confirmed' }
+function samePrevious(left: PreviousTriggerSnapshot | null | undefined, right: PreviousTriggerSnapshot | null | undefined): boolean {
+  return left == null || right == null ? left == null && right == null : left.checksum === right.checksum && left.daemonBootId === right.daemonBootId && left.savedAt === right.savedAt;
+}
+export class TriggerStoreVersionError extends Error {
+  override readonly name = 'TriggerStoreVersionError';
+  constructor(readonly version: number) { super('Trigger snapshot requires a newer reader'); }
+}
+
+export class TriggerMigrationRequiredError extends Error {
+  override readonly name = 'TriggerMigrationRequiredError';
+  constructor() { super('Older trigger state needs explicit migration after closing older GoodVibes instances; inspection remains available.'); }
+}
+function runnablePrevious(snapshot: TriggerStoreSnapshot | null): boolean {
+  return snapshot?.triggers.some(record => record.state !== 'fired' && record.state !== 'cancelled') ?? false;
 }
 
 export interface TriggerRetentionPolicy {
@@ -65,159 +77,229 @@ export const DEFAULT_RETENTION: TriggerRetentionPolicy = {
 };
 
 export function getTriggerStorePath(rootPath: string): string {
-  return resolveSharedDirectory(rootPath, 'triggers.json');
+  return resolveSharedDirectory(rootPath, 'triggers-v2.json');
 }
+
+/** Actual v1 file remains read-only for installed earlier readers. */
+export function getPreviousTriggerStorePath(rootPath: string): string { return resolveSharedDirectory(rootPath, 'triggers.json'); }
 
 export function getTriggerReapReportPath(storePath: string): string {
-  return join(dirname(storePath), 'triggers-reaped.json');
+  return join(dirname(storePath), `${basename(storePath).replace(/\.json$/, '')}-reaped.json`);
 }
 
-interface SnapshotBody {
-  readonly version: number;
+/** The deployed v1 checksum is read compatibility, not an authenticator.
+ * Only actual saved version1 data/fixtures may use this representation. Fresh
+ * version2 publication uses complete validation and owned atomic persistence.
+ */
+export function checksumOf(body: SnapshotBody): string {
+  if (body.version !== 1) throw new TriggerStoreError('invalid');
+  return createHash('sha256').update(JSON.stringify({ version: body.version, daemonBootId: body.daemonBootId,
+    savedAt: body.savedAt, triggers: body.triggers, grants: body.grants, eventLog: body.eventLog })).digest('hex');
+}
+
+export function validateSnapshot(parsed: unknown): TriggerStoreSnapshot | { readonly invalid: string } {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { invalid: 'snapshot is not an object' };
+  const snapshot = parsed as Record<string, unknown>, version = snapshot['version'];
+  if (typeof version === 'number' && Number.isFinite(version) && version !== 1 && version !== 2) throw new TriggerStoreVersionError(version);
+  if (version !== 1 && version !== 2) return { invalid: 'snapshot version is not supported' };
+  if (version === 1 && (typeof snapshot['checksum'] !== 'string' || !/^[0-9a-f]{64}$/.test(snapshot['checksum']))) {
+    return { invalid: 'snapshot has no checksum, the write did not complete' };
+  }
+  const previous = snapshot['previousSource'];
+  if (previous !== undefined && (version !== 2 || !previous || typeof previous !== 'object' || Array.isArray(previous)
+    || Object.keys(previous).length !== 4 || !('version' in previous) || previous.version !== 1
+    || !('checksum' in previous) || typeof previous.checksum !== 'string' || !/^[0-9a-f]{64}$/.test(previous.checksum)
+    || !('daemonBootId' in previous) || typeof previous.daemonBootId !== 'string' || !previous.daemonBootId
+    || !('savedAt' in previous) || typeof previous.savedAt !== 'number' || !Number.isFinite(previous.savedAt))) return { invalid: 'previous snapshot source is invalid' };
+  const keys = version === 1 ? ['version', 'daemonBootId', 'savedAt', 'triggers', 'grants', 'eventLog', 'checksum']
+    : ['version', 'daemonBootId', 'savedAt', 'triggers', 'grants', 'eventLog', ...(previous === undefined ? [] : ['previousSource'])];
+  if (Object.keys(snapshot).length !== keys.length || Object.keys(snapshot).some(key => !keys.includes(key))) return { invalid: 'snapshot envelope fields are invalid' };
+  if (typeof snapshot['daemonBootId'] !== 'string' || !snapshot['daemonBootId'] || typeof snapshot['savedAt'] !== 'number' || !Number.isFinite(snapshot['savedAt'])
+    || !Array.isArray(snapshot['triggers']) || !Array.isArray(snapshot['grants']) || !Array.isArray(snapshot['eventLog'])) return { invalid: 'snapshot header or collections are invalid' };
+  // First verify the precise original representation on an actual v1 input.
+  // v2 never calls this hash, including on malformed records.
+  if (version === 1 && checksumOf(snapshot as unknown as SnapshotBody) !== snapshot['checksum']) return { invalid: 'snapshot checksum mismatch' };
+  if (!snapshot['triggers'].every(isTriggerRecord) || !snapshot['grants'].every(isTriggerGrant) || !snapshot['eventLog'].every(isTriggerEvent)) return { invalid: 'snapshot records failed shape validation' };
+  if (new Set(snapshot['triggers'].map(entry => entry.definition.id)).size !== snapshot['triggers'].length
+    || new Set(snapshot['grants'].map(entry => entry.id)).size !== snapshot['grants'].length) return { invalid: 'snapshot identities are duplicated' };
+  return snapshot as unknown as TriggerStoreSnapshot;
+}
+
+export interface TriggerSnapshotInput {
   readonly daemonBootId: string;
-  readonly savedAt: number;
   readonly triggers: readonly TriggerRecord[];
   readonly grants: readonly TriggerActionGrant[];
   readonly eventLog: readonly TriggerEventLogEntry[];
+  readonly now?: number | undefined;
 }
+export interface LoadedTriggerStore { readonly snapshot: TriggerStoreSnapshot | null; readonly quarantined?: string | undefined }
 
-/** Canonical serialisation the checksum is computed over. Key order is fixed. */
-function canonicalBody(body: SnapshotBody): string {
-  return JSON.stringify({
-    version: body.version,
-    daemonBootId: body.daemonBootId,
-    savedAt: body.savedAt,
-    triggers: body.triggers,
-    grants: body.grants,
-    eventLog: body.eventLog,
-  });
-}
-
-export function checksumOf(body: SnapshotBody): string {
-  return createHash('sha256').update(canonicalBody(body)).digest('hex');
-}
-
-/**
- * Content validation. `existsSync` proves nothing: a crashed run can leave a
- * full-size file of zeros that an existence check happily treats as complete.
- * We re-derive the checksum and require every record to parse into shape.
+/** One manager owns one selected original snapshot/report tree. Only native
+ * ownership metadata is retained here; there is no whole-body checksum cache.
  */
-export function validateSnapshot(parsed: unknown): TriggerStoreSnapshot | { readonly invalid: string } {
-  if (typeof parsed !== 'object' || parsed === null) return { invalid: 'snapshot is not an object' };
-  const snapshot = parsed as Partial<TriggerStoreSnapshot>;
-  if (snapshot.version !== TRIGGER_STORE_VERSION) {
-    return { invalid: `unsupported snapshot version ${String(snapshot.version)}` };
+export class TriggerSnapshotStore {
+  private readonly files: TriggerFileOwner;
+  private readonly name: string;
+  private readonly reportName: string;
+  private knownVersion: number | null | undefined;
+  private readonly previousFiles: TriggerFileOwner | undefined;
+  private readonly previousName: string | undefined;
+  private previousIdentity: PreviousTriggerSnapshot | null = null;
+  private previousInspected = false;
+  private readonly cutoverName: string;
+  private cutover: TriggerCutover | null | undefined;
+  private quarantinedHere = false;
+  private migrationAccepted = false;
+  private previousRunnable = false;
+  constructor(readonly storePath: string, private readonly beforeWrite?: (() => void) | undefined, previousStorePath?: string) {
+    this.name = basename(storePath); this.reportName = basename(getTriggerReapReportPath(storePath));
+    this.cutoverName = `${this.name}.cutover.json`;
+    this.files = new TriggerFileOwner(storePath, this.reportName, [this.cutoverName]);
+    if (previousStorePath) { this.previousName = basename(previousStorePath); this.previousFiles = new TriggerFileOwner(previousStorePath, 'triggers-reaped.json'); }
   }
-  if (typeof snapshot.checksum !== 'string' || snapshot.checksum.length !== 64) {
-    return { invalid: 'snapshot has no checksum, the write did not complete' };
+  /** Explicit operator acknowledgement; this is not a process-exclusion proof. */
+  acceptPreviousMigration(): void { this.migrationAccepted = true; }
+  private assertMigration(): void {
+    if (this.previousRunnable && !this.migrationAccepted && this.cutover?.migration !== 'operator-confirmed') throw new TriggerMigrationRequiredError();
   }
-  if (!Array.isArray(snapshot.triggers) || !Array.isArray(snapshot.grants) || !Array.isArray(snapshot.eventLog)) {
-    return { invalid: 'snapshot collections are missing or not arrays' };
-  }
-  const body: SnapshotBody = {
-    version: snapshot.version,
-    daemonBootId: typeof snapshot.daemonBootId === 'string' ? snapshot.daemonBootId : '',
-    savedAt: typeof snapshot.savedAt === 'number' ? snapshot.savedAt : 0,
-    triggers: snapshot.triggers,
-    grants: snapshot.grants,
-    eventLog: snapshot.eventLog,
-  };
-  if (checksumOf(body) !== snapshot.checksum) {
-    return { invalid: 'snapshot checksum mismatch, the file is torn, truncated or was written by a crashed run' };
-  }
-  const malformed = snapshot.triggers.filter((record) => !isWellFormedRecord(record));
-  if (malformed.length > 0) {
-    return { invalid: `${malformed.length} trigger record(s) failed shape validation` };
-  }
-  return {
-    version: TRIGGER_STORE_VERSION,
-    daemonBootId: body.daemonBootId,
-    savedAt: body.savedAt,
-    triggers: snapshot.triggers,
-    grants: snapshot.grants,
-    eventLog: snapshot.eventLog,
-    checksum: snapshot.checksum,
-  };
-}
-
-function isWellFormedRecord(record: unknown): record is TriggerRecord {
-  if (typeof record !== 'object' || record === null) return false;
-  const candidate = record as Partial<TriggerRecord>;
-  const definition = candidate.definition;
-  if (typeof definition !== 'object' || definition === null) return false;
-  if (typeof definition.id !== 'string' || definition.id.length === 0) return false;
-  if (typeof definition.spec !== 'object' || definition.spec === null) return false;
-  if (typeof definition.action !== 'object' || definition.action === null) return false;
-  if (!Array.isArray(candidate.observations) || !Array.isArray(candidate.runs)) return false;
-  if (typeof candidate.strikes !== 'number' || typeof candidate.firedCount !== 'number') return false;
-  return true;
-}
-
-export function saveTriggerSnapshot(
-  storePath: string,
-  input: {
-    readonly daemonBootId: string;
-    readonly triggers: readonly TriggerRecord[];
-    readonly grants: readonly TriggerActionGrant[];
-    readonly eventLog: readonly TriggerEventLogEntry[];
-    readonly now?: number | undefined;
-  },
-): void {
-  const body: SnapshotBody = {
-    version: TRIGGER_STORE_VERSION,
-    daemonBootId: input.daemonBootId,
-    savedAt: input.now ?? Date.now(),
-    triggers: [...input.triggers].sort((a, b) => a.definition.id.localeCompare(b.definition.id)),
-    grants: [...input.grants].sort((a, b) => a.id.localeCompare(b.id)),
-    eventLog: [...input.eventLog].sort((a, b) => a.at - b.at || a.triggerId.localeCompare(b.triggerId)),
-  };
-  const snapshot: TriggerStoreSnapshot = { ...body, version: TRIGGER_STORE_VERSION, checksum: checksumOf(body) };
-  mkdirSync(dirname(storePath), { recursive: true });
-  const temp = `${storePath}.tmp-${process.pid}`;
-  writeFileSync(temp, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf-8');
-  renameSync(temp, storePath);
-}
-
-export interface LoadedTriggerStore {
-  readonly snapshot: TriggerStoreSnapshot | null;
-  /** Set when the on-disk state failed content validation and was set aside. */
-  readonly quarantined?: string | undefined;
-}
-
-/**
- * Loads and content-validates. A file that fails validation is renamed aside
- * rather than deleted (so it can be inspected) and the caller starts clean.
- */
-export function loadTriggerSnapshot(storePath: string): LoadedTriggerStore {
-  if (!existsSync(storePath)) return { snapshot: null };
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(storePath, 'utf-8')) as unknown;
-  } catch (error) {
-    return { snapshot: null, quarantined: quarantine(storePath, `unparseable: ${summarizeError(error)}`) };
-  }
-  const validated = validateSnapshot(parsed);
-  if ('invalid' in validated) {
-    return { snapshot: null, quarantined: quarantine(storePath, validated.invalid) };
-  }
-  return { snapshot: validated };
-}
-
-function quarantine(storePath: string, reason: string): string {
-  const target = `${storePath}.corrupt-${Date.now()}`;
-  try {
-    renameSync(storePath, target);
-  } catch (error) {
-    logger.warn('Trigger store quarantine rename failed', { storePath, error: summarizeError(error) });
+  acquire(): void { this.previousFiles?.assertCurrent(); this.files.acquire(this.name); }
+  release(): void { this.files.release(); }
+  assertCurrent(): void { this.previousFiles?.assertCurrent(); this.files.assertCurrent(); }
+  private readPrevious(): TriggerStoreSnapshot | null {
+    const source = this.previousFiles && this.previousName ? this.previousFiles.read(this.previousName) : null;
+    this.previousInspected = true;
+    if (!source) { this.previousIdentity = null; return null; }
     try {
-      unlinkSync(storePath);
-    } catch {
-      // Leaving the bad file in place is still better than serving it.
-    }
+      let parsed: unknown; try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)) as unknown; } catch { throw new TriggerStoreError('invalid'); }
+      const validated = validateSnapshot(parsed); if ('invalid' in validated || validated.version !== 1) throw new TriggerStoreError('invalid');
+      this.previousRunnable = runnablePrevious(validated);
+      this.previousIdentity = { version: 1, checksum: validated.checksum, daemonBootId: validated.daemonBootId, savedAt: validated.savedAt };
+      this.assertCurrent(); return validated;
+    } finally { source.close(); }
   }
-  logger.warn('Trigger store failed content validation and was set aside', { storePath, target, reason });
-  return `${reason} (moved to ${target})`;
+  private assertPrevious(snapshot: TriggerStoreSnapshot): void {
+    if (!this.previousFiles) return;
+    if (snapshot.version !== 2) throw new TriggerStoreError('invalid');
+    const expected = snapshot.previousSource, actual = this.previousIdentity;
+    if (expected === undefined ? actual !== null : actual === null || expected.checksum !== actual.checksum
+      || expected.daemonBootId !== actual.daemonBootId || expected.savedAt !== actual.savedAt) throw new TriggerStoreError('unavailable');
+  }
+  private readCutover(): void {
+    if (this.cutover !== undefined) return;
+    const source = this.files.read(this.cutoverName);
+    if (!source) { this.cutover = null; return; }
+    try {
+      let value: unknown; try { value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)) as unknown; } catch { throw new TriggerStoreError('invalid'); }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TriggerStoreError('invalid');
+      const record = value as Record<string, unknown>;
+      if (typeof record['version'] === 'number' && record['version'] !== 1) throw new TriggerStoreVersionError(record['version']);
+      if (Object.keys(record).length !== 4 || Object.keys(record).some(key => !['version', 'phase', 'migration', 'previousSource'].includes(key)) || (record['migration'] !== 'terminal-history' && record['migration'] !== 'operator-confirmed') || record['version'] !== 1 || (record['phase'] !== 'prepared' && record['phase'] !== 'committed')) throw new TriggerStoreError('invalid');
+      const previous = record['previousSource'];
+      if (previous !== null) {
+        const envelope = validateSnapshot({ version: 2, daemonBootId: 'cutover', savedAt: 0, triggers: [], grants: [], eventLog: [], previousSource: previous });
+        if ('invalid' in envelope) throw new TriggerStoreError('invalid');
+      }
+      const captured: TriggerCutover = { version: 1, phase: record['phase'], migration: record['migration'], previousSource: previous as PreviousTriggerSnapshot | null };
+      if (this.previousFiles && !samePrevious(captured.previousSource, this.previousIdentity)) throw new TriggerStoreError('unavailable');
+      this.cutover = captured;
+    } finally { source.close(); }
+  }
+  private declare(): void {
+    this.previousFiles?.assertCurrent();
+    const result: unknown = this.beforeWrite?.();
+    if (result !== undefined) { drainOwned(result); throw new TriggerStoreError('unavailable'); }
+    this.previousFiles?.assertCurrent();
+  }
+  load(readOnly = false): LoadedTriggerStore {
+    this.assertCurrent(); const previous = this.readPrevious(); this.readCutover();
+    if (!readOnly) this.assertMigration();
+    const source = this.files.read(this.name);
+    if (!source) {
+      if (this.cutover?.phase === 'committed') throw new TriggerStoreError('unavailable');
+      if (!readOnly) this.assertMigration();
+      this.knownVersion = null; return { snapshot: previous };
+    }
+    try {
+      let parsed: unknown;
+      try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)) as unknown; }
+      catch { if (readOnly) throw new TriggerStoreError('invalid'); const target = this.files.quarantine(this.name, source); this.knownVersion = null; this.quarantinedHere = true; if (this.cutover?.phase === 'committed' && this.previousFiles) throw new TriggerStoreError('invalid'); return { snapshot: this.cutover?.phase === 'prepared' ? previous : null, quarantined: `unparseable snapshot (moved to ${target})` }; }
+      const snapshot = validateSnapshot(parsed);
+      if ('invalid' in snapshot) {
+        if (readOnly) throw new TriggerStoreError('invalid');
+        const target = this.files.quarantine(this.name, source); this.knownVersion = null; this.quarantinedHere = true;
+        if (this.cutover?.phase === 'committed' && this.previousFiles) throw new TriggerStoreError('invalid');
+        return { snapshot: this.cutover?.phase === 'prepared' ? previous : null, quarantined: `${snapshot.invalid} (moved to ${target})` };
+      }
+      this.assertPrevious(snapshot);
+      if (!readOnly) this.assertMigration();
+      if (this.cutover && !samePrevious(snapshot.previousSource, this.cutover.previousSource)) throw new TriggerStoreError('unavailable');
+      this.files.assertCurrent(); this.knownVersion = snapshot.version; return { snapshot };
+    } finally { source.close(); }
+  }
+  private withLease<T>(work: () => T): T {
+    const owned = this.files.acquired; if (!owned) this.acquire();
+    try { return work(); } finally { if (!owned) this.release(); }
+  }
+  save(input: TriggerSnapshotInput): void { this.withLease(() => this.saveOwned(input)); }
+  private saveOwned(input: TriggerSnapshotInput): void {
+    this.assertCurrent();
+    if (!this.previousInspected) this.readPrevious();
+    this.readCutover();
+    this.assertMigration();
+    if (this.cutover?.previousSource && !this.previousFiles) throw new TriggerStoreError('unavailable');
+    if (this.cutover?.phase === 'committed' && this.knownVersion === null && (!this.quarantinedHere || this.previousFiles)) throw new TriggerStoreError('unavailable');
+    // A stand-alone explicit writer must inspect an existing version before
+    // replacement too; an unsupported future file is never quarantined/reset.
+    if (this.knownVersion === undefined) {
+      const source = this.files.read(this.name);
+      if (source) {
+        try {
+          let parsed: unknown; try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)) as unknown; } catch { throw new TriggerStoreError('invalid'); }
+          const validated = validateSnapshot(parsed); if ('invalid' in validated) throw new TriggerStoreError('invalid');
+          this.assertPrevious(validated); this.knownVersion = validated.version;
+        } finally { source.close(); }
+      } else {
+        if (this.cutover?.phase === 'committed' && !(this.quarantinedHere && !this.previousFiles)) throw new TriggerStoreError('unavailable');
+        this.knownVersion = null;
+      }
+    }
+    const captured = snapshotJson({ version: TRIGGER_STORE_VERSION, ...(this.previousIdentity === null ? {} : { previousSource: this.previousIdentity }), daemonBootId: input.daemonBootId, savedAt: input.now ?? Date.now(),
+      triggers: [...input.triggers].sort((a, b) => a.definition.id.localeCompare(b.definition.id)),
+      grants: [...input.grants].sort((a, b) => a.id.localeCompare(b.id)),
+      eventLog: [...input.eventLog].sort((a, b) => a.at - b.at || a.triggerId.localeCompare(b.triggerId)),
+    });
+    const snapshot = validateSnapshot(captured); if ('invalid' in snapshot) throw new TriggerStoreError('invalid');
+    if (!this.cutover) {
+      const prepared: TriggerCutover = { version: 1, phase: 'prepared', previousSource: this.previousIdentity, migration: this.migrationAccepted ? 'operator-confirmed' : 'terminal-history' };
+      this.files.write(this.cutoverName, `${JSON.stringify(prepared)}\n`, () => this.declare()); this.cutover = prepared;
+    }
+    this.files.write(this.name, `${JSON.stringify(snapshot, null, 2)}\n`, () => this.declare());
+    if (this.cutover.phase === 'prepared') {
+      const committed: TriggerCutover = { ...this.cutover, phase: 'committed' };
+      this.files.write(this.cutoverName, `${JSON.stringify(committed)}\n`, () => this.declare()); this.cutover = committed;
+    }
+    this.knownVersion = TRIGGER_STORE_VERSION;
+  }
+  report(report: TriggerRecoveryReport): void { this.withLease(() => this.reportOwned(report)); }
+  private reportOwned(report: TriggerRecoveryReport): void {
+    this.assertCurrent();
+    if (!isTriggerReport(report)) throw new TriggerStoreError('invalid');
+    if (!report.triggersReaped && !report.runsReaped && !report.observationsReaped && !report.eventsReaped && !report.orphanedProcesses.length && !report.quarantined) return;
+    const source = this.files.read(this.reportName) ?? this.previousFiles?.read('triggers-reaped.json') ?? null; let history: TriggerRecoveryReport[] = [];
+    if (source) {
+      try {
+        let parsed: unknown; try { parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)) as unknown; } catch { throw new TriggerStoreError('invalid'); }
+        if (!Array.isArray(parsed) || !parsed.every(isTriggerReport)) throw new TriggerStoreError('invalid'); history = parsed;
+      } finally { source.close(); }
+    }
+    history.push(snapshotJson(report) as TriggerRecoveryReport);
+    this.files.write(this.reportName, `${JSON.stringify(history.slice(-50), null, 2)}\n`);
+  }
 }
+
+/** Compatibility entry points retain their own actual selected file owner. */
+export function saveTriggerSnapshot(storePath: string, input: TriggerSnapshotInput): void { new TriggerSnapshotStore(storePath).save(input); }
+export function loadTriggerSnapshot(storePath: string): LoadedTriggerStore { return new TriggerSnapshotStore(storePath).load(); }
 
 // ─── Bounding ─────────────────────────────────────────────────────────────────
 
@@ -344,32 +426,4 @@ export function sweepTriggers(input: SweepInput): SweepResult {
  * `checkpoints-moved.json`: whatever was removed is written down where a person
  * can find it, so a reap never looks like data loss.
  */
-export function writeReapReport(storePath: string, report: TriggerRecoveryReport): void {
-  if (
-    report.triggersReaped === 0
-    && report.runsReaped === 0
-    && report.observationsReaped === 0
-    && report.eventsReaped === 0
-    && report.orphanedProcesses.length === 0
-    && !report.quarantined
-  ) {
-    return;
-  }
-  const path = getTriggerReapReportPath(storePath);
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    let history: TriggerRecoveryReport[] = [];
-    if (existsSync(path)) {
-      try {
-        const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
-        if (Array.isArray(parsed)) history = parsed as TriggerRecoveryReport[];
-      } catch {
-        history = [];
-      }
-    }
-    history.push(report);
-    writeFileSync(path, `${JSON.stringify(history.slice(-50), null, 2)}\n`, 'utf-8');
-  } catch (error) {
-    logger.warn('Trigger reap report write failed', { path, error: summarizeError(error) });
-  }
-}
+export function writeReapReport(storePath: string, report: TriggerRecoveryReport): void { new TriggerSnapshotStore(storePath).report(report); }

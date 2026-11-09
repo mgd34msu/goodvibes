@@ -4,7 +4,6 @@ export {
   PROJECT_PLANNING_CONNECTOR_ID,
   PROJECT_PLANNING_TAG,
   projectPlanningCanonicalUri,
-  projectPlanningProjectIdFromPath,
   resolveProjectPlanningSpace,
 } from './helpers.js';
 export { evaluateProjectPlanningReadiness } from './readiness.js';
@@ -68,3 +67,6 @@ export type {
   ProjectWorkPlanTaskStatusInput,
   ProjectWorkPlanTaskUpdateInput,
 } from './types.js';
+
+export { prepareConfiguredProjectContext, createConfiguredPlanningStore } from './configured-project.js';
+export type { ConfiguredProjectInspection } from './configured-project.js';

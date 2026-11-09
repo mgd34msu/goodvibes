@@ -97,7 +97,7 @@ export async function bootDaemon(options: BootDaemonOptions): Promise<BootedDaem
     ownsDaemonTier: true,
   });
 
-  const server = new DaemonServer({
+  const server = await DaemonServer.create({
     port: options.port ?? 0,
     ...(options.host !== undefined ? { host: options.host } : {}),
     workingDir: options.workingDir,

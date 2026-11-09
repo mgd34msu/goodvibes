@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import { initialTerminalRuntimeFields } from '@goodvibes-jev/engine/terminal-shell/bootstrap-primitives';
 import { projectAgentToolDependencies } from '@goodvibes-jev/engine/terminal-shell/bootstrap-command-context';
 import {
@@ -120,6 +121,7 @@ export async function initializeBootstrapCore(
   const workingDir = options.workingDir;
   const homeDirectory = options.homeDirectory;
   const configManager = options.configManager;
+  await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-agent.sqlite', { activate: true });
 
   // Gate states derive from domain settings keys (behavior.*, sandbox.*, ...);
   // the featureFlags config category no longer exists. The live bridge keeps

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeServices } from '../../src/runtime/services.ts';
 import { createRuntimeStore } from '../../src/runtime/store/index.ts';
@@ -19,39 +20,43 @@ export async function runReferenceOperatorClientExample(): Promise<void> {
   mkdirSync(homeDir, { recursive: true });
 
   try {
+    const configManager = new ConfigManager({
+      configDir: join(homeDir, '.goodvibes', 'tui'),
+      workingDir,
+      homeDir,
+    });
+    await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-wiki.sqlite', { activate: true });
     const runtimeServices = createRuntimeServices({
       runtimeStore: createRuntimeStore(),
       runtimeBus: new RuntimeEventBus(),
-      configManager: new ConfigManager({
-        configDir: join(homeDir, '.goodvibes', 'tui'),
-        workingDir,
-        homeDir,
-      }),
+      configManager,
       workingDir,
       homeDirectory: homeDir,
       getConversationTitle: () => 'reference-operator-client',
     });
 
-    const transport = createDirectTransport(runtimeServices);
-    const session = await transport.operator.sessions.ensureSession({
-      sessionId: 'reference-operator-session',
-      title: 'Reference Operator Session',
-      participant: {
-        surfaceKind: 'tui',
-        surfaceId: 'reference-operator-client',
-        lastSeenAt: Date.now(),
-      },
-    });
-    const providers = await transport.operator.providers.snapshot();
-    const snapshot = await transport.snapshot();
+    try {
+      const transport = createDirectTransport(runtimeServices);
+      const session = await transport.operator.sessions.ensureSession({
+        sessionId: 'reference-operator-session',
+        title: 'Reference Operator Session',
+        participant: {
+          surfaceKind: 'tui',
+          surfaceId: 'reference-operator-client',
+          lastSeenAt: Date.now(),
+        },
+      });
+      const providers = await transport.operator.providers.snapshot();
+      const snapshot = await transport.snapshot();
 
-    console.log(JSON.stringify({
-      kind: transport.kind,
-      sessionId: session.id,
-      providerCount: providers.providerIds.length,
-      controlPlaneSessions: snapshot.operator.controlPlane.sessions.length,
-      peerContractBasePath: snapshot.peer.nodeHostContract.basePath,
-    }, null, 2));
+      console.log(JSON.stringify({
+        kind: transport.kind,
+        sessionId: session.id,
+        providerCount: providers.providerIds.length,
+        controlPlaneSessions: snapshot.operator.controlPlane.sessions.length,
+        peerContractBasePath: snapshot.peer.nodeHostContract.basePath,
+      }, null, 2));
+    } finally { await runtimeServices.close(); }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

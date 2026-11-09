@@ -30,6 +30,7 @@ import {
   KnowledgeSemanticService,
   KnowledgeService,
   KnowledgeStore,
+  prepareConfiguredProjectContext,
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
 } from '../knowledge/index.js';
@@ -272,7 +273,7 @@ export function createCompanionProviderAdapter(providerRegistry: ProviderRegistr
   };
 }
 
-export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemonFacadeRuntime {
+function daemonFacadeRuntimeInputs(config: DaemonConfig) {
   const ownedWorkingDir = config.runtimeServices?.workingDirectory ?? config.workingDir;
   const ownedHomeDirectory = config.runtimeServices?.homeDirectory ?? config.homeDirectory;
   const configManager = config.configManager ?? config.runtimeServices?.configManager;
@@ -282,8 +283,25 @@ export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemon
   if (!config.runtimeServices && !configManager) {
     throw new Error('DaemonServer requires an explicit ConfigManager or runtimeServices.');
   }
+  if (!config.runtimeServices && (!ownedWorkingDir || !ownedHomeDirectory)) {
+    throw new Error('DaemonServer requires explicit workingDir and homeDirectory when composing runtime services.');
+  }
 
-  const resolvedConfigManager = configManager ?? config.runtimeServices!.configManager;
+  return { configManager: configManager ?? config.runtimeServices!.configManager,
+    workingDirectory: ownedWorkingDir, homeDirectory: ownedHomeDirectory };
+}
+
+/** Async construction owns project activation before the synchronous graph can
+ * capture its native work identity. Existing supplied graphs are already owned. */
+export async function prepareDaemonFacadeRuntime(config: DaemonConfig): Promise<void> {
+  const inputs = daemonFacadeRuntimeInputs(config);
+  if (!config.runtimeServices) {
+    await prepareConfiguredProjectContext(inputs.configManager, inputs.workingDirectory!, 'knowledge-wiki.sqlite', { activate: true });
+  }
+}
+
+export function resolveDaemonFacadeRuntime(config: DaemonConfig): ResolvedDaemonFacadeRuntime {
+  const { configManager: resolvedConfigManager, workingDirectory: ownedWorkingDir, homeDirectory: ownedHomeDirectory } = daemonFacadeRuntimeInputs(config);
   configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => resolvedConfigManager.get(key)));
   const ownedRuntimeBus = config.runtimeServices?.runtimeBus ?? config.runtimeBus ?? new RuntimeEventBus();
   const runtimeServices = ensureAgentKnowledgeService(config.runtimeServices ?? createRuntimeServices({

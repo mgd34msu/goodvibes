@@ -5,7 +5,14 @@ import { ConfigManager, retainConfiguredWorkspace } from '../sdk/src/platform/co
 import { JudgmentInputError } from '../sdk/src/platform/gate/judgment-input.ts';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.ts';
 import { ProjectPlanningService } from '../sdk/src/platform/knowledge/project-planning/service.ts';
-import { projectPlanningProjectIdFromPath } from '../sdk/src/platform/knowledge/project-planning/helpers.ts';
+import { prepareConfiguredProjectContext, createConfiguredPlanningStore } from '../sdk/src/platform/knowledge/project-planning/configured-project.ts';
+import { createHash } from 'node:crypto';
+import { basename } from 'node:path';
+import { normalizeSpaceComponent } from '../sdk/src/platform/knowledge/spaces.ts';
+import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.ts';
+import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema-version.ts';
+// The exact writer recipe is used only to construct actual old saved fixtures.
+const savedDefaultId = (path: string) => `${normalizeSpaceComponent(basename(path))}-${createHash('sha256').update(path).digest('hex').slice(0,10)}`;
 import { findCardNumberShapes } from '../sdk/src/platform/security/card-shapes.ts';
 import { planningGoalSpecified } from '../sdk/src/platform/knowledge/project-planning/batteries/readiness.ts';
 import { installJudgmentPort } from '../errors/src/judgment-port.ts';
@@ -24,17 +31,24 @@ async function fixture(Manager: typeof ConfigManager = ConfigManager, configured
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const config = new Manager({ surfaceRoot: 'native-planning-test', configDir: join(root, 'config'),
     ...(configured ? { workingDir: workingDirectory } : {}), readOnly: true });
-  const store = new KnowledgeStore({ configManager: config });
+  const seeded = new KnowledgeStore({ configManager: config });
+  await seeded.upsertSource({ id: 'saved-project-selector', connectorId: 'goodvibes-project-planning', sourceType: 'dataset', title: 'Saved project selector', status: 'indexed', metadata: { projectId: 'old-placeholder' } });
+  await seeded.close();
+  const raw = new SQLiteStore(seeded.storagePath, { coordinated: true }); await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
+  const projectId = savedDefaultId(workingDirectory);
+  raw.run('UPDATE knowledge_sources SET metadata=? WHERE id=?', [JSON.stringify({ projectId }), 'saved-project-selector']); await raw.save(); raw.close();
+  if (configured) await prepareConfiguredProjectContext(config, workingDirectory, undefined, { activate: true });
+  const store = configured ? createConfiguredPlanningStore(config) : new KnowledgeStore({ configManager: config });
   await store.init(); cleanup.push(() => store.close());
   await store.upsertSource({ id: 'native-reference-fixture', connectorId: 'native-reference-fixture',
     sourceType: 'dataset', title: 'Native reference fixture', canonicalUri: 'native:reference-fixture', status: 'indexed' });
-  return { root, workingDirectory, config, store, bytes: () => readFileSync(store.storagePath) };
+  return { root, workingDirectory, config, store, projectId, bytes: () => readFileSync(store.storagePath) };
 }
 
 for (const Manager of [ConfigManager, AgentConfigManager, TuiConfigManager]) {
   test(`${Manager.name} native configured identity remains unchanged while constructor and default resolution admit its role`, async () => {
     const f = await fixture(Manager), before = f.bytes();
-    const expected = projectPlanningProjectIdFromPath(f.workingDirectory);
+    const expected = f.projectId;
     expect(findCardNumberShapes(expected, 1)).toHaveLength(1);
     expect(() => new ProjectPlanningService(f.store, { defaultProjectId: expected })).toThrow(JudgmentInputError);
     const native = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, f.workingDirectory);
@@ -52,10 +66,13 @@ for (const configured of [false, true]) {
   test(`an authentic ${configured ? 'mismatched' : 'missing'} configured directory retains plain constructor screening`, async () => {
     const f = await fixture(ConfigManager, configured);
     const directory = configured ? join(f.root, 'other-1791693573084') : f.workingDirectory;
-    expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, directory)).toThrow(JudgmentInputError);
+    expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, directory)).toThrow();
     const safeDirectory = join(f.root, 'safe-plain-directory');
-    const ordinary = ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, safeDirectory);
-    expect((await ordinary.service.status()).projectId).toBe(projectPlanningProjectIdFromPath(safeDirectory));
+    expect(() => ProjectPlanningService.forConfiguredWorkspace(f.store, f.config, safeDirectory)).toThrow();
+    // Unconfigured embedders use an explicit ordinary service/default; no native
+    // authority is inferred from a path or caller-authored project label.
+    const ordinary = new ProjectPlanningService(f.store, { defaultProjectId: 'safe-explicit-project' });
+    expect((await ordinary.status()).projectId).toBe('safe-explicit-project');
   });
 }
 

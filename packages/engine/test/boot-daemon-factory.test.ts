@@ -16,6 +16,8 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { bootDaemon, type BootedDaemon } from '../sdk/src/platform/daemon/boot.ts';
+import { ConfigManager } from '../sdk/src/platform/config/manager.ts';
+import { prepareConfiguredProjectContext } from '../sdk/src/platform/knowledge/project-planning/configured-project.ts';
 import { gatewayPricingCachePath } from '../sdk/src/platform/providers/gateway-pricing.ts';
 import { createShellPathService } from '../sdk/src/platform/runtime/shell-paths.ts';
 
@@ -60,6 +62,17 @@ describe('bootDaemon one-call factory', () => {
   test('boots on an ephemeral port and exposes an addressable url', () => {
     expect(daemon.port).toBeGreaterThan(0);
     expect(daemon.url).toBe(`http://127.0.0.1:${daemon.port}`);
+  });
+
+  // Regression source UNRUN: the real one-call constructor must prepare a
+  // fresh project's saved identity before native work services are composed.
+  test('fresh embedded boot registers one project visible to readonly preparation', async () => {
+    const config = new ConfigManager({ workingDir: work, homeDir: home, surfaceRoot: 'goodvibes' });
+    const first = await prepareConfiguredProjectContext(config, work);
+    const second = await prepareConfiguredProjectContext(config, work);
+    expect(first.registration).toBe('registered');
+    expect(first.projectId).toMatch(/^project-[a-p]{8}(?:-[a-p]{4}){3}-[a-p]{12}$/);
+    expect(second).toEqual(first);
   });
 
   test('every route is auth-gated: no token → 401', async () => {

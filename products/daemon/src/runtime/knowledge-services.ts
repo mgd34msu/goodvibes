@@ -25,8 +25,8 @@ import {
   KnowledgeSemanticService,
   KnowledgeStore,
   ProjectPlanningService,
+  createConfiguredPlanningStore,
   createProviderBackedKnowledgeSemanticLlm,
-  projectPlanningProjectIdFromPath,
 } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
 import type { ProviderRegistry } from '@goodvibes-jev/engine/sdk/platform/providers';
@@ -80,15 +80,12 @@ export interface KnowledgeServices {
 /** Construct the knowledge/wiki + home-graph stack with governor backpressure wired in. */
 export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeServices {
   const { configManager, providerRegistry, artifactStore, memoryRegistry, runtimeBus, isBackgroundPaused, admitExpensiveWork } = deps;
-  const knowledgeStore = new KnowledgeStore({ configManager, dbFileName: REGULAR_KNOWLEDGE_DB_FILE });
+  const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { family: 'wiki' });
   deps.ownership.registry.add('regular knowledge store', () => knowledgeStore.close());
   const agentKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE });
   deps.ownership.registry.add('agent knowledge store', () => agentKnowledgeStore.close());
   const homeGraphKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE });
   deps.ownership.registry.add('home graph knowledge store', () => homeGraphKnowledgeStore.close());
-  const projectPlanningProjectId = projectPlanningProjectIdFromPath(deps.workingDirectory);
-  const workLedgerOwner = createNativeWorkLedgerOwner({ projectId: projectPlanningProjectId, knowledgeStore });
-  deps.ownership.registry.add('native work ledger', workLedgerOwner.close);
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, { timeoutMs: 20_000, maxConcurrent: 1 });
   const knowledgeSemanticService = new KnowledgeSemanticService(knowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, isBackgroundPaused, admitExpensiveWork });
   const homeGraphSemanticService = new KnowledgeSemanticService(homeGraphKnowledgeStore, { llm: knowledgeSemanticLlm, maxLlmSourcesPerReindex: 3, objectProfiles: HOME_GRAPH_KNOWLEDGE_EXTENSION.objectProfiles, isBackgroundPaused, admitExpensiveWork });
@@ -101,7 +98,9 @@ export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeS
   agentKnowledgeService.attachRuntimeBus(runtimeBus);
   const homeGraphService = new HomeGraphService(homeGraphKnowledgeStore, artifactStore, { semanticService: homeGraphSemanticService, admitExpensiveWork });
   deps.ownership.ownUntilRegistered('home graph service', () => homeGraphService.dispose());
-  const { service: projectPlanningService } = ProjectPlanningService.forConfiguredWorkspace(knowledgeStore, configManager, deps.workingDirectory, { waitForStartup: () => knowledgeService.whenReady() });
+  const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(knowledgeStore, configManager, deps.workingDirectory, { waitForStartup: () => knowledgeService.whenReady() });
+  const workLedgerOwner = createNativeWorkLedgerOwner({ projectId: projectPlanningProjectId, knowledgeStore });
+  deps.ownership.registry.add('native work ledger', workLedgerOwner.close);
   const workPlanStore = new WorkPlanStore({
     homeDirectory: deps.homeDirectory,
     surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT,

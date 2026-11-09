@@ -51,6 +51,7 @@ import {
   configureDaemonSessionContinuation,
   createDaemonFacadeCollaborators,
   resolveDaemonFacadeRuntime,
+  prepareDaemonFacadeRuntime,
 } from './facade-composition.js';
 import {
   GlobalNetworkTransportInstaller,
@@ -196,6 +197,15 @@ export class DaemonServer {
   /** The detached native socket remains owned until its actual close settles. */
   private listenerDrain: Promise<void> | null = null;
   private tornDown = false; // True once stop() tore this daemon down; cleared by a successful bind. Teardown was gated on `server === null`, which conflated "never bound a socket" with "has nothing to release". The CONSTRUCTOR starts the companion-chat GC sweep and the batch tick, so enable() plus a failed or never-called start() left both running with no reachable stop. What must not run twice is the teardown, so that is what this guards.
+
+  /** Prepare the actual configured project before creating an owned runtime.
+   * Synchronous construction remains available with an already prepared context
+   * or a supplied runtimeServices graph. */
+  static async create(config: DaemonConfig = {}): Promise<DaemonServer> {
+    const captured = { ...config };
+    await prepareDaemonFacadeRuntime(captured);
+    return new DaemonServer(captured);
+  }
 
   constructor(private config: DaemonConfig = {}) {
     const resolved = resolveDaemonFacadeRuntime(config);

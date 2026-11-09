@@ -2,7 +2,7 @@
 import { expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { KnowledgeStore, ProjectPlanningService, projectPlanningProjectIdFromPath } from '@goodvibes-jev/engine/sdk/platform/knowledge';
+import { KnowledgeStore, ProjectPlanningService, prepareConfiguredProjectContext, createConfiguredPlanningStore } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { readPlanningSourceSnapshots } from '../helpers/planning-source-snapshot.ts';
@@ -17,8 +17,10 @@ test('built terminal history refresh, native view and restart retain saved quest
   let tui: TuiSession | undefined;
   const config = new TuiConfigManager({ configDir: join(home.home, '.goodvibes', 'tui'), homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' });
   seedProviderMetadataCacheFixture({ configManager: config, homeDirectory: home.home, workingDirectory: home.workspace });
-  const store = new KnowledgeStore({ configManager: config, dbFileName: 'knowledge-wiki.sqlite' });
-  const dbPath = store.storagePath; const projectId = projectPlanningProjectIdFromPath(home.workspace);
+  const context = await prepareConfiguredProjectContext(config, home.workspace, 'knowledge-wiki.sqlite', { activate: true });
+  if (!context.projectId) throw new Error('Missing activated project context');
+  const store = createConfiguredPlanningStore(config);
+  const dbPath = store.storagePath; const projectId = context.projectId;
   try {
     const service = new ProjectPlanningService(store);
     await service.upsertState({ projectId, state: {

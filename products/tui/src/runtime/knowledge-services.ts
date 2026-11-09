@@ -25,6 +25,7 @@ import {
   KnowledgeSemanticService,
   KnowledgeStore,
   ProjectPlanningService,
+  createConfiguredPlanningStore,
   createProviderBackedKnowledgeSemanticLlm,
 } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import type { ConfigManager } from '@goodvibes-jev/engine/sdk/platform/config';
@@ -69,7 +70,7 @@ export interface KnowledgeServices {
 /** Construct the knowledge/wiki + home-graph stack with governor backpressure wired in. */
 export function createKnowledgeServices(deps: KnowledgeServicesDeps): KnowledgeServices {
   const { configManager, providerRegistry, artifactStore, memoryRegistry, runtimeBus, isBackgroundPaused, admitExpensiveWork } = deps;
-  const knowledgeStore = new KnowledgeStore({ configManager, dbFileName: REGULAR_KNOWLEDGE_DB_FILE });
+  const knowledgeStore = createConfiguredPlanningStore(configManager, REGULAR_KNOWLEDGE_DB_FILE, { family: 'wiki' });
   const agentKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE });
   const homeGraphKnowledgeStore = new KnowledgeStore({ configManager, dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE });
   const knowledgeSemanticLlm = createProviderBackedKnowledgeSemanticLlm(providerRegistry, { timeoutMs: 20_000, maxConcurrent: 1 });

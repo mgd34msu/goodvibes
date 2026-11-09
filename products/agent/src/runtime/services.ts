@@ -126,6 +126,7 @@ import {
   KnowledgeSemanticService,
   KnowledgeStore,
   ProjectPlanningService,
+  createConfiguredPlanningStore,
   createProviderBackedKnowledgeSemanticLlm,
   createWebKnowledgeGapRepairer,
 } from '@goodvibes-jev/engine/sdk/platform/knowledge';
@@ -1410,10 +1411,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       return record.id;
     },
   });
-  const agentKnowledgeStore = new KnowledgeStore({
-    configManager,
-    dbFileName: GOODVIBES_AGENT_KNOWLEDGE_DB_FILE,
-  });
+  const agentKnowledgeStore = createConfiguredPlanningStore(configManager, GOODVIBES_AGENT_KNOWLEDGE_DB_FILE, { family: 'agent' });
   const homeGraphKnowledgeStore = new KnowledgeStore({
     configManager,
     dbFileName: HOME_GRAPH_KNOWLEDGE_DB_FILE,

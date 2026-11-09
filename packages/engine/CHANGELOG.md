@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Assign each configured project one saved identity instead of deriving it from
+  its filesystem path. Preserve existing planning data and prepare the same
+  identity before terminal, daemon and embedded work services start. Readonly
+  project inspection leaves an unregistered project untouched.
+
 - Reuse accepted knowledge nodes from actual source and subject revisions,
   including after restart, without repeatedly hashing complete evidence. Changes
   made during review invalidate the result. Preserve older saved acceptances

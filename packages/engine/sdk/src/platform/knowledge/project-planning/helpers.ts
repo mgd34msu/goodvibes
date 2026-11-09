@@ -1,5 +1,3 @@
-import { createHash } from 'node:crypto';
-import { basename, resolve } from 'node:path';
 import {
   PROJECT_KNOWLEDGE_SPACE_PREFIX,
   isProjectKnowledgeSpace,
@@ -24,13 +22,6 @@ export type ProjectPlanningArtifactKind = 'state' | 'decision' | 'language' | 'w
 export interface ResolvedProjectPlanningSpace {
   readonly projectId: string;
   readonly knowledgeSpaceId: string;
-}
-
-export function projectPlanningProjectIdFromPath(path: string): string {
-  const resolved = resolve(path);
-  const name = normalizeSpaceComponent(basename(resolved) || 'project');
-  const digest = createHash('sha256').update(resolved).digest('hex').slice(0, 10);
-  return `${name}-${digest}`;
 }
 
 export function resolveProjectPlanningSpace(
@@ -86,11 +77,13 @@ export function projectPlanningArtifactSummary(kind: ProjectPlanningArtifactKind
   return `Project language artifact with ${language.terms?.length ?? 0} terms and ${language.ambiguities?.length ?? 0} resolved ambiguities.`;
 }
 
-export function stablePlanningId(prefix: string, value: string): string {
+/** Explicit IDs must name a usable identifier. Saved opaque/hash-shaped IDs
+ * already satisfy this grammar and remain unchanged; input is never digested.
+ */
+export function stablePlanningId(_prefix: string, value: string): string {
   const normalized = normalizeSpaceComponent(value);
-  if (normalized !== 'default') return normalized;
-  const digest = createHash('sha256').update(value || prefix).digest('hex').slice(0, 10);
-  return `${prefix}-${digest}`;
+  if (normalized === 'default' && value.trim().toLowerCase() !== 'default') throw new TypeError('Choose an explicit planning identifier containing letters or digits.');
+  return normalized;
 }
 
 export function readPlanningMetadataObject(value: unknown): Record<string, unknown> {

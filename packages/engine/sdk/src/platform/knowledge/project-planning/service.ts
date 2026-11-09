@@ -1,3 +1,4 @@
+import { configuredPlanningStoreIdentity } from './configured-project.js';
 import { knowledgeRawRowForAdmission } from '../store-row-revisions.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 export class WorkPlanTaskExistsError extends Error {
@@ -29,7 +30,6 @@ import {
   type ProjectPlanningArtifactKind,
   projectPlanningArtifactSummary,
   projectPlanningCanonicalUri,
-  projectPlanningProjectIdFromPath,
   readPlanningMetadataObject,
   resolveProjectPlanningSpace,
   stablePlanningId,
@@ -99,6 +99,7 @@ interface NativePlanningDefault {
   readonly startup: (() => Promise<void>) | undefined;
   readonly assertCurrent: () => void;
 }
+const nativeApply = Reflect.apply, nativeWeakGet = WeakMap.prototype.get, nativeWeakSet = WeakMap.prototype.set, nativeWeakDelete = WeakMap.prototype.delete;
 const nativePlanningOptions = new WeakMap<ProjectPlanningServiceOptions, NativePlanningDefault>();
 const nativeStoreMethods = [
   ['init', KnowledgeStore.prototype.init],
@@ -164,14 +165,10 @@ export class ProjectPlanningService {
   ): { readonly service: ProjectPlanningService; readonly projectId: string } {
     const workspace = retainConfiguredWorkspace(configManager);
     const captured = captureNativePlanningOptions(options);
-    const projectId = projectPlanningProjectIdFromPath(workingDirectory);
+    const identity = configuredPlanningStoreIdentity(store, configManager, workingDirectory);
+    const projectId = identity.projectId;
     workspace.assertCurrent(); captured.assertCurrent();
-    if (workspace.directory === null || workspace.directory !== resolve(workingDirectory)) {
-      // A directory supplied only by an embedder has no native source binding.
-      return { projectId, service: new ProjectPlanningService(store, {
-        defaultProjectId: projectId, waitForStartup: captured.startup, runtimeBus: captured.bus,
-      }) };
-    }
+    if (workspace.directory === null || workspace.directory !== resolve(workingDirectory)) throw new JudgmentAuthorityRetiredError();
     if (nativeTypes.isProxy(store) || Object.getPrototypeOf(store) !== KnowledgeStore.prototype) throw new JudgmentAuthorityRetiredError();
     const storeSlots = ['dbPath', 'sqlite', 'closed'].map(key => {
       const slot = Object.getOwnPropertyDescriptor(store, key);
@@ -193,20 +190,20 @@ export class ProjectPlanningService {
         const current = own ?? Object.getOwnPropertyDescriptor(KnowledgeStore.prototype, key);
         if (!current || !('value' in current) || current.value !== method) throw new JudgmentAuthorityRetiredError();
       }
-      workspace.assertCurrent(); captured.assertCurrent();
+      workspace.assertCurrent(); identity.assertCurrent(); captured.assertCurrent();
     };
     assertCurrent();
     const nativeOptions = Object.freeze({ defaultProjectId: projectId, waitForStartup: captured.startup, runtimeBus: captured.bus });
-    nativePlanningOptions.set(nativeOptions, Object.freeze({ projectId, store, startup: captured.startup, assertCurrent }));
+    nativeApply(nativeWeakSet, nativePlanningOptions, [nativeOptions, Object.freeze({ projectId, store, startup: captured.startup, assertCurrent })]);
     try { return { projectId, service: new ProjectPlanningService(store, nativeOptions) }; }
-    finally { nativePlanningOptions.delete(nativeOptions); }
+    finally { nativeApply(nativeWeakDelete, nativePlanningOptions, [nativeOptions]); }
   }
 
   constructor(
     private readonly store: KnowledgeStore,
     options: ProjectPlanningServiceOptions = {},
   ) {
-    const native = nativePlanningOptions.get(options);
+    const native = nativeApply(nativeWeakGet, nativePlanningOptions, [options]) as NativePlanningDefault | undefined;
     native?.assertCurrent();
     const defaultProjectId = options.defaultProjectId;
     snapshotJudgmentInput(native ? { kind: 'native-project-reference' } : defaultProjectId);
@@ -366,7 +363,7 @@ export class ProjectPlanningService {
       const committed = await this.publishPlanningReadiness(space, normalizeState(changed, space.projectId, space.knowledgeSpaceId), snapshot, options, observation);
       published = true;
       committed.assertCurrent();
-      this.readinessOwners.set(committed.evaluation, committed.assertCurrent);
+      nativeApply(nativeWeakSet, this.readinessOwners, [committed.evaluation, committed.assertCurrent]);
       return { ok: true, applied: true, state: committed.evaluation.state,
         revision: Object.freeze({ sourceId: committed.source.id, generation: committed.generation }),
         evaluation: committed.evaluation, ...(question ? { question } : {}) };
@@ -457,7 +454,7 @@ export class ProjectPlanningService {
       action: { kind: 'answer', questionId: input.questionId, questionIndex: input.questionIndex, answer: input.answer },
     }, options);
     const state = result.state;
-    const observed = result.applied ? this.readinessOwners.get(result.evaluation)! : this.store.captureSourcePublication();
+    const observed = result.applied ? (nativeApply(nativeWeakGet, this.readinessOwners, [result.evaluation]) as () => void) : this.store.captureSourcePublication();
     const capturedSignal = options.signal, capturedCheck = options.assertCurrent;
     const current = result.applied ? observed
       : () => { capturedSignal?.throwIfAborted(); capturedCheck?.(); observed(); };
@@ -500,21 +497,28 @@ export class ProjectPlanningService {
     input = snapshotJudgmentInput(input) as ProjectPlanningDecisionRecordInput;
     await this.initialize();
     const space = this.resolveSpace(input);
-    const now = Date.now();
+    const observation = this.store.captureSourcePublication();
+    const title = input.decision.title.trim();
+    const matching = input.decision.id === undefined ? this.sourcesForSpace(space.knowledgeSpaceId)
+      .filter(source => artifactKind(source) === 'decision').map(readDecision)
+      .filter((decision): decision is ProjectPlanningDecision => decision !== null && decision.title === title) : [];
+    if (matching.length > 1) throw new Error('Multiple saved decisions have this title; select the exact saved decision ID.');
+    observation();
+    const previous = matching[0], now = Date.now();
     const decision: ProjectPlanningDecision = {
-      id: input.decision.id ?? stablePlanningId('decision', input.decision.title),
-      title: input.decision.title.trim(),
+      id: input.decision.id ?? previous?.id ?? `decision-${randomUUID().replace(/[0-9a-f]/g, nibble => String.fromCharCode(97 + Number.parseInt(nibble, 16)))}`,
+      title,
       ...(input.decision.context ? { context: input.decision.context } : {}),
       decision: input.decision.decision.trim(),
       ...(input.decision.alternatives ? { alternatives: [...input.decision.alternatives] } : {}),
       ...(input.decision.reasoning ? { reasoning: input.decision.reasoning } : {}),
       ...(input.decision.consequences ? { consequences: [...input.decision.consequences] } : {}),
       status: input.decision.status ?? 'accepted',
-      createdAt: input.decision.createdAt ?? now,
+      createdAt: input.decision.createdAt ?? previous?.createdAt ?? now,
       updatedAt: now,
       ...(input.decision.metadata ? { metadata: { ...input.decision.metadata } } : {}),
     };
-    const source = await this.upsertArtifactSource(space, 'decision', decision.id, decision);
+    const source = await this.upsertArtifactSource(space, 'decision', decision.id, decision, observation);
     return {
       ok: true,
       projectId: space.projectId,
@@ -933,8 +937,9 @@ export class ProjectPlanningService {
     kind: ProjectPlanningArtifactKind,
     id: string,
     value: ProjectPlanningState | ProjectPlanningDecision | ProjectPlanningLanguageArtifact | ProjectWorkPlanArtifact,
+    observation = this.store.captureSourcePublication(),
   ): Promise<KnowledgeSourceRecord> {
-    const observation = this.store.captureSourcePublication();
+    observation();
     const previous = this.getArtifactSnapshot(space.knowledgeSpaceId, kind, id);
     let current = observation;
     const written = await this.store.upsertOwnedCanonicalSources([{

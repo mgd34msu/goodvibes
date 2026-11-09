@@ -134,7 +134,6 @@ export {
   readProjectPlanningAnswerActions,
   buildProjectPlanningAnswerActions,
   projectPlanningCanonicalUri,
-  projectPlanningProjectIdFromPath,
   resolveProjectPlanningSpace,
 } from './project-planning/index.js';
 export type {
@@ -337,3 +336,6 @@ export type {
 } from './consolidation-gateway.js';
 
 export { learningProposalQuality } from './learning-proposal.js';
+
+export { prepareConfiguredProjectContext, createConfiguredPlanningStore } from './project-planning/configured-project.js';
+export type { ConfiguredProjectInspection } from './project-planning/configured-project.js';

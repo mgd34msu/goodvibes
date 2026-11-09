@@ -1,4 +1,5 @@
 import { commandTextExitCode } from '@goodvibes-jev/engine/terminal-shell/cli-output';
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 export { yesNo, formatJsonOrText } from '@goodvibes-jev/engine/terminal-shell/cli-output';
 import { createCliProviderViews } from '@goodvibes-jev/engine/terminal-shell/cli-provider-views';
@@ -111,6 +112,9 @@ export async function withRuntimeServices<T>(
   fn: (services: RuntimeServices) => Promise<T> | T,
   options: { readonly modelData?: 'background' | 'skip'; readonly catalog?: ProviderCatalogOptions } = {},
 ): Promise<T> {
+  // Full runtime composition owns native work and therefore activates the
+  // selected project. Readonly project inspection has its own preparation API.
+  await prepareConfiguredProjectContext(runtime.configManager, runtime.workingDirectory, 'knowledge-agent.sqlite', { activate: true });
   // Point the bus listener cap at runtime.eventBus.maxListeners before the
   // first bus exists, so every bus this process builds later uses it.
   configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => runtime.configManager.get(key)));

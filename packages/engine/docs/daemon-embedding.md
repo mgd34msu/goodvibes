@@ -56,6 +56,16 @@ explicit public subpaths rather than through a catch-all platform barrel.
 
 ## Host responsibility
 
+For a complete in-process server, use `await bootDaemon(options)` or
+`await DaemonServer.create(config)`. These prepare the configured project before
+constructing native work services. The synchronous `new DaemonServer(config)`
+entry point requires an already prepared project context or an existing
+`runtimeServices` graph. Direct runtime embedders call
+`await prepareConfiguredProjectContext(configManager, workingDirectory,
+'knowledge-wiki.sqlite', { activate: true })` before `createRuntimeServices`.
+The preparation API's default mode only inspects existing project metadata;
+activation explicitly registers the project for an active runtime.
+
 The SDK does not replace your server framework. You still own:
 - **request routing**: matching incoming requests to the handlers this package builds.
 - **concrete service implementations**: the objects (session stores, provider clients, and so on) the route-handler factories are built from.

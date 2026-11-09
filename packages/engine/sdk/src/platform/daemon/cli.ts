@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '../knowledge/project-planning/configured-project.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ConfigManager } from '../config/manager.js';
@@ -103,6 +104,7 @@ async function main(): Promise<void> {
 
   ensureDaemonHome(daemonHomeDir);
   const runtimeStore = createRuntimeStore();
+  await prepareConfiguredProjectContext(config, workingDir, 'knowledge-wiki.sqlite', { activate: true });
   const runtimeServices = createRuntimeServices({
     configManager: config,
     runtimeBus,

@@ -1,3 +1,4 @@
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import { createApprovalDerivedHandlers } from '@goodvibes-jev/engine/sdk/platform/runtime/bootstrap';
 import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes-jev/engine/sdk/platform/runtime/feature-announcements';
 import { createDaemonWorkspaceTrustResolver } from './workspace-trust-composition.js';
@@ -114,6 +115,7 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
   try {
     const workingDirectory = options.workingDir;
     const homeDirectory = options.homeDirectory;
+    await prepareConfiguredProjectContext(options.configManager, workingDirectory, 'knowledge-wiki.sqlite', { activate: true });
     const shellPaths = createShellPathService({
       workingDirectory,
       homeDirectory,

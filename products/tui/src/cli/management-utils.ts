@@ -42,6 +42,7 @@ import net from 'node:net';
 import 'node:child_process';
 import 'node:os';
 import type { ConfigManager, GoodVibesConfig } from '@goodvibes-jev/engine/sdk/platform/config';
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/sdk/platform/knowledge';
 import { createRuntimeServices } from '../runtime/services.ts';
 import { createRuntimeStore } from '../runtime/store/index.ts';
 import type { RuntimeServices } from '../runtime/services.ts';
@@ -148,6 +149,10 @@ export async function withRuntimeServices<T>(
   fn: (services: RuntimeServices) => Promise<T> | T,
   options: { readonly catalog?: ProviderCatalogOptions } = {},
 ): Promise<T> {
+  // This helper starts the complete active runtime, including its native work
+  // services. Prepare its real project before any synchronous owner freezes an
+  // identity; lightweight metadata probes do not use this full-graph helper.
+  await prepareConfiguredProjectContext(runtime.configManager, runtime.workingDirectory, 'knowledge-wiki.sqlite', { activate: true });
   // Point the bus listener cap at runtime.eventBus.maxListeners before the
   // first bus exists, so every bus this process builds later uses it.
   configureRuntimeEventBusDefaults(runtimeEventBusOptionsFrom((key) => runtime.configManager.get(key)));

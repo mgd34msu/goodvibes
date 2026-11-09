@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Apply synchronous caller restrictions before URL or artifact ingestion starts
+  and throughout finalization. An async restriction cannot be ignored before
+  storage initialization or outward work, and changing the caller retires it.
+
 - Recognize the current original-obligation completion receipt when reporting
   completed work. Keep earlier receipt checks and refuse mixed or unknown formats
   instead of falling back to a weaker saved review.

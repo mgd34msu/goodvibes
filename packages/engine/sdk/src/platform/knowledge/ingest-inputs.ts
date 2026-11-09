@@ -1,3 +1,4 @@
+import { assertKnowledgeRestriction } from './extraction-ownership.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { knowledgeRawRepresentation } from './store-record-representation.js';
 import { knowledgeClockIso } from './store-record-representation.js';
@@ -64,7 +65,7 @@ export async function ingestKnowledgeUrl(
       try {
         if (ownership.assertCurrent !== callerCurrent || ownership.signal !== callerSignal || ownership.onCommitted !== onCommitted
           || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new Error('retired');
-        signal?.throwIfAborted(); callerCurrent?.();
+        signal?.throwIfAborted(); assertKnowledgeRestriction(callerCurrent);
       }
       catch { throw new KnowledgeEntityAliasHoldError(); }
     };
@@ -193,9 +194,14 @@ export async function ingestKnowledgeArtifact(
 ): Promise<{ source: KnowledgeSourceRecord; artifactId?: string; extraction?: KnowledgeExtractionRecord; issues: readonly KnowledgeIssueRecord[] }> {
   return withConfiguredDecisionModelPolicy(async () => {
     const { signal: inputSignal, ...values } = input;
-    const signal = ownership.signal && inputSignal ? AbortSignal.any([ownership.signal, inputSignal]) : ownership.signal ?? inputSignal;
+    const { assertCurrent: callerCurrent, signal: callerSignal, onCommitted, deferSemanticEnrichment } = ownership;
+    const signal = callerSignal && inputSignal ? AbortSignal.any([callerSignal, inputSignal]) : callerSignal ?? inputSignal;
     const assertOwned = () => {
-      try { signal?.throwIfAborted(); ownership.assertCurrent?.(); }
+      try {
+        if (ownership.assertCurrent !== callerCurrent || ownership.signal !== callerSignal || ownership.onCommitted !== onCommitted
+          || ownership.deferSemanticEnrichment !== deferSemanticEnrichment) throw new Error('retired');
+        signal?.throwIfAborted(); assertKnowledgeRestriction(callerCurrent);
+      }
       catch { throw new KnowledgeEntityAliasHoldError(); }
     };
     assertOwned();

@@ -155,3 +155,30 @@ test('prepared native extraction retains its actual artifact file rather than a 
   writeFileSync(record.contentPath, 'Different document.', { mode: 0o600 });
   expect(() => retained.assertCurrent()).toThrow(KnowledgeExtractionJudgmentHoldError);
 });
+
+
+for (const route of ['url', 'artifact'] as const) {
+  for (const result of ['value', 'promise', 'thrown-promise'] as const) {
+    test(`${route} ingest refuses ${result} from its caller restriction before initialization or outward work`, async () => {
+      const ctx = context();
+      const init = spyOn(ctx.store, 'init');
+      const create = spyOn(ctx.artifactStore, 'create');
+      const fake = fakePort(() => noulAnswer(0.99)); installJudgmentPort(fake.port);
+      const ownership = { assertCurrent: () => {
+        if (result === 'value') return true;
+        const rejected = Promise.reject(new Error('Private rejected caller detail'));
+        if (result === 'thrown-promise') throw rejected;
+        return rejected;
+      } };
+      try {
+        const pending = route === 'url'
+          ? ingestKnowledgeUrl(ctx, { url: URL }, ownership)
+          : ingestKnowledgeArtifact(ctx, { artifactId: 'existing-local-artifact' }, ownership);
+        await expect(pending).rejects.toThrow();
+        expect(init).not.toHaveBeenCalled(); expect(create).not.toHaveBeenCalled(); expect(fake.requests).toHaveLength(0);
+        expect(ctx.store.listSources()).toHaveLength(0);
+        await Promise.resolve(); await Promise.resolve();
+      } finally { init.mockRestore(); create.mockRestore(); await ctx.store.close(); }
+    });
+  }
+}

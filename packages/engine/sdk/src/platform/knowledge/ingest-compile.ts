@@ -1,3 +1,4 @@
+import { assertKnowledgeRestriction } from './extraction-ownership.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
 import { createKnowledgeIngestUriCanonicalizer, assertKnowledgeIngestUriOperation, retireKnowledgeIngestUriOperation, type KnowledgeIngestUriCanonicalizer } from './uri-canonicalization/ingest-owner.js';
 import type { KnowledgeUriCanonicalizer } from './uri-canonicalization/reader.js';
@@ -69,10 +70,10 @@ export async function finalizeKnowledgeIngestedSource(
   const retainedRecord = observeKnowledgeValue(recordBeforeCanonicalization);
   const sourceCurrent = knowledgeIngestGuard(context, input.sourceId, undefined, signal);
   const canonicalUri = await uris.canonicalize(context.artifactStore.getRecord(input.artifactId)?.sourceUri ?? '');
-  sourceCurrent(); uris.assertCurrent(); ownership.assertCurrent?.();
+  sourceCurrent(); uris.assertCurrent(); assertKnowledgeRestriction(ownership.assertCurrent);
   if (!retainedRecord.matches(context.artifactStore.getRecord(input.artifactId))) throw new KnowledgeExtractionJudgmentHoldError();
   const canonicalCurrent = knowledgeIngestGuard(context, input.sourceId, canonicalUri ?? undefined, signal);
-  const assertCurrent = () => { ownership.assertCurrent?.(); assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId); sourceCurrent(); canonicalCurrent(); };
+  const assertCurrent = () => { assertKnowledgeRestriction(ownership.assertCurrent); assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId); sourceCurrent(); canonicalCurrent(); };
   assertCurrent();
   let consumed = false;
   try {
@@ -90,7 +91,7 @@ export async function finalizeKnowledgeIngestedSource(
     let assertAliasesCurrent = () => {};
     const assertPrepared = () => {
       assertKnowledgeIngestUriOperation(context, uris, input.sourceId, input.artifactId, token);
-      ownership.assertCurrent?.();
+      assertKnowledgeRestriction(ownership.assertCurrent);
       assertCurrent();
       assertExtractionCurrent();
       assertAliasesCurrent();
@@ -115,7 +116,7 @@ export async function finalizeKnowledgeIngestedSource(
     const prospectiveSource = prepareKnowledgeSourceRecord(sourceInput, context.store.getSource(input.sourceId));
     const prospectiveExtraction = prepareKnowledgeExtractionRecord(extractionInput, previousExtraction, prospectiveSource);
     const entityHints = await prepareKnowledgeStructuredEntityHints(prospectiveSource, prospectiveExtraction, signal,
-      (guard) => { assertAliasesCurrent = guard; }, () => { ownership.assertCurrent?.(); assertCurrent(); assertExtractionCurrent(); });
+      (guard) => { assertAliasesCurrent = guard; }, () => { assertKnowledgeRestriction(ownership.assertCurrent); assertCurrent(); assertExtractionCurrent(); });
     assertPrepared();
     await context.store.applyPreparedIngest({
       sources: [knowledgeSourceCrawledNow({ ...sourceInput, metadata: { ...sourceInput.metadata,

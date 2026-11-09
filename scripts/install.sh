@@ -452,6 +452,9 @@ expected_install_claim_identity() {
 }
 
 install_claim_directories_current() {
+  if [ "${_claim_purpose:-install}" = uninstall ]; then
+    [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/0 ] || return 1
+  fi
   [ ! -L "$INSTALL_CLAIM_DIR" ] && [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/9 ] || return 1
   [ ! -L "$INSTALL_CLAIM_OWNER" ] && [ "$INSTALL_CLAIM_OWNER" -ef /dev/fd/8 ] || return 1
 }
@@ -536,13 +539,21 @@ cleanup_release_install() {
 }
 
 claim_release_install() {
+  _claim_purpose=${1:-install}
+  case "$_claim_purpose" in install|uninstall) : ;; *) fail 'Unknown suite claim purpose.' ;; esac
   command -v stat >/dev/null 2>&1 || fail 'The native stat utility is required to retain original installation ownership.'
-  mkdir -p "$INSTALL_DIR"
+  if [ "$_claim_purpose" = uninstall ]; then
+    [ -d "$INSTALL_DIR" ] && [ ! -L "$INSTALL_DIR" ] && [ "$INSTALL_DIR" -ef /dev/fd/0 ] || fail 'The original uninstall directory changed before exclusion.'
+  else mkdir -p "$INSTALL_DIR"
+  fi
   INSTALL_CLAIM_DIR=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the installation directory.'
   # Publish only to the selected directory, even when the original option was
   # a relative path or symlink. The open descriptor detects its replacement.
   exec 9< "$INSTALL_CLAIM_DIR"
   [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/9 ] || fail 'Could not retain the selected installation directory.'
+  if [ "$_claim_purpose" = uninstall ]; then
+    [ "$INSTALL_CLAIM_DIR" -ef /dev/fd/0 ] || fail 'The original uninstall directory changed before claiming.'
+  fi
   INSTALL_DIR=$INSTALL_CLAIM_DIR
   WEBUI_ROOT="$INSTALL_DIR/webui"
   INSTALL_CLAIM_OWNER=$(mktemp -d "$INSTALL_CLAIM_DIR/.goodvibes-install-claim.XXXXXX")
@@ -575,6 +586,7 @@ claim_release_install() {
       && [ "$_claim_path" -ef "$_created_claim_fd" ] && [ "$INSTALL_CLAIM_OWNER/$_claim_product" -ef "$_created_claim_fd" ] \
       || fail 'The original installation claim changed before retention.'
   done
+  if [ "$_claim_purpose" = uninstall ]; then assert_install_claims; return 0; fi
   # An interrupted updater may have retained a companion slot even when its
   # primary claim is missing. Never overwrite that recovery evidence.
   for _idle_product in goodvibes-daemon goodvibes goodvibes-agent; do
@@ -2552,20 +2564,30 @@ shadow_normalize_dir() {
   printf '%s' "$_nd"
 }
 
-# The owning @pellux/goodvibes-* package for a resolved path, or nothing.
-# The LAST node_modules segment is the one that owns the file: a nested
-# node_modules/a/node_modules/b/bin/x belongs to b, not a. Another publisher's
-# scope, or another package inside ours, is deliberately not ours.
-shadow_owning_package() {
+# The innermost actual package selector, including an unrelated publisher.
+# This is a locator only; it never authorizes removal on its own.
+shadow_package_owner() {
   printf '%s\n' "$1" | awk -F/ '{
     pkg = ""
     for (i = 1; i <= NF; i++) {
       if ($i != "node_modules") continue
-      if ($(i + 1) == "@pellux" && index($(i + 2), "goodvibes-") == 1) pkg = $(i + 1) "/" $(i + 2)
-      else pkg = ""
+      if ($(i + 1) ~ /^@/ && $(i + 2) != "") pkg = $(i + 1) "/" $(i + 2)
+      else pkg = $(i + 1)
     }
     print pkg
   }'
+}
+
+# Exact historical product/command pairs, used only to clean up an identified
+# existing package install. Current @goodvibes-jev products are private workspace
+# packages; the published-shaped engine exposes other toolchain/contract bins.
+# No currently supported published product package is inferred from that scope.
+shadow_owning_package() {
+  shadow_owner=$(shadow_package_owner "$1")
+  case "${2:-}:$shadow_owner" in
+    goodvibes:@pellux/goodvibes-tui|goodvibes-daemon:@pellux/goodvibes-daemon|goodvibes-agent:@pellux/goodvibes-agent)
+      printf '%s\n' "$shadow_owner" ;;
+  esac
 }
 
 # What `<path> --version` reports, but ONLY when the output is the exact shape
@@ -2610,8 +2632,8 @@ shadow_is_within() {
 
 # The removal plan for a shadowing copy, as "<kind>\t<detail>", or nothing when
 # the copy is not recognisably one of our programs. Two recognised kinds:
-#   package <pkg>   an entry resolving into an installed @pellux/goodvibes-*
-#                   package (a bun/npm global link or a dependency link)
+#   package <pkg>   a known exact historical product package, matched to its
+#                   command and version (a bun/npm global or dependency link)
 #   file <path>     a standalone file that answers --version as this command,
 #                   i.e. an earlier standalone install of the same program
 shadow_removal_plan() {
@@ -2622,13 +2644,20 @@ shadow_removal_plan() {
   shadow_is_within "$shadow_plan_path" "$HOME" || return 0
   shadow_is_within "$shadow_plan_resolved" "$HOME" || return 0
 
-  shadow_plan_package=$(shadow_owning_package "$shadow_plan_resolved")
-  if [ -n "$shadow_plan_package" ]; then
-    printf 'package\t%s\n' "$shadow_plan_package"
+  # Control characters cannot be represented safely by this tab-delimited
+  # removal plan. Unknown paths remain untouched rather than reparsed as plans.
+  if printf '%s%s' "$shadow_plan_path" "$shadow_plan_resolved" | LC_ALL=C grep -q '[[:cntrl:]]'; then return 0; fi
+  shadow_plan_owner=$(shadow_package_owner "$shadow_plan_resolved")
+  shadow_plan_package=$(shadow_owning_package "$shadow_plan_resolved" "$shadow_plan_command")
+  if [ -n "$shadow_plan_owner" ] && [ -z "$shadow_plan_package" ]; then
+    # A foreign/private package must not fall through to standalone-file
+    # deletion just because its command forwards a GoodVibes version banner.
     return 0
   fi
-
-  if [ -n "$(shadow_version_of "$shadow_plan_path" "$shadow_plan_command")" ]; then
+  [ -n "$(shadow_version_of "$shadow_plan_path" "$shadow_plan_command")" ] || return 0
+  if [ -n "$shadow_plan_package" ]; then
+    printf 'package\t%s\n' "$shadow_plan_package"
+  else
     printf 'file\t%s\n' "$shadow_plan_path"
   fi
 }
@@ -2882,6 +2911,7 @@ resolve_path_shadows() {
 
 UNINSTALL_REMOVED=""
 UNINSTALL_KEPT=""
+UNINSTALL_DIRECTORY_ASSETS_KEPT=0
 record_removed() { UNINSTALL_REMOVED="${UNINSTALL_REMOVED}  $1
 "; }
 record_kept() { UNINSTALL_KEPT="${UNINSTALL_KEPT}  $1
@@ -3014,11 +3044,99 @@ uninstall_services_and_processes() {
   stop_bare_processes '[g]oodvibes-agent' goodvibes-agent
 }
 
-run_uninstall() {
+assert_uninstall_recovery_slots_idle() {
+  for _uninstall_recovery_slot in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
+    _uninstall_recovery_path="$1$_uninstall_recovery_slot"
+    [ ! -e "$_uninstall_recovery_path" ] && [ ! -L "$_uninstall_recovery_path" ] \
+      || fail "Retained update files include $_uninstall_recovery_path. Inspect the original transaction before uninstalling; nothing was removed."
+  done
+}
+
+assert_uninstall_update_idle() {
+  # Do not unlink programs beneath an admitted or uncertain updater. These
+  # concrete transaction names are exclusion fences, never deletion receipts.
+  # This recheck runs while this uninstaller owns the three primary claims.
+  for _uninstall_product in goodvibes-daemon goodvibes goodvibes-agent; do
+    for _uninstall_companion in '' .bun .bun.json .bun.LICENSE.md .readers.json; do
+      for _uninstall_slot in .update-transaction .update-download .update-previous .rollback-exchange .incoming; do
+        [ -n "$_uninstall_companion" ] || [ "$_uninstall_slot" != .update-transaction ] || continue
+        _uninstall_pending="$INSTALL_DIR/$_uninstall_product$_uninstall_companion$_uninstall_slot"
+        [ ! -e "$_uninstall_pending" ] && [ ! -L "$_uninstall_pending" ] \
+          || fail "An update or retained transaction owns $_uninstall_pending. Stop the updater and inspect its recovery files before uninstalling; nothing was removed."
+      done
+    done
+  done
+  assert_uninstall_recovery_slots_idle "$INSTALL_DIR/daemon-installation.json"
+  if [ -d "$INSTALL_DIR/lib" ] && [ ! -L "$INSTALL_DIR/lib" ]; then
+    for _uninstall_native_target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+      case "$_uninstall_native_target" in darwin-*) _uninstall_native_vec=vec0.dylib ;; *) _uninstall_native_vec=vec0.so ;; esac
+      for _uninstall_native_leaf in "sqlite-vec-$_uninstall_native_target/$_uninstall_native_vec" "sqlite-$_uninstall_native_target/libsqlite3.dylib" "sqlite-$_uninstall_native_target/libsqlite3.dylib.json"; do
+        _uninstall_native_parent="$INSTALL_DIR/lib/${_uninstall_native_leaf%/*}"
+        [ -d "$_uninstall_native_parent" ] && [ ! -L "$_uninstall_native_parent" ] || continue
+        assert_uninstall_recovery_slots_idle "$INSTALL_DIR/lib/$_uninstall_native_leaf"
+      done
+    done
+  fi
+  for _uninstall_pending in "$INSTALL_DIR/playwright-core.directory-update.lock"; do
+    [ ! -e "$_uninstall_pending" ] && [ ! -L "$_uninstall_pending" ] \
+      || fail "An update or retained transaction owns $_uninstall_pending. Inspect it before uninstalling; nothing was removed."
+  done
+  if [ -d "$WEBUI_ROOT" ] && [ ! -L "$WEBUI_ROOT" ]; then
+    for _uninstall_pending in "$WEBUI_ROOT"/*.directory-update.lock; do
+      [ ! -e "$_uninstall_pending" ] && [ ! -L "$_uninstall_pending" ] \
+        || fail "A WebUI update owns $_uninstall_pending. Inspect it before uninstalling; nothing was removed."
+    done
+  fi
+}
+
+preserve_uninstall_directory() {
+  [ -e "$1" ] || [ -L "$1" ] || return 0
+  record_kept "$1 (directory/deployment contents cannot be attributed safely; not followed or recursively deleted)"
+  UNINSTALL_DIRECTORY_ASSETS_KEPT=1
+}
+
+run_uninstall() (
   say "Uninstalling GoodVibes (installer-managed files) from $INSTALL_DIR"
   say ""
 
+  _uninstall_has_directory=0
+  _uninstall_mutation_started=0
+  _uninstall_complete=0
+  _uninstall_claim_exit() {
+    _uninstall_exit=$?
+    trap - EXIT INT TERM
+    if [ -n "$INSTALL_CLAIM_OWNER" ]; then
+      if [ "$_uninstall_mutation_started" = 0 ] || [ "$_uninstall_complete" = 1 ]; then
+        if ! release_install_claims; then
+          say "install.sh: original uninstall claims changed; inspect retained transaction files in $INSTALL_CLAIM_DIR before retrying." >&2
+          _uninstall_exit=1
+        fi
+      else
+        say "install.sh: uninstall did not finish; inspect retained transaction files in $INSTALL_CLAIM_DIR and remaining programs before retrying." >&2
+        _uninstall_exit=1
+      fi
+    fi
+    exit "$_uninstall_exit"
+  }
+  trap _uninstall_claim_exit EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if [ -e "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ]; then
+    [ -d "$INSTALL_DIR" ] || fail 'The selected uninstall directory is unavailable; it was preserved.'
+    _uninstall_original=$(CDPATH= cd -- "$INSTALL_DIR" && pwd -P) || fail 'Could not retain the original uninstall directory.'
+    exec 0< "$_uninstall_original"
+    [ "$_uninstall_original" -ef /dev/fd/0 ] || fail 'The original uninstall directory changed.'
+    INSTALL_DIR=$_uninstall_original
+    WEBUI_ROOT="$INSTALL_DIR/webui"
+    VERSION=${VERSION:-uninstall}
+    claim_release_install uninstall
+    assert_uninstall_update_idle
+    _uninstall_has_directory=1
+  fi
   uninstall_services_and_processes
+  if [ "$_uninstall_has_directory" = 1 ]; then
+  assert_install_claims
+  _uninstall_mutation_started=1
 
   if [ -e "$INSTALL_DIR/.goodvibes-reader-requirements.json" ] || [ -L "$INSTALL_DIR/.goodvibes-reader-requirements.json" ]; then
     record_kept "$INSTALL_DIR/.goodvibes-reader-requirements.json (saved-data reader requirements)"
@@ -3026,12 +3144,13 @@ run_uninstall() {
 
   # Binaries the installer places, plus the updater's parked rollback copy
   # beside each one (<path>.previous — see self-update.ts's swapFileAtomically/
-  # PREVIOUS_FILE_SUFFIX contract). Leaving these behind was the same class of
-  # miss the playwright-core.previous handling below already covers.
+  # PREVIOUS_FILE_SUFFIX contract). Retained transaction sources have already
+  # refused above; support-directory contents below are preserved separately.
   for name in goodvibes goodvibes-daemon goodvibes-agent; do
     for companion in .bun .bun.json .bun.LICENSE.md .readers.json; do
-      for tail in '' .previous .incoming; do
+      for tail in '' .previous; do
         if [ -f "$INSTALL_DIR/$name$companion$tail" ]; then
+          assert_install_claims
           rm -f "$INSTALL_DIR/$name$companion$tail"
           record_removed "$INSTALL_DIR/$name$companion$tail"
         fi
@@ -3039,65 +3158,89 @@ run_uninstall() {
     done
     bin_path="$INSTALL_DIR/$name"
     if [ -e "$bin_path" ]; then
+      assert_install_claims
       rm -f "$bin_path"
       say "  removed    $bin_path"
       record_removed "$bin_path"
     fi
     previous_path="$INSTALL_DIR/$name.previous"
     if [ -e "$previous_path" ]; then
+      assert_install_claims
       rm -f "$previous_path"
       say "  removed    $previous_path"
       record_removed "$previous_path"
     fi
   done
 
-  # Remove only the known installed library leaves. An unrelated sibling in a
-  # native-library directory is not installer-owned and keeps that directory.
-  for _uninstall_target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
-    case "$_uninstall_target" in darwin-*) _uninstall_vec=vec0.dylib ;; *) _uninstall_vec=vec0.so ;; esac
-    for _uninstall_library in "sqlite-vec-$_uninstall_target/$_uninstall_vec" "sqlite-$_uninstall_target/libsqlite3.dylib" "sqlite-$_uninstall_target/libsqlite3.dylib.json"; do
-      _uninstall_parent="$INSTALL_DIR/lib/${_uninstall_library%/*}"
-      if [ -L "$INSTALL_DIR/lib" ] || [ -L "$_uninstall_parent" ]; then
-        record_kept "$_uninstall_parent (native library alias; not followed)"
-        continue
-      fi
-      for _uninstall_tail in '' .previous .incoming; do
-        _uninstall_leaf="$INSTALL_DIR/lib/$_uninstall_library$_uninstall_tail"
-        if [ -L "$_uninstall_leaf" ]; then record_kept "$_uninstall_leaf (not an installer-created regular library)"
-        elif [ -f "$_uninstall_leaf" ]; then rm -f "$_uninstall_leaf"; record_removed "$_uninstall_leaf"
-        fi
+  # Known library leaves still require their original physical parent at each
+  # unlink. A parent changed after the first leaf must not redirect a later
+  # .previous cleanup through a new alias outside this installation.
+  _uninstall_library_current() {
+    assert_install_claims
+    [ ! -L "$INSTALL_DIR/lib" ] && [ "$INSTALL_DIR/lib" -ef /dev/fd/3 ] \
+      && [ ! -L "$_uninstall_parent" ] && [ "$_uninstall_parent" -ef /dev/fd/4 ] \
+      || fail 'An original native library directory changed during uninstall; its remaining files were preserved.'
+  }
+  if [ -L "$INSTALL_DIR/lib" ]; then
+    record_kept "$INSTALL_DIR/lib (native library alias; not followed)"
+  elif [ -d "$INSTALL_DIR/lib" ]; then
+    exec 3< "$INSTALL_DIR/lib"
+    assert_install_claims
+    [ ! -L "$INSTALL_DIR/lib" ] && [ "$INSTALL_DIR/lib" -ef /dev/fd/3 ] || fail 'The original native library root changed.'
+    for _uninstall_target in linux-x64 linux-arm64 darwin-x64 darwin-arm64; do
+      case "$_uninstall_target" in darwin-*) _uninstall_vec=vec0.dylib ;; *) _uninstall_vec=vec0.so ;; esac
+      for _uninstall_library in "sqlite-vec-$_uninstall_target/$_uninstall_vec" "sqlite-$_uninstall_target/libsqlite3.dylib" "sqlite-$_uninstall_target/libsqlite3.dylib.json"; do
+        _uninstall_parent="$INSTALL_DIR/lib/${_uninstall_library%/*}"
+        if [ -L "$_uninstall_parent" ]; then record_kept "$_uninstall_parent (native library alias; not followed)"; continue; fi
+        [ -d "$_uninstall_parent" ] || continue
+        exec 4< "$_uninstall_parent"
+        _uninstall_library_current
+        for _uninstall_tail in '' .previous; do
+          _uninstall_library_current
+          _uninstall_leaf="$INSTALL_DIR/lib/$_uninstall_library$_uninstall_tail"
+          if [ -L "$_uninstall_leaf" ]; then record_kept "$_uninstall_leaf (not an installer-created regular library)"
+          elif [ -f "$_uninstall_leaf" ]; then
+            _uninstall_library_current
+            rm -f "$_uninstall_leaf"
+            _uninstall_library_current
+            record_removed "$_uninstall_leaf"
+          fi
+        done
+        _uninstall_library_current
+        rmdir "$_uninstall_parent" 2>/dev/null || true
       done
-      rmdir "$_uninstall_parent" 2>/dev/null || true
     done
-  done
+    assert_install_claims
+    [ ! -L "$INSTALL_DIR/lib" ] && [ "$INSTALL_DIR/lib" -ef /dev/fd/3 ] || fail 'The original native library root changed before cleanup.'
+    rmdir "$INSTALL_DIR/lib" 2>/dev/null || true
+  elif [ -e "$INSTALL_DIR/lib" ]; then
+    record_kept "$INSTALL_DIR/lib (custom non-directory path; not removed)"
+  fi
   for native in "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun.json" "$INSTALL_DIR/goodvibes-daemon-$PLATFORM_SUFFIX.bun.LICENSE.md" "$INSTALL_DIR/daemon-installation.json"; do
     for tail in '' .previous; do
-      if [ -f "$native$tail" ]; then rm -f "$native$tail"; record_removed "$native$tail"; fi
+      if [ -f "$native$tail" ]; then assert_install_claims; rm -f "$native$tail"; record_removed "$native$tail"; fi
     done
   done
-  # Drop the lib dir only if the installer left it empty.
-  rmdir "$INSTALL_DIR/lib" 2>/dev/null || true
-
-  # The browser driver the installer extracts beside goodvibes-agent, plus the
-  # copy /update parks when it refreshes it. The agent's own self-installed
-  # driver lives under ~/.goodvibes and is user data, so it is preserved along
-  # with everything else there.
-  for driver_dir in "$INSTALL_DIR/playwright-core" "$INSTALL_DIR/playwright-core.previous"; do
-    [ -d "$driver_dir" ] || continue
-    rm -rf "$driver_dir"
-    say "  removed    $driver_dir"
-    record_removed "$driver_dir"
+  # A release marker or conventional directory name cannot establish the
+  # ownership of every nested file. Keep support/rollback/custom trees in place
+  # rather than delete user additions or a bundle served by another deployment.
+  for driver_dir in "$INSTALL_DIR/playwright-core" "$INSTALL_DIR/playwright-core.previous" "$INSTALL_DIR/playwright-core.incoming"; do
+    preserve_uninstall_directory "$driver_dir"
+  done
+  preserve_uninstall_directory "$WEBUI_ROOT"
+  # Failed publications and deliberately retained previous trees have unique
+  # paths. Naming one here is guidance, never deletion authority.
+  for retained_directory in "$INSTALL_DIR"/.goodvibes-directory-install.* "$INSTALL_DIR"/.playwright-core.update-*; do
+    preserve_uninstall_directory "$retained_directory"
   done
 
-  # The unpacked web UI bundles. These are installer-placed program files, not
-  # user data — the settings that point the daemon at them live under
-  # ~/.goodvibes and are preserved with everything else there, so a re-install
-  # finds its configuration intact and only has to put the files back.
-  if [ -d "$WEBUI_ROOT" ]; then
-    rm -rf "$WEBUI_ROOT"
-    say "  removed    $WEBUI_ROOT"
-    record_removed "$WEBUI_ROOT"
+  elif [ -e "$INSTALL_DIR" ] || [ -L "$INSTALL_DIR" ]; then
+    record_kept "$INSTALL_DIR (appeared after initial absence; not this uninstall's original directory)"
   fi
+
+  # The selected install-tree removal is settled. A later shell-rc/reporting
+  # failure does not turn the completed removal into an uncertain cohort.
+  _uninstall_complete=1
 
   # The installer-managed PATH line, if one was ever added.
   uninstall_shell_rc_path_line
@@ -3117,10 +3260,13 @@ run_uninstall() {
   if [ -n "$UNINSTALL_KEPT" ]; then
     printf '%s' "$UNINSTALL_KEPT"
   fi
+  if [ "$UNINSTALL_DIRECTORY_ASSETS_KEPT" = 1 ]; then
+    say '  Review the retained directory paths and any other running deployments before removing their contents manually.'
+  fi
   say ""
   say "To also erase all GoodVibes user data, remove it yourself:"
   say "  rm -rf $HOME/.goodvibes"
-}
+)
 
 DECISION_POLICY=''
 parse_options() {

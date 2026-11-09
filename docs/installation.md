@@ -73,8 +73,12 @@ attempt; the installer does not report a complete install or blindly retry it.
 curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_UNINSTALL=1 sh
 ```
 
-This removes installer-managed programs, supporting files and service files,
-keeping `~/.goodvibes` settings, sessions and memory. A saved installer can perform
+This removes installer-managed programs, runtime companions, known native library
+files and managed service files, keeping `~/.goodvibes` settings, sessions and memory.
+Browser-driver, WebUI and retained directory backups are listed and preserved;
+they may contain local additions or serve another deployment. Review those paths
+before removing their contents. An active or interrupted update must be resolved
+before uninstall can remove its programs. A saved installer can perform
 this operation without release downloads. `scripts/uninstall.sh` also recognizes
 receipt-owned installations made by the earlier checkout installer and invokes
 their installed uninstaller. Their `--prefix` and `--purge` options remain available.

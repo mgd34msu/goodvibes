@@ -114,3 +114,18 @@ test('a real README changed while its original reading awaited cannot inherit th
   expect(current.problems[0]).toContain('missing or stale content evidence');
   expect(Object.values(saved)[0]?.answers).toEqual({ documents: SETTLED_YES, stale: SETTLED_NO });
 });
+
+test('an actually empty saved README store reports identical missing evidence without hashing the body', () => {
+  const original = storedReadings.stateHash, hash = spyOn(storedReadings, 'stateHash');
+  try {
+    const evaluation = evaluateReadmeReadings('.', REWORDED_INTERNAL, true, {});
+    expect(evaluation.entry).toBeUndefined();
+    expect(evaluation.problems).toEqual(['./README.md has no stored engine.gates.package-readme reading for its current text (missing or stale content evidence); run `bun run package-readmes:read` and commit packages/engine/etc/package-readme-readings.json']);
+    expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); }
+  // A nonempty actual saved map still requires its real exact original state key.
+  const known = stored(REWORDED_INTERNAL, { documents: SETTLED_YES, stale: SETTLED_NO });
+  const lookup = spyOn(storedReadings, 'stateHash').mockImplementation(state => original(state));
+  try { expect(evaluateReadmeReadings('.', REWORDED_INTERNAL, true, known).entry).toBe(Object.values(known)[0]); expect(lookup).toHaveBeenCalledTimes(1); }
+  finally { lookup.mockRestore(); }
+});

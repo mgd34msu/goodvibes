@@ -59,6 +59,15 @@ if (collisions.length > 0) {
   process.exit(1);
 }
 
+// Fail known missing inputs before spending a digest on earlier payloads.
+// The generator still checks real reads: disappearance after this cheap
+// preflight remains a refusal and can never publish a partial manifest.
+const absent = entries.filter(entry => !existsSync(resolve(root, entry.path))).map(entry => entry.name);
+if (absent.length > 0) {
+  consoleLogger.error(`sha256sums: refusing to write, missing asset(s): ${absent.join(', ')}`);
+  process.exit(1);
+}
+
 const result = generateSha256Sums(entries, readBytesFrom(root), hashBytes);
 if (!result.ok) {
   consoleLogger.error(`sha256sums: refusing to write, missing asset(s): ${result.missing.join(', ')}`);

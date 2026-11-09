@@ -19,8 +19,8 @@ function staging(files: Record<string, string>): string {
   return dir;
 }
 
-function runBin(cwd: string, args: readonly string[]) {
-  const res = spawnSync('bun', [BIN, ...args], { cwd, encoding: 'utf8', timeout: 60_000 });
+function runBin(cwd: string, args: readonly string[], preload?: string) {
+  const res = spawnSync('bun', [...(preload ? ['--preload', preload] : []), BIN, ...args], { cwd, encoding: 'utf8', timeout: 60_000 });
   return { status: res.status, output: `${res.stdout ?? ''}${res.stderr ?? ''}` };
 }
 
@@ -37,6 +37,20 @@ const readBytes = (p: string): Uint8Array | null => files[p] ?? null;
 const fakeHash = (b: Uint8Array): string => `${b.length}`.padStart(64, '0');
 
 describe('sha256sums', () => {
+  test('actual CLI refuses an already missing later asset before hashing earlier payloads or replacing a manifest', () => {
+    const dir = staging({ 'original-program': 'actual bytes', 'SHA256SUMS.txt': 'Original manifest must survive failure' });
+    const marker = join(dir, 'hash-called'), observer = join(dir, 'observe.mjs');
+    writeFileSync(observer, `import crypto from 'node:crypto';import {syncBuiltinESMExports} from 'node:module';import {appendFileSync} from 'node:fs';
+      const original=crypto.createHash;crypto.createHash=(...args)=>{if(args[0]==='sha256')appendFileSync(${JSON.stringify(marker)},'sha256\\n');return original(...args)};syncBuiltinESMExports();`);
+    const refused = runBin(dir, ['--out', 'SHA256SUMS.txt', 'original-program', 'missing-program'], observer);
+    expect(refused.status).toBe(1); expect(refused.output).toContain('missing asset(s): missing-program');
+    expect(() => readFileSync(marker)).toThrow();
+    expect(readFileSync(join(dir, 'SHA256SUMS.txt'), 'utf8')).toBe('Original manifest must survive failure');
+    // Prove this observer reaches the real command's SHA producer on the
+    // admitted path; absence above cannot be an inert interception seam.
+    expect(runBin(dir, ['--out', 'SHA256SUMS.txt', 'original-program'], observer).status).toBe(0);
+    expect(readFileSync(marker, 'utf8')).toBe('sha256\n');
+  });
   test('empty, malformed, mixed and duplicate manifests cannot report successful verification', () => {
     const valid = `${fakeHash(files['goodvibes-linux-x64']!)}  goodvibes-linux-x64\n`;
     for (const manifest of ['', '  \n', 'damaged', `${valid}damaged\n`, valid + valid]) {

@@ -5,16 +5,52 @@ import * as crypto from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import * as atomic from '../platform/src/platform/utils/atomic-json-store.ts';
-import { SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
+import { canonicalJson, toJson, SqliteDecisionLog, withDecisionLog } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { captureStaticInputs, staticInputKey, readStaticInput, staticDecisionSourceHash, staticDecisionSourceManifest,
-  withStaticSourcePolicyPass } from '../scripts/static-source-readings.ts';
+  revalidateStaticInput, withStaticSourcePolicyPass } from '../scripts/static-source-readings.ts';
 import { checkNoInternalIdentifiers } from '../scripts/internal-identifier-rule.ts';
 import { sourceMarkerAnchors, sourceMarkerFindings } from '../scripts/no-todo-marker-rules.ts';
 import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
+
+test('missing or empty static stores and non-object receipts do not hash an impossible policy candidate', () => {
+  const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
+  const key = staticInputKey(input), hash = spyOn(crypto, 'createHash');
+  try {
+    expect(revalidateStaticInput(input, null)).toBeNull();
+    expect(revalidateStaticInput(input, { format: 1, decisionSourceHash: 'missing', readings: {} })).toBeNull();
+    expect(hash).not.toHaveBeenCalled();
+    expect(revalidateStaticInput(input, { format: 1, decisionSourceHash: 'missing', readings: { [key]: 17 } })).toBeNull();
+    // The actual nonempty lookup needs one input key, never a sixteen-file
+    // policy commitment for a value that cannot contain receipt evidence.
+    expect(hash).toHaveBeenCalledTimes(1);
+  } finally { hash.mockRestore(); }
+});
+
+for (const failed of [false, true]) test(`an actual no-progress static read computes only its published key (failed=${failed})`, async () => {
+  const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
+  const expectedInput = canonicalJson(toJson(input));
+  const native = crypto.createHash; let inputKeys = 0;
+  const hash = spyOn(crypto, 'createHash').mockImplementation((...args: Parameters<typeof native>) => {
+    const current = native(...args), update = current.update.bind(current);
+    spyOn(current, 'update').mockImplementation((...values: Parameters<typeof update>) => {
+      if (values[0] === expectedInput) inputKeys += 1;
+      return update(...values);
+    });
+    return current;
+  });
+  using log = new SqliteDecisionLog(':memory:');
+  const model = fakePort(() => { if (failed) throw new Error('Original unavailable fixture'); return noulAnswer(0.01); });
+  try {
+    const reading = readStaticInput(withDecisionLog(model.port, log), log, input);
+    if (failed) await expect(reading).rejects.toThrow();
+    else expect((await reading).inputHash).toEqual(expect.any(String));
+    expect(inputKeys).toBe(failed ? 0 : 1);
+  } finally { hash.mockRestore(); }
+});
 const scripts = resolve(import.meta.dir, '../scripts'), packages = resolve(scripts, '../..');
 function fixture() {
   const root = fs.mkdtempSync(join(tmpdir(), 'static-policy-original-')); roots.push(root);

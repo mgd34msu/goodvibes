@@ -521,7 +521,13 @@ export async function readStaticInput(port: JudgmentPort, log: DecisionLog, inpu
       if (staticDecisionSourceHash() !== sourceHash) throw new Error('Static decision source changed during reading');
       const prior = progress ? revalidateStaticInput(current, progress.previous)
         ?? revalidateReceipt(current, inherited, progress.previous) : null;
-      const original = ownValue(progress?.original?.readings, staticInputKey(current)) ?? ownValue(progress?.previous.readings, staticInputKey(current)) ?? inherited;
+      // No saved lookup exists without progress. Compute one key for these
+      // synchronous original/previous lookups; later receipt publication still
+      // binds the actual current input, including changes across an await.
+      const original = progress ? (() => {
+        const key = staticInputKey(current);
+        return ownValue(progress.original?.readings, key) ?? ownValue(progress.previous.readings, key) ?? inherited;
+      })() : inherited;
       const options = { site: `${STATIC_SITE}.${current.kind}`, ...(signal ? { signal } : {}) };
       let presence = prior && object(prior) ? receiptEvidence(current, prior, false, sourceHash, progress?.previous.captureSources ?? {}, progress?.previous.captureBatterySources ?? {}) : null;
       const reusedPresence = presence !== null;
@@ -666,12 +672,18 @@ function capturePolicyMatches(captureHash: unknown, kind: StaticRule, manifests:
 /** Produce explicit revalidation provenance, retaining original captures and any held observations. */
 export function revalidateStaticInput(input: StaticSourceInput, readings: StaticSourceReadings | null): unknown | null {
   return withStaticSourcePolicyPass(() => {
-    return revalidateReceipt(input, ownValue(readings?.readings, staticInputKey(input)), readings);
+    if (!readings || !object(readings.readings)) return null;
+    // Stop on the first own entry: a large stored set is checked for every
+    // input, so allocating its complete key array here would be quadratic.
+    let candidate = false;
+    for (const key in readings.readings) if (Object.hasOwn(readings.readings, key)) { candidate = true; break; }
+    if (!candidate) return null;
+    return revalidateReceipt(input, ownValue(readings.readings, staticInputKey(input)), readings);
   });
 }
 
 function revalidateReceipt(input: StaticSourceInput, receipt: unknown, readings: StaticSourceReadings | null): unknown | null {
-  if (!readings) return null;
+  if (!readings || !object(receipt)) return null;
   const sourceHash = staticDecisionSourceHash();
   const clone = (partInput: StaticSourceInput, value: unknown): unknown => {
     if (!object(value)) return value;

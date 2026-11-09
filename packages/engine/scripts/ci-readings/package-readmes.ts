@@ -46,7 +46,7 @@ export function evaluateReadmeReadings(
   isPublic: boolean,
   readings: Readonly<Record<string, StoredEntry>>,
 ): { readonly entry: StoredEntry | undefined; readonly problems: string[] } {
-  const entry = readings[stateHash(state)];
+  const entry = Object.keys(readings).length === 0 ? undefined : readings[stateHash(state)];
   const problems: string[] = [];
   for (const question of readmeQuestions(isPublic)) {
     const answer = entry?.answers[question];

@@ -65,7 +65,7 @@ describe('job-run history retention (bounded memory + disk)', () => {
 
 describe('no self-improve scheduler bypasses (gate)', () => {
   test('every .selfImprove( caller in the platform source is on the governed allowlist', () => {
-    const root = 'sdk/src';
+    const root = 'platform/src';
     // Files allowed to call selfImprove directly:
     //  - semantic/service.ts: the scheduler itself + the answer path (deferRepair task-queue pass)
     //  - home-graph/sync-self-improvement.ts: the delayed, single-flight sync pump,

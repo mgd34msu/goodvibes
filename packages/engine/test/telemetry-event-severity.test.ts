@@ -14,7 +14,7 @@ import type { NormalizedError } from '../platform/src/platform/utils/error-displ
 
 /** Every string literal in the `type` field of the `AnyRuntimeEvent` union. */
 function declaredEventTypes(): readonly string[] {
-  const file = join(import.meta.dir, '..', 'sdk/src/events/domain-map.ts');
+  const file = join(import.meta.dir, '..', 'platform/src/events/domain-map.ts');
   const program = ts.createProgram([file], {
     strict: true,
     target: ts.ScriptTarget.ES2022,

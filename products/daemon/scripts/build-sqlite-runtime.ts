@@ -7,6 +7,15 @@ import { readTarGzEntries } from '@goodvibes-jev/engine/platform/platform/browse
 import { assertDaemonSqliteArchitecture, daemonSqliteRuntime, type DaemonSqliteOwner } from '../src/cli/native-sqlite-runtime.ts';
 import { VERSION } from '../src/version.ts';
 
+/** Apple tool selection is a vendor CLI contract, independent of platform terminology. */
+export function compileDaemonSqliteLibrary(arch: 'x64' | 'arm64', sourceFile: string, library: string): void {
+  execFileSync('xcrun', ['--sdk', 'macosx', 'clang', '-arch', arch === 'x64' ? 'x86_64' : 'arm64',
+    '-dynamiclib', '-O2', '-DSQLITE_THREADSAFE=1', '-DSQLITE_ENABLE_COLUMN_METADATA', '-DSQLITE_ENABLE_FTS5',
+    '-DSQLITE_ENABLE_RTREE', '-DSQLITE_ENABLE_DBSTAT_VTAB', '-DSQLITE_ENABLE_LOAD_EXTENSION',
+    '-Wl,-install_name,@rpath/libsqlite3.dylib', sourceFile, '-o', library],
+    { cwd: dirname(sourceFile), stdio: 'inherit', timeout: 120_000 });
+}
+
 /** Native source compilation is part of the producer; consumers never run it. */
 export async function buildDaemonSqliteRuntime(root: string, target: string): Promise<DaemonSqliteOwner | null> {
   if (!target.startsWith('bun-darwin-')) return null;
@@ -45,11 +54,7 @@ export async function buildDaemonSqliteRuntime(root: string, target: string): Pr
   try {
     for (const file of selected) writeFileSync(join(scratch, file.name), file.bytes, { flag: 'wx', mode: 0o600 });
     const library = join(scratch, 'libsqlite3.dylib');
-    execFileSync('xcrun', ['--engine', 'macosx', 'clang', '-arch', arch === 'x64' ? 'x86_64' : 'arm64',
-      '-dynamiclib', '-O2', '-DSQLITE_THREADSAFE=1', '-DSQLITE_ENABLE_COLUMN_METADATA', '-DSQLITE_ENABLE_FTS5',
-      '-DSQLITE_ENABLE_RTREE', '-DSQLITE_ENABLE_DBSTAT_VTAB', '-DSQLITE_ENABLE_LOAD_EXTENSION',
-      '-Wl,-install_name,@rpath/libsqlite3.dylib', join(scratch, 'sqlite3.c'), '-o', library],
-      { cwd: scratch, stdio: 'inherit', timeout: 120_000 });
+    compileDaemonSqliteLibrary(runtime.target === 'darwin-x64' ? 'x64' : 'arm64', join(scratch, 'sqlite3.c'), library);
     const bytes = readFileSync(library); assertDaemonSqliteArchitecture(bytes, runtime.target); chmodSync(library, 0o644);
     const output = join(root, 'native', runtime.libraryPath), provenance = join(root, 'native', runtime.provenancePath);
     mkdirSync(dirname(output), { recursive: true });

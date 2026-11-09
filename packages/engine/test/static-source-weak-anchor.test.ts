@@ -7,7 +7,7 @@ import { STATIC_WEAK_ANCHOR_FIT_INSTRUCTIONS, STATIC_WEAK_ANCHOR_INSTRUCTIONS, s
 import { STATIC_ANCHOR_FIT_INSTRUCTIONS, STATIC_ANCHOR_INSTRUCTIONS } from '../scripts/batteries/static-source.ts';
 import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 
-const input = () => captureStaticInputs('internal-identifier', 'sdk/src/example.ts', 'const value = 3;', [{ id: 'candidate', line: 1, col: 7, text: 'value' }])[0]!;
+const input = () => captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;', [{ id: 'candidate', line: 1, col: 7, text: 'value' }])[0]!;
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 async function selected(presence: number, pick: 'candidate' | 'none', confidence: number, fit: number) {
@@ -108,7 +108,7 @@ test('weak exhaustive negative fits keep the original high band and every contra
 });
 
 test('a settled weak negative sibling cannot clear another unresolved exact source subset', async () => {
-  const captured = captureStaticInputs('internal-identifier', 'sdk/src/example.ts', 'const first = 1;\nconst second = 2;')[0]!;
+  const captured = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const first = 1;\nconst second = 2;')[0]!;
   using log = new SqliteDecisionLog(':memory:');
   const fixture = fakePort((name, question, state) => {
     if (question.type === 'choice') return choiceAnswer(question, 'none', .2);

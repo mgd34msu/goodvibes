@@ -23,7 +23,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ActivityLogger } from '../platform/src/platform/utils/logger.ts';
 
-const LOGGER_MODULE = join(import.meta.dir, '..', 'sdk/src/platform/utils/logger.ts');
+const LOGGER_MODULE = join(import.meta.dir, '..', 'platform/src/platform/utils/logger.ts');
 
 const dirs: string[] = [];
 const loggers: ActivityLogger[] = [];

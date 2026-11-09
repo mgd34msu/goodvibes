@@ -23,7 +23,7 @@ describe('toolchain config', () => {
     expect(resolved.enginePackage).toBe(DEFAULT_ENGINE_PACKAGE);
     expect(resolved.pinSource).toBe('dependencies');
     expect(resolved.lockfile).toBe('bun.lock');
-    expect(resolved.overlayMarker).toContain('.local-sdk-overlay.json');
+    expect(resolved.overlayMarker).toContain('.local-engine-overlay.json');
   });
   test('resolvePerJobGreenConfig requires owner/repo and defaults the rest', () => {
     const resolved = resolvePerJobGreenConfig({ owner: 'a', repo: 'b' });

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { captureStaticInputs, loadStaticSourceReadings, projectCurrentStaticSourceReadings, saveStaticSourceReadings, staticDecisionSourceHash, staticInputCaptureComplete, staticInputKey, staticInputStanding, type StaticSourceReadings } from '../scripts/static-source-readings.ts';
 import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 
-const input = () => captureStaticInputs('internal-identifier', 'sdk/src/example.ts', '// Public source\nconst value = 3;')[0]!;
+const input = () => captureStaticInputs('internal-identifier', 'platform/src/example.ts', '// Public source\nconst value = 3;')[0]!;
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 test('current projection retains complete held subset evidence and leaves private history unchanged', async () => {

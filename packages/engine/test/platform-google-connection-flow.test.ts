@@ -221,7 +221,7 @@ describe('discovery decides before anything runs', () => {
     // Structural rather than behavioural: the succession cannot regrow a disk
     // step by accident if there is nothing to read a disk with.
     const source = readFileSync(
-      join(import.meta.dir, '..', 'sdk/src/platform/google/discovery.ts'),
+      join(import.meta.dir, '..', 'platform/src/platform/google/discovery.ts'),
       'utf8',
     );
     expect(source).not.toContain('GoogleFilePort');
@@ -761,7 +761,7 @@ describe('no setup string tells the user to type anything', () => {
     // Fix strings are what a person reads at the moment something went wrong,
     // which is the worst possible moment to be handed a command to look up.
     const source = readFileSync(
-      join(import.meta.dir, '..', 'sdk/src/platform/google/setup-actions.ts'),
+      join(import.meta.dir, '..', 'platform/src/platform/google/setup-actions.ts'),
       'utf8',
     );
     const offenders = [...source.matchAll(/(?:problem|fix|detail):\s*(?:'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`)/g)]
@@ -772,7 +772,7 @@ describe('no setup string tells the user to type anything', () => {
 
   test('the file-intake failure offers to read the path rather than naming a command', () => {
     const source = readFileSync(
-      join(import.meta.dir, '..', 'sdk/src/platform/google/setup-actions.ts'),
+      join(import.meta.dir, '..', 'platform/src/platform/google/setup-actions.ts'),
       'utf8',
     );
     expect(source).toContain('Tell me where the client JSON is and I will read it from there.');
@@ -811,7 +811,7 @@ describe('every command named in Google-flow text exists', () => {
   // command surface answered "Unknown setup item google". A fix line naming a
   // command that does not resolve is worse than no fix line.
 
-  const googleDir = join(import.meta.dir, '..', 'sdk/src/platform/google');
+  const googleDir = join(import.meta.dir, '..', 'platform/src/platform/google');
 
   /**
    * Command invocations named anywhere in the connector's source, as

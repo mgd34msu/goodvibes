@@ -55,7 +55,7 @@ describe('npm pack child output', () => {
   test('a file listing larger than the default capture buffer retains the final tarball filename', () => {
     const filename = 'goodvibes-jev-engine-2.0.23.tgz';
     const files = Array.from({ length: 10_000 }, (_, index) => ({
-      path: `sdk/dist/platform/${'long-package-path/'.repeat(6)}entry-${index}.js`,
+      path: `platform/dist/platform/${'long-package-path/'.repeat(6)}entry-${index}.js`,
       size: index,
       mode: 420,
     }));

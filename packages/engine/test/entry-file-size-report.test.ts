@@ -32,7 +32,7 @@ beforeEach(() => {
     copyFileSync(join(SOURCE_SCRIPTS, name), join(engine, 'scripts', name));
   }
   write('package.json', JSON.stringify({ exports: { './platform': './platform/dist/index.js' } }));
-  write('sdk/dist/index.js', 'export const fixture = 1;\n');
+  write('platform/dist/index.js', 'export const fixture = 1;\n');
   write('bundle-budgets.json', '{}\n');
   writeFileSync(join(root, 'offline.ts'), "globalThis.fetch = async () => { throw new Error('Unexpected network in fixture'); };\n");
 });
@@ -44,7 +44,7 @@ test('a built new export reports its entry-file bytes without requiring a baseli
     './platform': './platform/dist/index.js', './platform/new-entry': './platform/dist/new-entry.js',
   } }));
   const source = 'export { fixture } from "./index.js";\n';
-  write('sdk/dist/new-entry.js', source);
+  write('platform/dist/new-entry.js', source);
   const result = run();
   expect(result.code).toBe(0);
   expect(result.output).toContain('ADVISORY');
@@ -76,7 +76,7 @@ for (const kind of ['missing', 'malformed', 'stale'] as const) {
 
 for (const domains of [['retired-domain'], { invalid: 'list' }]) {
   test(`optional event-domain reference ${Array.isArray(domains) ? 'drift' : 'malformation'} remains advisory`, () => {
-    write('sdk/dist/events/actual-domain.js', 'export const event = "fixture";\n');
+    write('platform/dist/events/actual-domain.js', 'export const event = "fixture";\n');
     write('bundle-budgets.json', JSON.stringify({ './events': { gzip_bytes: 100, domains } }));
     const result = run();
     expect(result.code).toBe(0);
@@ -94,7 +94,7 @@ test('a missing built export remains a fatal packaging error', () => {
 });
 
 test('missing build output with --no-build remains fatal and does not invoke a build', () => {
-  rmSync(join(engine, 'sdk/dist'), { recursive: true });
+  rmSync(join(engine, 'platform/dist'), { recursive: true });
   const result = run();
   expect(result.code).not.toBe(0);
   expect(result.output).toContain('dist/ is missing');

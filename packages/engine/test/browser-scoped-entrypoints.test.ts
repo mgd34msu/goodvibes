@@ -283,7 +283,7 @@ describe('scoped browser platform entrypoints', () => {
   });
 
   test('bundled knowledge entrypoint does not include Home Graph contract metadata', async () => {
-    const bundle = await bundleEntrypoint('sdk/src/browser-knowledge.ts');
+    const bundle = await bundleEntrypoint('platform/src/browser-knowledge.ts');
 
     expect(bundle).not.toContain('homeassistant.homeGraph');
     expect(bundle).not.toContain('/api/homeassistant/home-graph');
@@ -291,7 +291,7 @@ describe('scoped browser platform entrypoints', () => {
   });
 
   test('bundled agent entrypoint does not include Home Graph route metadata', async () => {
-    const bundle = await bundleEntrypoint('sdk/src/browser-agent.ts');
+    const bundle = await bundleEntrypoint('platform/src/browser-agent.ts');
 
     expect(bundle).not.toContain('homeassistant.homeGraph');
     expect(bundle).not.toContain('/api/homeassistant/home-graph');
@@ -301,7 +301,7 @@ describe('scoped browser platform entrypoints', () => {
   });
 
   test('bundled home assistant entrypoint does not include base knowledge/wiki contract metadata', async () => {
-    const bundle = await bundleEntrypoint('sdk/src/browser-homeassistant.ts');
+    const bundle = await bundleEntrypoint('platform/src/browser-homeassistant.ts');
 
     expect(bundle).not.toContain('knowledge.ask');
     expect(bundle).not.toContain('knowledge.refinement.tasks.list');

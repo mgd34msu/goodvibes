@@ -223,7 +223,7 @@ describe('acquireCrossProcessLock: the primitive', () => {
     const lockModulePath = join(
       import.meta.dir,
       '..',
-      'sdk/src/platform/workspace/checkpoint/cross-process-lock.ts',
+      'platform/src/platform/workspace/checkpoint/cross-process-lock.ts',
     ).replace(/\\/g, '/');
     const holderScript = join(dir, 'holder.ts');
     writeFileSync(
@@ -378,7 +378,7 @@ describe('acquireCrossProcessLock: genuine multi-process contention', () => {
     const lockModulePath = join(
       import.meta.dir,
       '..',
-      'sdk/src/platform/workspace/checkpoint/cross-process-lock.ts',
+      'platform/src/platform/workspace/checkpoint/cross-process-lock.ts',
     ).replace(/\\/g, '/');
     const scriptPath = join(dir, 'contend.ts');
     writeFileSync(
@@ -593,7 +593,7 @@ describe('WorkspaceCheckpointManager: real subprocess separation', () => {
     const managerModulePath = join(
       import.meta.dir,
       '..',
-      'sdk/src/platform/workspace/checkpoint/manager.ts',
+      'platform/src/platform/workspace/checkpoint/manager.ts',
     ).replace(/\\/g, '/');
     // Each subprocess reports how many of ITS OWN create() calls returned a
     // real (non-null) checkpoint, in a per-process count file. Two processes

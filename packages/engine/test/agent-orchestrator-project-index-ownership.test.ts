@@ -90,6 +90,9 @@ beforeAll(async () => {
   sharedIndex.upsertFile('src/shared.ts', 90);
 
   services.dispose();
+  // Compatibility dispose starts the runtime's ordered async drain. Sample
+  // the orchestrator only after its preceding dependencies have settled.
+  await services.close();
   ownedCountAfterDispose = orchestrator.ownedProjectIndexes.size;
   flushTimerAfterDispose = (ownedIndex as unknown as IndexInternals | undefined)?.flushTimer;
   sharedIndexTimerAfterDispose = (sharedIndex as unknown as IndexInternals).flushTimer;
@@ -101,6 +104,8 @@ afterAll(async () => {
   // file owns it: leaving it armed would be the very class of stray handle
   // these tests exist to close, inside every later file of the shared-process
   // leak scan.
+  await services?.close();
+  await ownedIndex?.dispose();
   await sharedIndexRef?.dispose();
   rmSync(root, { recursive: true, force: true });
   rmSync(agentCwd, { recursive: true, force: true });

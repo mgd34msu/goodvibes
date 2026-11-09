@@ -121,7 +121,7 @@ describe('WorkPlanStore', () => {
     const markdown = store.toMarkdown();
     expect(markdown).toContain('# Work Plan');
     expect(markdown).toContain('Write handoff (blocked)');
-    expect(markdown).toContain('Owner: sdk');
+    expect(markdown).toContain('Owner: platform');
     expect(markdown).toContain('Source: coordination');
   });
 

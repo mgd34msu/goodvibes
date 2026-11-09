@@ -10,7 +10,7 @@ afterAll(() => { if (root) rmSync(root, { recursive: true, force: true }); });
 
 test('captures every file in a pack JSON document larger than the default subprocess buffer', () => {
   const files = Array.from({ length: 8_000 }, (_, index) => ({
-    path: `sdk/dist/synthetic/${String(index).padStart(5, '0')}/${'component-'.repeat(18)}index.js`,
+    path: `platform/dist/synthetic/${String(index).padStart(5, '0')}/${'component-'.repeat(18)}index.js`,
     size: index + 1,
     mode: 420,
   }));

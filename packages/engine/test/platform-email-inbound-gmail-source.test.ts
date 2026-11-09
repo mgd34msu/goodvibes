@@ -734,9 +734,9 @@ describe('gmail source: adaptive interval', () => {
 
 describe('inbound sources cannot register an expectation', () => {
   const files = [
-    'sdk/src/platform/email/inbound/gmail-source.ts',
-    'sdk/src/platform/email/inbound/imap-source.ts',
-    'sdk/src/platform/email/inbound/source-selection.ts',
+    'platform/src/platform/email/inbound/gmail-source.ts',
+    'platform/src/platform/email/inbound/imap-source.ts',
+    'platform/src/platform/email/inbound/source-selection.ts',
   ];
 
   test('no source module names openExpectation or hydrateExpectation', () => {

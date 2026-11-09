@@ -1,4 +1,6 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, spyOn, test } from 'bun:test';
+import * as childProcess from 'node:child_process';
+import { compileDaemonSqliteLibrary } from '../../../scripts/build-sqlite-runtime.ts';
 import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -120,4 +122,20 @@ test('retained compiled SQLite admission tolerates sibling bookkeeping and still
   expect(() => admitted?.assertCurrent()).not.toThrow();
   const foreign = f.library + '.later'; writeFileSync(foreign, f.bytes, { mode: 0o644 }); renameSync(foreign, f.library);
   expect(() => admitted?.assertCurrent()).toThrow('Original native SQLite');
+});
+
+
+test.each(['x64', 'arm64'] as const)('Darwin SQLite compiler keeps Apple --sdk selection for %s', arch => {
+  const compile = spyOn(childProcess, 'execFileSync').mockReturnValue(Buffer.alloc(0));
+  try {
+    const source = '/owned native source/sqlite3.c', library = '/owned native output/libsqlite3.dylib';
+    compileDaemonSqliteLibrary(arch, source, library);
+    expect(compile).toHaveBeenCalledTimes(1);
+    expect(compile).toHaveBeenCalledWith('xcrun', [
+      '--sdk', 'macosx', 'clang', '-arch', arch === 'x64' ? 'x86_64' : 'arm64',
+      '-dynamiclib', '-O2', '-DSQLITE_THREADSAFE=1', '-DSQLITE_ENABLE_COLUMN_METADATA', '-DSQLITE_ENABLE_FTS5',
+      '-DSQLITE_ENABLE_RTREE', '-DSQLITE_ENABLE_DBSTAT_VTAB', '-DSQLITE_ENABLE_LOAD_EXTENSION',
+      '-Wl,-install_name,@rpath/libsqlite3.dylib', source, '-o', library,
+    ], { cwd: dirname(source), stdio: 'inherit', timeout: 120_000 });
+  } finally { compile.mockRestore(); }
 });

@@ -564,7 +564,7 @@ describe('two independent writers over one record file lose nothing', () => {
     const storeModule = join(
       import.meta.dir,
       '..',
-      'sdk/src/platform/email/inbound/record-store.ts',
+      'platform/src/platform/email/inbound/record-store.ts',
     ).replace(/\\/g, '/');
     const errorsModule = join(import.meta.dir, '..', 'errors/src/index.ts').replace(/\\/g, '/');
     const testingModule = join(import.meta.dir, '..', '..', 'judgment/src/testing/index.ts').replace(/\\/g, '/');

@@ -54,15 +54,15 @@ function resolveRelative(fromFile: string, specifier: string): string {
 
 /**
  * Whether a resolved path is inside the engine's source: under
- * `packages/engine`, under an old `goodvibes` checkout, or, when it leaves
- * the consumer's root, in a sibling `engine` package.
+ * `packages/engine`, or, only after leaving the consumer root, a historical
+ * `goodvibes`/`goodvibes-sdk` checkout or sibling `engine` package. A local
+ * client module named `goodvibes` is ordinary consumer source.
  */
 function landsInEngine(resolved: string): boolean {
   const segments = resolved.split('/');
-  if (segments.includes('goodvibes')) return true;
   if (segments.some((segment, index) => segment === 'packages' && segments[index + 1] === 'engine')) return true;
   const firstInside = segments.findIndex((segment) => segment !== '..');
-  return firstInside > 0 && segments[firstInside] === 'engine';
+  return firstInside > 0 && (segments[firstInside] === 'engine' || segments.includes('goodvibes') || segments.includes('goodvibes-sdk'));
 }
 
 /**

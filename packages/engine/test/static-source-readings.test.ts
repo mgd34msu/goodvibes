@@ -9,7 +9,7 @@ import { captureStaticInputs, CheckpointValueReader, loadStaticSourceCheckpoint,
 import { INTERNAL_IDENTIFIER_INSTRUCTIONS, internalIdentifier, staticOffendingAnchor } from '../scripts/batteries/static-source.ts';
 import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 
-const input = () => captureStaticInputs('internal-identifier', 'sdk/src/example.ts', '// Exact public source\nconst value = 3;')[0]!;
+const input = () => captureStaticInputs('internal-identifier', 'platform/src/example.ts', '// Exact public source\nconst value = 3;')[0]!;
 
 test('a durable interrupted subset tree resumes only its missing call', async () => {
   const root = mkdtempSync(join(tmpdir(), 'static-partial-subsets-'));
@@ -297,7 +297,7 @@ test('only settled current no observations clear an offline source input', async
   expect(staticInputStanding(captured, { ...readings, decisionSourceHash: 'stale' }).kind).toBe('held');
   const changed = captureStaticInputs('internal-identifier', captured.path, '// Changed source\nconst value = 3;')[0]!;
   expect(staticInputStanding(changed, readings).kind).toBe('held');
-  expect(staticInputStanding({ ...captured, path: 'sdk/src/another.ts' }, readings).kind).toBe('held');
+  expect(staticInputStanding({ ...captured, path: 'platform/src/another.ts' }, readings).kind).toBe('held');
 });
 
 test('weak no and uncertain observations stay held without changing their probabilities', async () => {

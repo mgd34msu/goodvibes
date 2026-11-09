@@ -14,14 +14,14 @@ import { readCompilerOutput, typecheckFailures } from '../scripts/typecheck-outp
 
 const CLEAN_OUTPUT = [
   '[typecheck] tsc -b ...',
-  'TSFILE: /repo/packages/sdk/dist/index.d.ts',
+  'TSFILE: /repo/packages/platform/dist/index.d.ts',
   'Found 0 errors.',
   '',
 ].join('\n');
 
 const DIRTY_OUTPUT = [
-  "sdk/src/a.ts(1,23): error TS2307: Cannot find module 'dep' or its corresponding type declarations.",
-  "sdk/src/b.ts(4,9): error TS2741: Property 'x' is missing in type '{}'.",
+  "platform/src/a.ts(1,23): error TS2307: Cannot find module 'dep' or its corresponding type declarations.",
+  "platform/src/b.ts(4,9): error TS2741: Property 'x' is missing in type '{}'.",
   'Found 2 errors in 2 files.',
   '',
 ].join('\n');

@@ -12,7 +12,7 @@ import { preparedStaticReadings } from './_helpers/static-source-evidence.ts';
 
 const REPO_ROOT = resolve(import.meta.dir, '..');
 
-async function violationsFor(text: string, relPath = 'sdk/src/example.ts', probability = 0.99): Promise<string[]> {
+async function violationsFor(text: string, relPath = 'platform/src/example.ts', probability = 0.99): Promise<string[]> {
   const inputs = captureStaticInputs('internal-identifier', relPath, text);
   const readings = await preparedStaticReadings(inputs, probability, inputs[0]?.anchors.at(-1)?.id);
   return checkNoInternalIdentifiers([{ relPath, text }], readings);
@@ -91,7 +91,7 @@ describe('internal-identifier rule', () => {
       'the checklist item has 1.5 points', // "item" not directly adjoining the number
     ];
     for (const text of legal) {
-      expect(await violationsFor(text, 'sdk/src/example.ts', 0.01)).toEqual([]);
+      expect(await violationsFor(text, 'platform/src/example.ts', 0.01)).toEqual([]);
     }
   });
 
@@ -106,7 +106,7 @@ describe('internal-identifier rule', () => {
     for (const relPath of ['scripts/batteries/static-source.ts', 'test/internal-identifier-check.test.ts', 'test\\static-source-readings.test.ts']) {
       expect(checkNoInternalIdentifiers([{ relPath, text }])).toEqual([]);
     }
-    for (const relPath of ['sdk/src/feature.ts', 'scripts/batteries/other.ts', 'test/internal-identifier-check-extra.test.ts']) {
+    for (const relPath of ['platform/src/feature.ts', 'scripts/batteries/other.ts', 'test/internal-identifier-check-extra.test.ts']) {
       const advisories: string[] = [];
       expect(checkNoInternalIdentifiers([{ relPath, text }], null, finding => advisories.push(finding))).toEqual([]);
       expect(advisories).toHaveLength(1);

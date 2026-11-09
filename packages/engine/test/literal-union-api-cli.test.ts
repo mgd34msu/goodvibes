@@ -7,7 +7,7 @@ import { makeProjectTempDir } from './_helpers/project-temp.ts';
 test('the real API command accepts a literal permutation without rewriting its baseline and rejects contract edits', async () => {
   const engine = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const fixture = makeProjectTempDir('literal-api-command');
-  for (const directory of ['scripts', 'etc', 'sdk/dist', 'terminal-shell/dist', 'node_modules']) mkdirSync(join(fixture, directory), { recursive: true });
+  for (const directory of ['scripts', 'etc', 'platform/dist', 'terminal-shell/dist', 'node_modules']) mkdirSync(join(fixture, directory), { recursive: true });
   for (const file of ['check-subpath-api-surface.ts', 'subpath-api-surface-rule.ts', 'literal-type-order.ts', 'export-conditions.ts']) {
     copyFileSync(join(engine, 'scripts', file), join(fixture, 'scripts', file));
   }
@@ -15,7 +15,7 @@ test('the real API command accepts a literal permutation without rewriting its b
   writeFileSync(join(fixture, 'package.json'), JSON.stringify({ name: 'synthetic-api', type: 'module', exports: {
     './platform': { types: './platform/dist/index.d.ts' }, './terminal-shell': { types: './terminal-shell/dist/index.d.ts' },
   } }));
-  const source = join(fixture, 'sdk/dist/index.d.ts');
+  const source = join(fixture, 'platform/dist/index.d.ts');
   const baseline = 'export type Choice = "a" | "b"; export interface Options { required: boolean; }';
   writeFileSync(source, baseline);
   writeFileSync(join(fixture, 'terminal-shell/dist/index.d.ts'), 'export interface Terminal { write(text: string): void; }');

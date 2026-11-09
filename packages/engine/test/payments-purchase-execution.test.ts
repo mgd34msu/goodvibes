@@ -1318,7 +1318,7 @@ describe('the flow is merchant-agnostic by construction', () => {
     // A selector table would have to live somewhere. This is the check that
     // notices the first one, while it is still one line.
     const { Glob } = await import('bun');
-    const glob = new Glob('sdk/src/platform/payments/**/*.ts');
+    const glob = new Glob('platform/src/platform/payments/**/*.ts');
     const offenders: string[] = [];
     for await (const path of glob.scan({ cwd: process.cwd() })) {
       const source = await Bun.file(path).text();

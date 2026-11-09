@@ -84,6 +84,29 @@ describe('engine-pin-gate', () => {
     expect(results.find((r) => r.id === 'npm-specifier-only-imports')?.ok).toBe(true);
   });
 
+  test('WebUI local client imports remain consumer source at every actual nesting level', () => {
+    const files = baseFiles('1.10.1');
+    files['src/index.ts'] = "import { client } from './lib/goodvibes';";
+    files['src/lib/state.ts'] = "import { client } from './goodvibes';";
+    files['src/lib/nested/state.ts'] = "import { client } from '../goodvibes';";
+    files['src/views/chat.ts'] = "import { client } from '../lib/goodvibes';";
+    files['src/components/settings/dialog/editor.ts'] = "import { client } from '../../../lib/goodvibes';";
+    files['scripts/live.ts'] = "import { client } from '../src/lib/goodvibes';";
+    files['e2e/support/client.ts'] = "import { client } from '../../src/lib/goodvibes';";
+    const results = runEnginePinGate(fakeFs(files), { sourceRoots: ['src', 'scripts', 'e2e'], enforceExportsMap: true });
+    expect(results.find(result => result.id === 'npm-specifier-only-imports')?.ok).toBe(true);
+    expect(results.find(result => result.id === 'exports-map-only-imports')?.ok).toBe(true);
+  });
+
+  test('escaping into a historical checkout still refuses direct source imports', () => {
+    for (const specifier of ['../../goodvibes/src/index.ts', '../../goodvibes-platform/src/index.ts', '../../shared/goodvibes/src/index.ts']) {
+      const files = baseFiles('1.10.1');
+      files['src/index.ts'] = `import { thing } from '${specifier}';`;
+      const gate = runEnginePinGate(fakeFs(files), {}).find(result => result.id === 'npm-specifier-only-imports');
+      expect(gate?.ok).toBe(false); expect(gate?.detail).toContain(specifier);
+    }
+  });
+
   test('reads the pin from devDependencies when configured (agent variant)', () => {
     const fs = fakeFs({ 'package.json': JSON.stringify({ devDependencies: { [engine]: '1.10.1' } }) });
     expect(readEnginePin(fs, resolveEnginePinConfig({ pinSource: 'devDependencies' }))).toBe('1.10.1');

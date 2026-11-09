@@ -40,13 +40,13 @@ const descriptorReads = (read: { readonly mock: { readonly calls: readonly (read
 test('actual multi-candidate identifier gate and deferred-source reader hash policy bodies once per pass', () => {
   const f = fixture(), readings = { format: 1 as const, decisionSourceHash: staticDecisionSourceHash(), readings: {} }, read = spyOn(fs, 'readFileSync');
   try {
-    const candidates = Array.from({ length: 12 }, (_, index) => ({ relPath: `sdk/src/example-${index}.ts`, text: 'const value = 3;' }));
+    const candidates = Array.from({ length: 12 }, (_, index) => ({ relPath: `platform/src/example-${index}.ts`, text: 'const value = 3;' }));
     const held: string[] = [];
     expect(checkNoInternalIdentifiers(candidates, readings, finding => { held.push(finding); })).toEqual([]);
     expect(held.length).toBeGreaterThan(1); expect(descriptorReads(read)).toBe(16);
     read.mockClear();
     const markers = Array.from({ length: 181 }, (_, index) => `// Finish persistence for reader ${index}.`).join('\n\n');
-    expect(sourceMarkerFindings('sdk/src/example.ts', markers, readings).length).toBeGreaterThan(1);
+    expect(sourceMarkerFindings('platform/src/example.ts', markers, readings).length).toBeGreaterThan(1);
     expect(descriptorReads(read)).toBe(16);
     // A completed pass cannot make a later invocation silently reuse its owner.
     read.mockClear(); checkNoInternalIdentifiers(candidates, readings);
@@ -75,8 +75,8 @@ test('same-size edits, restored bytes/mtime, and identical-byte leaf replacement
 
 test('actual gate held callbacks cannot make later candidates approve under a stale policy owner', async () => {
   const f = fixture(), candidates = [
-    { relPath: 'sdk/src/uncaptured.ts', text: 'const missing = 3;' },
-    { relPath: 'sdk/src/current.ts', text: 'const value = 3;' },
+    { relPath: 'platform/src/uncaptured.ts', text: 'const missing = 3;' },
+    { relPath: 'platform/src/current.ts', text: 'const value = 3;' },
   ];
   try {
     const inputs = captureStaticInputs('internal-identifier', candidates[1]!.relPath, candidates[1]!.text);
@@ -92,7 +92,7 @@ test('actual gate held callbacks cannot make later candidates approve under a st
 test('the final actual gate callback cannot release a result using an invalidated original policy', () => {
   const f = fixture(), readings = { format: 1 as const, decisionSourceHash: staticDecisionSourceHash(), readings: {} };
   try {
-    expect(() => checkNoInternalIdentifiers([{ relPath: 'sdk/src/example.ts', text: 'const value = 3;' }], readings,
+    expect(() => checkNoInternalIdentifiers([{ relPath: 'platform/src/example.ts', text: 'const value = 3;' }], readings,
       () => { f.edit(f.changed); })).toThrow('Static policy source changed');
   } finally { f.close(); }
 });
@@ -121,7 +121,7 @@ test('actual static reader rechecks the owned policy after its provider await an
   using log = new SqliteDecisionLog(':memory:');
   const port = withDecisionLog({ ...fake.port, async ask(request) { entered(); await held; return fake.port.ask(request); } }, log);
   try {
-    const input = captureStaticInputs('internal-identifier', 'sdk/src/example.ts', 'const value = 3;')[0]!;
+    const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
     const reading = readStaticInput(port, log, input);
     await admitted; f.edit(f.changed); release();
     await expect(reading).rejects.toThrow('Static decision source changed during reading');
@@ -135,14 +135,14 @@ test('actual missing-store gates keep identical structural held scopes without a
   const internalText = Array.from({ length: 240 }, (_, index) => `Paragraph ${index} is complete.`).join('\n\n');
   const deferredText = Array.from({ length: 240 }, (_, index) => `// Persistence reader ${index} is documented.`).join('\n\n');
   const internal = captureStaticInputs('internal-identifier', 'docs/example.md', internalText);
-  const deferred = captureStaticInputs('deferred-work', 'sdk/src/example.ts', deferredText, sourceMarkerAnchors('sdk/src/example.ts', deferredText));
+  const deferred = captureStaticInputs('deferred-work', 'platform/src/example.ts', deferredText, sourceMarkerAnchors('platform/src/example.ts', deferredText));
   expect(internal.length).toBeGreaterThan(1); expect(deferred.length).toBeGreaterThan(1);
   const hash = spyOn(crypto, 'createHash'), nativeHash = spyOn(Bun.CryptoHasher, 'hash');
   try {
     const held: string[] = [];
     expect(checkNoInternalIdentifiers([{ relPath: 'docs/example.md', text: internalText }], null, value => { held.push(value); })).toEqual([]);
     expect(held).toEqual(internal.map(input => `docs/example.md:${input.firstLine}: internal-identifier evidence held (missing or stale decision source); review source or run static-source:read [internal-identifier]`));
-    expect(sourceMarkerFindings('sdk/src/example.ts', deferredText, null)).toEqual(deferred.map(input => ({ line: input.firstLine, col: 1,
+    expect(sourceMarkerFindings('platform/src/example.ts', deferredText, null)).toEqual(deferred.map(input => ({ line: input.firstLine, col: 1,
       marker: 'evidence-held', text: 'missing or stale decision source; run static-source:read' })));
     expect(hash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
     expect(nativeHash.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(0);
@@ -152,8 +152,8 @@ test('actual missing-store gates keep identical structural held scopes without a
 test('default explicit preparation still binds the complete source beyond its offered window', () => {
   const first = '// Visible original source.', text = [first, ...Array.from({ length: 80 }, () => ''), '// Remote original source.'].join('\n');
   const anchors = [{ id: 'original', line: 1, col: 1, text: first }];
-  const before = captureStaticInputs('deferred-work', 'sdk/src/example.ts', text, anchors)[0]!;
-  const after = captureStaticInputs('deferred-work', 'sdk/src/example.ts', text.replace('Remote original', 'Remote modified'), anchors)[0]!;
+  const before = captureStaticInputs('deferred-work', 'platform/src/example.ts', text, anchors)[0]!;
+  const after = captureStaticInputs('deferred-work', 'platform/src/example.ts', text.replace('Remote original', 'Remote modified'), anchors)[0]!;
   expect(before).toHaveProperty('sourceHash'); expect(before.sourceHash).toMatch(/^[a-f0-9]{64}$/);
   expect(before.source).toBe(after.source); expect(before.anchors).toEqual(after.anchors);
   expect(before.sourceHash).not.toBe(after.sourceHash); expect(staticInputKey(before)).not.toBe(staticInputKey(after));

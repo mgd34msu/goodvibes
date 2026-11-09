@@ -25,7 +25,7 @@ function request(root: string): DurableContractRequest {
     input: { ask: 'Preserve the originally selected repository', sessionId: 'placement', origin: 'cli', projectRoot: root, isolation: 'auto' } };
 }
 function harness(root: string) {
-  const h = makeHarness({ root, contract: { maxActiveContracts: 0 }, scripts: {},
+  const h = makeHarness({ root, contract: { maxActiveContracts: 0, isolation: 'auto' }, scripts: {},
     durableAdmission: { withCurrent: (_admission, launch) => launch(() => undefined) } });
   harnesses.push(h);
   return h;
@@ -72,14 +72,17 @@ function holdFirstMetadata() {
     child.once('error', () => entered());
     return child;
   }) as typeof childProcess.spawn);
+  let closing: Promise<void> | undefined;
   return { ready, resume: () => child?.kill('SIGTERM'),
     active: () => child !== undefined && child.exitCode === null && child.signalCode === null,
-    async close() {
-      tap.mockRestore();
-      if (child && child.exitCode === null && child.signalCode === null) {
-        const closed = new Promise<void>(resolve => child!.once('close', () => resolve()));
-        child.kill('SIGKILL'); await closed;
-      }
+    close(): Promise<void> {
+      return closing ??= (async () => {
+        tap.mockRestore();
+        if (child && child.exitCode === null && child.signalCode === null) {
+          const closed = new Promise<void>(resolve => child!.once('close', () => resolve()));
+          child.kill('SIGKILL'); await closed;
+        }
+      })();
     } };
 }
 

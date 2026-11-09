@@ -1562,7 +1562,10 @@ describe('product breadth commands', () => {
     out.length = 0;
     await marketplace!.handler(['receipt', 'plugin', 'deploy-audit', 'project'], ctx);
     expect(out.join('\n')).toContain('Marketplace Receipt: Deploy Audit');
-    expect(out.join('\n')).toContain('fingerprint:');
+    expect(out.join('\n')).toContain(`targetPath: ${join(root, '.goodvibes', 'plugins', 'deploy-audit')}`);
+    expect(out.join('\n')).toContain('provenance: curated-local');
+    expect(out.join('\n')).toContain('compatibility: supported');
+    expect(out.join('\n')).not.toContain('fingerprint:');
 
     writeFileSync(join(root, 'catalog', 'plugins', 'deploy-audit', 'index.ts'), 'export function init() { return "updated"; }\n');
     out.length = 0;

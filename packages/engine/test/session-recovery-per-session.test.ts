@@ -179,7 +179,7 @@ describe('no .preserved collision machinery in platform code', () => {
     try {
       matched = execFileSync(
         'grep',
-        ['-rIlE', '--include=*.ts', String.raw`\.preserved['"` + '`' + String.raw`/]`, 'sdk/src'],
+        ['-rIlE', '--include=*.ts', String.raw`\.preserved['"` + '`' + String.raw`/]`, 'platform/src'],
         { encoding: 'utf-8', cwd: join(import.meta.dir, '..') },
       ).trim();
     } catch (err) {

@@ -47,7 +47,7 @@ import {
 const INBOUND_DIR = join(
   import.meta.dir,
   '..',
-  'sdk/src/platform/email/inbound',
+  'platform/src/platform/email/inbound',
 );
 
 describe('backoff', () => {

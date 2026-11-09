@@ -111,10 +111,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await client.close();
-  await daemon.close();
+  // Drain both actual owners even if one refuses teardown; neither graph may
+  // still be using these directories when the fixture removes them.
+  const closed = await Promise.allSettled([client.close(), daemon.close()]);
   rmSync(root, { recursive: true, force: true });
   rmSync(daemonRoot, { recursive: true, force: true });
+  const failures = closed.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+  if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Runtime fixture teardown failed');
 });
 
 test('a surface composes its interactive loop without any daemon furniture', () => {
@@ -211,10 +214,13 @@ test('the inbound-dispatch seam takes the surface loop runner', async () => {
     homeDirectory: root,
     requestApproval: declineEverything,
     sessionDispatch: dispatch,
+    sessionOrchestration: client.sessionOrchestration,
   });
+  expect(withDispatch.sessionOrchestration).toBe(client.sessionOrchestration);
   withDispatch.sessionBroker.setContinuationRunner(runner);
   expect(bound).toEqual([runner]);
   await withDispatch.close();
+  expect(client.sessionOrchestration.borrowForGraphPath(client.shellPaths.resolveProjectPath('tui', 'sessions', 'task-graph.json'))).toBe(client.sessionOrchestration);
 
   // The concrete SharedSessionBroker satisfies the same seam, which is what
   // keeps a daemon-grade composition usable through the client shape.
@@ -332,7 +338,9 @@ test('real client composition refuses external MCP input in plan mode before jud
   const withoutOwner = createClientRuntimeServices({
     configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
     surfaceRoot: 'tui', workingDir: root, homeDirectory: root, requestApproval: declineEverything,
+    sessionOrchestration: client.sessionOrchestration,
   });
+  expect(withoutOwner.sessionOrchestration).toBe(client.sessionOrchestration);
   const startAsks = asks.length;
   const gate = gateReadingsPort();
   const semantic = fakePort((_name, question) => choiceAnswer(question, 'act', 0.99));
@@ -357,7 +365,12 @@ test('real client composition refuses external MCP input in plan mode before jud
     expect(gate.requests).toHaveLength(0);
     expect(semantic.requests).toHaveLength(0);
     expect(asks.length).toBe(startAsks);
-  } finally { await withoutOwner.close(); configManager.set('permissions.mode', previousMode); }
+  } finally {
+    try {
+      await withoutOwner.close();
+      expect(client.sessionOrchestration.borrowForGraphPath(client.shellPaths.resolveProjectPath('tui', 'sessions', 'task-graph.json'))).toBe(client.sessionOrchestration);
+    } finally { configManager.set('permissions.mode', previousMode); }
+  }
 });
 
 test('real client composition revokes an accepted MCP response when workspace trust changes before commit', async () => {

@@ -19,15 +19,28 @@ const PRIORITY_SCORE: Record<DistributedWorkPriority, number> = {
   default: 1,
 };
 
+/** One-way verifier of a freshly minted random pairing challenge/bearer.
+ * The persisted remote snapshot contains this verifier, never the full bearer.
+ * This is credential authentication, not an identifier or local equality tag.
+ */
 export function hashSecret(secret: string): string {
   return createHash('sha256').update(secret).digest('hex');
 }
 
+/** One authentication operation, with no process-wide credential cache. A
+ * presented token is hashed lazily once, not once for every peer on the roster.
+ */
+export function createSecretMatcher(secret: string): (expectedHash: string) => boolean {
+  let candidate: Buffer | undefined;
+  return (expectedHash) => {
+    if (!/^[a-f0-9]{64}$/.test(expectedHash)) return false;
+    candidate ??= Buffer.from(hashSecret(secret), 'hex');
+    return timingSafeEqual(candidate, Buffer.from(expectedHash, 'hex'));
+  };
+}
+
 export function matchesSecret(secret: string, expectedHash: string): boolean {
-  const candidate = Buffer.from(hashSecret(secret), 'utf8');
-  const expected = Buffer.from(expectedHash, 'utf8');
-  if (candidate.length !== expected.length) return false;
-  return timingSafeEqual(candidate, expected);
+  return createSecretMatcher(secret)(expectedHash);
 }
 
 export function randomSecret(prefix: string): string {

@@ -1,5 +1,6 @@
 /** Reconstructed from the previously qualified 23-case suite; actual manager, synthetic peers. */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
+import * as crypto from 'node:crypto';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { DistributedRuntimeManager } from '../sdk/src/platform/runtime/remote/distributed-runtime-manager.js';
@@ -42,6 +43,26 @@ function pauseNextPersist(manager: DistributedRuntimeManager) {
 }
 
 describe('host-owned distributed work admission', () => {
+  test('actual roster authentication hashes the presented token once, including a complete miss', async () => {
+    const f = await fixture(); let last = f.auth;
+    for (const label of ['Second synthetic peer', 'Third synthetic peer']) {
+      const request = await f.manager.requestPairing({ peerKind: 'device', label });
+      await f.manager.approvePairRequest(request.request.id);
+      const verified = await f.manager.verifyPairRequest(request.request.id, request.challenge);
+      if (!verified) throw new Error('Fixture pairing failed');
+      last = { peer: verified.peer, token: verified.token };
+    }
+    const hashing = spyOn(crypto, 'createHash');
+    try {
+      const found = await f.manager.authenticatePeerToken(last.token.value);
+      expect(found?.peer.id).toBe(last.peer.id);
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+      hashing.mockClear();
+      expect(await f.manager.authenticatePeerToken('gvrt_unrecognized-presented-credential')).toBeNull();
+      expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
+    } finally { hashing.mockRestore(); }
+  });
+
   test('cancellation during actual manager startup queues no work and consumes no decision', async () => {
     const f = await fixture(); const owner = authority(); const restarted = new DistributedRuntimeManager(f.path);
     cleanups.push(() => restarted.writes.drain());

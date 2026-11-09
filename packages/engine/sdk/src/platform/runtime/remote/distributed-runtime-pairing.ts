@@ -12,6 +12,7 @@ import type {
 } from './distributed-runtime-types.js';
 import {
   buildAudit,
+  createSecretMatcher,
   fingerprint,
   hashSecret,
   matchesSecret,
@@ -322,10 +323,11 @@ export async function authenticateDistributedPeerToken(
 ): Promise<DistributedPeerAuth | null> {
   await startDistributedRuntime(state);
   if (!tokenValue.trim()) return null;
+  const matches = createSecretMatcher(tokenValue);
   for (const peer of state.peers.values()) {
     for (const token of peer.tokens) {
       if (token.revokedAt) continue;
-      if (!matchesSecret(tokenValue, token.secretHash)) continue;
+      if (!matches(token.secretHash)) continue;
       const now = Date.now();
       const updatedToken: StoredPeerTokenRecord = {
         ...token,

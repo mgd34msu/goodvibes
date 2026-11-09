@@ -129,9 +129,12 @@ async function assertNoSpecialFiles(root: string, exclusions: readonly string[],
  * inspection or treating an incidental index-file rewrite as a source change.
  * Git has no native ID for the combination of staged entries and index flags.
  */
-function indexFingerprint(root: string): string {
-  return createHash('sha256').update(git(root, ['ls-files', '--stage', '-z']))
-    .update(git(root, ['ls-files', '-v', '-z'])).digest('hex');
+interface LogicalIndex { readonly entries: Buffer; readonly flags: Buffer }
+function readLogicalIndex(root: string): LogicalIndex {
+  return { entries: git(root, ['ls-files', '--stage', '-z']), flags: git(root, ['ls-files', '-v', '-z']) };
+}
+function indexFingerprint(index: LogicalIndex): string {
+  return createHash('sha256').update(index.entries).update(index.flags).digest('hex');
 }
 function objectFormat(root: string): 'sha1' | 'sha256' {
   const format = gitText(root, ['rev-parse', '--show-object-format']);
@@ -294,7 +297,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
   const ownerHead = gitText(root, ['rev-parse', 'HEAD']);
   const ownerRef = gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const originalIndex = await indexIdentity(root);
-  const index = indexFingerprint(root);
+  const index = indexFingerprint(readLogicalIndex(root));
   await assertNoSpecialFiles(root, CONTRACT_INPUT_EXCLUSIONS, signal);
   const selected = paths(root, CONTRACT_INPUT_EXCLUSIONS);
   if (options.maxFiles !== undefined && selected.length > options.maxFiles) throw new Error('contract input exceeds caller file-count budget');
@@ -327,7 +330,7 @@ async function capture(root: string, options: CaptureContractInputOptions): Prom
     // evaluates every original/captured path and must not be relaxed for UUIDs.
     const receipt: ContractInputSnapshot = { version: 2, id: randomUUID().replace(/[0-9]/g, (digit) => String.fromCharCode(107 + Number(digit))), sourceRoot: root, sourceIdentity, gitIdentity, ownerHead, ownerRef, indexFingerprint: index, inputTree, inputCommit, capturedAt: Date.now(), dirty, exclusions: [...CONTRACT_INPUT_EXCLUSIONS], files };
     check();
-    await assertContractInputOwner(receipt, signal);
+    await assertContractInputOwnerOriginal(receipt, signal, originalIndex);
     if (await indexIdentity(root) !== originalIndex) throw new Error('contract input index replaced during capture');
     check();
     return receipt;
@@ -342,6 +345,16 @@ export class ContractInputOwnerChangedError extends Error {
 
 /** Full recorded readset recheck. No writes and no best-effort empty fallback. */
 export async function assertContractInputOwner(snapshot: ContractInputSnapshot, signal?: AbortSignal): Promise<void> {
+  await assertContractInputOwnerOriginal(snapshot, signal);
+}
+
+/** The capture supplies its actual private index-file observation; a public or
+ * restored snapshot verifies its saved logical commitment once. Later awaits
+ * recheck the original physical index without retaining its potentially large,
+ * private path inventory. A changed index is read and compared in full, so an
+ * incidental rewrite with the same staged entries/flags remains acceptable.
+ */
+async function assertContractInputOwnerOriginal(snapshot: ContractInputSnapshot, signal?: AbortSignal, capturedIndex?: string): Promise<void> {
   const root = snapshot.sourceRoot;
   signal?.throwIfAborted();
   await assertOwnerGitIdle(root, signal);
@@ -349,7 +362,18 @@ export async function assertContractInputOwner(snapshot: ContractInputSnapshot, 
   if (await repositoryIdentity(root) !== snapshot.gitIdentity) throw new Error('contract input Git directory was replaced');
   if (gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']) !== snapshot.ownerRef) throw new Error('contract input owner HEAD or branch changed');
   if (gitText(root, ['rev-parse', 'HEAD']) !== snapshot.ownerHead) throw new ContractInputOwnerChangedError('head', 'contract input owner HEAD or branch changed');
-  if (indexFingerprint(root) !== snapshot.indexFingerprint) throw new ContractInputOwnerChangedError('index', 'contract input owner index changed');
+  let selectedIndex = await indexIdentity(root);
+  const indexMatches = async (): Promise<boolean> => {
+    const current = await indexIdentity(root);
+    if (current === selectedIndex) return true;
+    if (indexFingerprint(readLogicalIndex(root)) !== snapshot.indexFingerprint || await indexIdentity(root) !== current) return false;
+    selectedIndex = current;
+    return true;
+  };
+  if (capturedIndex === undefined || capturedIndex !== selectedIndex) {
+    if (indexFingerprint(readLogicalIndex(root)) !== snapshot.indexFingerprint || await indexIdentity(root) !== selectedIndex)
+      throw new ContractInputOwnerChangedError('index', 'contract input owner index changed');
+  }
   await assertNoSpecialFiles(root, snapshot.exclusions, signal);
   if (JSON.stringify(paths(root, snapshot.exclusions)) !== JSON.stringify(snapshot.files.map((file) => file.path))) throw new ContractInputOwnerChangedError('paths', 'contract input owner path set changed');
   const format = objectFormat(root);
@@ -362,7 +386,7 @@ export async function assertContractInputOwner(snapshot: ContractInputSnapshot, 
   }
   signal?.throwIfAborted();
   await assertOwnerGitIdle(root, signal);
-  if (await repositoryIdentity(root) !== snapshot.gitIdentity || directoryIdentity(await lstat(root, { bigint: true })) !== snapshot.sourceIdentity || indexFingerprint(root) !== snapshot.indexFingerprint || gitText(root, ['rev-parse', 'HEAD']) !== snapshot.ownerHead || gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']) !== snapshot.ownerRef || JSON.stringify(paths(root, snapshot.exclusions)) !== JSON.stringify(snapshot.files.map((file) => file.path))) throw new Error('contract input owner changed during recheck');
+  if (await repositoryIdentity(root) !== snapshot.gitIdentity || directoryIdentity(await lstat(root, { bigint: true })) !== snapshot.sourceIdentity || !await indexMatches() || gitText(root, ['rev-parse', 'HEAD']) !== snapshot.ownerHead || gitText(root, ['rev-parse', '--abbrev-ref', 'HEAD']) !== snapshot.ownerRef || JSON.stringify(paths(root, snapshot.exclusions)) !== JSON.stringify(snapshot.files.map((file) => file.path))) throw new Error('contract input owner changed during recheck');
 }
 
 /** Historical readers retain the recorded repository identity without requiring live owner files/HEAD. */

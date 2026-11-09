@@ -22,9 +22,10 @@
  *  - DISCLOSE, every reap that removed anything logs its counts.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs';
-import { writeFile } from 'node:fs/promises';
-import { dirname } from 'path';
+import { lstatSync, renameSync, unlinkSync } from 'node:fs';
+import { captureExistingDirectory, writeFileAtomic } from '../../utils/atomic-json-store.js';
+import { fileObservationIdentity, readFileObservation, type FileObservation } from '../../utils/file-observation.js';
+import { dirname, resolve } from 'node:path';
 import { logger } from '../../utils/logger.js';
 import { SessionTaskGraph } from './graph.js';
 import type {
@@ -47,6 +48,14 @@ import {
   reapGraphSnapshot,
   type CrossSessionGraphReapSummary,
 } from './registry-housekeeping.js';
+
+export class CrossSessionGraphUnavailableError extends Error {
+  override readonly name = 'CrossSessionGraphUnavailableError';
+  constructor(readonly kind: 'future-version' | 'source-changed' | 'unavailable', readonly fileVersion?: number) {
+    super(kind === 'future-version' ? 'Cross-session task graph requires a newer runtime; original data preserved' : 'Cross-session task graph source is unavailable; original data preserved');
+  }
+}
+const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 
 export type { CrossSessionGraphReapSummary } from './registry-housekeeping.js';
 
@@ -87,7 +96,10 @@ export class CrossSessionTaskRegistry {
   private readonly _dir: string;
   private readonly _sessionExists: ((sessionId: string) => boolean) | undefined;
   private readonly _now: () => number;
-  private _dirEnsured = false;
+  private _parent: ReturnType<typeof captureExistingDirectory> | undefined;
+  private _source: string | null = null;
+  private _publishingSource: string | undefined;
+  private _failure: CrossSessionGraphUnavailableError | undefined;
   private _flushTimer: ReturnType<typeof setTimeout> | null = null;
   private _sweepTimer: ReturnType<typeof setInterval> | null = null;
   private _lastReap: CrossSessionGraphReapSummary = EMPTY_REAP_SUMMARY;
@@ -98,8 +110,8 @@ export class CrossSessionTaskRegistry {
    * @param options - Injected seams (session-existence predicate, clock, sweep interval).
    */
   public constructor(graphPath: string, options: CrossSessionTaskRegistryOptions = {}) {
-    this._graphPath = graphPath;
-    this._dir = dirname(graphPath);
+    this._graphPath = resolve(graphPath);
+    this._dir = dirname(this._graphPath);
     this._sessionExists = options.sessionExists;
     this._now = options.now ?? Date.now;
     this._graph = new SessionTaskGraph();
@@ -108,7 +120,7 @@ export class CrossSessionTaskRegistry {
       if (this._flushTimer) {
         clearTimeout(this._flushTimer);
         this._flushTimer = null;
-        this._flushSync();
+        try { this._flushSync(); } catch (error) { logger.warn('CrossSessionTaskRegistry: exit flush refused; original graph preserved', { error: summarizeError(error) }); }
       }
     };
     process.on('exit', this._exitHandler);
@@ -116,8 +128,8 @@ export class CrossSessionTaskRegistry {
     const sweepIntervalMs = options.sweepIntervalMs ?? SWEEP_INTERVAL_MS;
     if (sweepIntervalMs > 0) {
       this._sweepTimer = setInterval(() => {
-        this.reap();
-        this._sweepQuarantine();
+        try { this.reap(); this._sweepQuarantine(); }
+        catch (error) { logger.warn('CrossSessionTaskRegistry: sweep source unavailable; original graph preserved', { error: summarizeError(error) }); }
       }, sweepIntervalMs);
       this._sweepTimer.unref?.();
     }
@@ -139,6 +151,7 @@ export class CrossSessionTaskRegistry {
     dependsOn?: { sessionId: string; taskId: string },
     reason?: string,
   ): { ok: boolean; error?: string | undefined } {
+    this._assertCurrent();
     this._graph.upsertRef(ref);
 
     if (dependsOn) {
@@ -170,6 +183,7 @@ export class CrossSessionTaskRegistry {
     taskId: string,
     status: TaskLifecycleState,
   ): boolean {
+    this._assertCurrent();
     const changed = this._graph.propagateStatus(sessionId, taskId, status);
     if (changed) this._flush();
     return changed;
@@ -230,6 +244,7 @@ export class CrossSessionTaskRegistry {
     toSessionId: string,
     reason?: string,
   ): { ok: boolean; handoffId?: string; error?: string | undefined } {
+    this._assertCurrent();
     const ref = this._graph.getRef(taskRef.sessionId, taskRef.taskId);
     if (!ref) {
       return {
@@ -266,6 +281,7 @@ export class CrossSessionTaskRegistry {
    * @returns `true` if the handoff was found and acknowledged.
    */
   public acknowledgeHandoff(handoffId: string): boolean {
+    this._assertCurrent();
     const ok = this._graph.acknowledgeHandoff(handoffId);
     if (ok) this._flush();
     return ok;
@@ -287,6 +303,7 @@ export class CrossSessionTaskRegistry {
    * @returns Result describing what was cancelled and what was skipped.
    */
   public cancel(request: CancellationRequest): CancellationResult {
+    this._assertCurrent();
     const result = this._graph.applyCancellation(request);
     if (result.ok && result.cancelled.length > 0) this._flush();
     return result;
@@ -307,18 +324,19 @@ export class CrossSessionTaskRegistry {
    * owning session is gone, refs past their TTL, dangling edges, fired or
    * aged-out handoffs, and anything over the count caps.
    *
-   * Safe to call at any time and idempotent, a second call immediately after
-   * a first reclaims nothing. Concurrent processes are safe because the reap
-   * is computed over this process's in-memory graph and persisted through the
-   * ordinary flush path; the loser of a concurrent flush simply reaps again.
+   * A second pass immediately after a first reclaims nothing. Another native
+   * writer replacing the selected graph retires this stale in-memory owner;
+   * a complete graph snapshot must never overwrite that writer's new state.
    *
    * @returns The counts reclaimed by this pass.
    */
   public reap(): CrossSessionGraphReapSummary {
+    this._assertCurrent();
     const { snapshot, summary } = reapGraphSnapshot(this._graph.snapshot(), {
       sessionExists: this._sessionExists,
       now: this._now(),
     });
+    this._assertCurrent();
     this._lastReap = summary;
     if (summary.total === 0) return summary;
 
@@ -358,14 +376,10 @@ export class CrossSessionTaskRegistry {
    * process exit handler and stopping the periodic sweep.
    */
   public dispose(): void {
-    this.flush();
-    if (this._sweepTimer !== null) {
-      clearInterval(this._sweepTimer);
-      this._sweepTimer = null;
-    }
-    if (this._exitHandler) {
-      process.removeListener('exit', this._exitHandler);
-      this._exitHandler = null;
+    try { this.flush(); }
+    finally {
+      if (this._sweepTimer !== null) { clearInterval(this._sweepTimer); this._sweepTimer = null; }
+      if (this._exitHandler) { process.removeListener('exit', this._exitHandler); this._exitHandler = null; }
     }
   }
 
@@ -379,45 +393,65 @@ export class CrossSessionTaskRegistry {
    * Surviving records are then reaped before hydration, so recovery never
    * re-imports records whose owning session is gone.
    */
-  private _load(): void {
-    this._sweepQuarantine();
-    if (!existsSync(this._graphPath)) return;
+  private _selectParent(): void {
+    if (this._parent) { this._parent.assertCurrent(); return; }
+    try { lstatSync(this._dir); } catch (error) { if (missing(error)) return; throw error; }
+    this._parent = captureExistingDirectory(this._dir);
+  }
 
-    let text: string;
+  private _readGraph(): FileObservation | null {
+    this._selectParent();
     try {
-      text = readFileSync(this._graphPath, 'utf-8');
-    } catch (e) {
-      logger.warn('CrossSessionTaskRegistry: could not read task graph', {
-        path: this._graphPath,
-        error: summarizeError(e),
-      });
-      return;
+      const source = readFileObservation(this._graphPath), stat = lstatSync(this._graphPath);
+      if (fileObservationIdentity(this._graphPath) !== source.physical || process.geteuid && stat.uid !== process.geteuid()) this._retire('unavailable');
+      this._parent?.assertCurrent(); return source;
     }
+    catch (error) { if (missing(error)) { this._parent?.assertCurrent(); return null; } throw error; }
+  }
 
-    const verdict = parseGraphFile(text);
-    if (verdict.kind === 'future') {
-      logger.warn('CrossSessionTaskRegistry: task graph written by a newer runtime, not loaded, preserved aside', {
-        path: this._graphPath,
-        fileVersion: verdict.version,
-        supportedVersion: GRAPH_SCHEMA_VERSION,
-      });
-      this._quarantine('future schema version');
-      return;
+  private _retire(kind: CrossSessionGraphUnavailableError['kind'], version?: number): never {
+    this._failure = new CrossSessionGraphUnavailableError(kind, version); throw this._failure;
+  }
+
+  /** Stat-only unchanged fast path; parse only a newly selected incarnation.
+   * An unknown newer writer never becomes empty current-version state. */
+  private _assertCurrent(): void {
+    if (this._failure) throw this._failure;
+    try {
+      this._selectParent(); let physical: string | null;
+      try { physical = fileObservationIdentity(this._graphPath); }
+      catch (error) { if (!missing(error)) throw error; physical = null; }
+      this._parent?.assertCurrent();
+      if (physical === (this._publishingSource ?? this._source)) return;
+      const changed = this._readGraph();
+      if (changed) {
+        const verdict = parseGraphFile(new TextDecoder('utf-8', { fatal: true }).decode(changed.bytes));
+        if (verdict.kind === 'future') this._retire('future-version', verdict.version);
+      }
+      this._retire('source-changed');
+    } catch (error) {
+      if (error instanceof CrossSessionGraphUnavailableError) throw error;
+      this._retire('unavailable');
     }
+  }
+
+  private _load(): void {
+    const source = this._readGraph(); this._source = source?.physical ?? null;
+    if (source === null) { this._sweepQuarantine(); this._assertCurrent(); return; }
+    let verdict: ReturnType<typeof parseGraphFile>;
+    try { verdict = parseGraphFile(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)); }
+    catch { verdict = { kind: 'corrupt', detail: 'invalid UTF-8' }; }
+    if (verdict.kind === 'future') this._retire('future-version', verdict.version);
+    this._sweepQuarantine();
     if (verdict.kind === 'corrupt') {
-      logger.warn('CrossSessionTaskRegistry: task graph failed content validation, not loaded, preserved aside', {
-        path: this._graphPath,
-        detail: verdict.detail,
-        bytes: Buffer.byteLength(text, 'utf-8'),
-      });
-      this._quarantine(verdict.detail);
-      return;
+      logger.warn('CrossSessionTaskRegistry: task graph failed content validation, not loaded, preserved aside', { path: this._graphPath, detail: verdict.detail, bytes: source.bytes.byteLength });
+      this._quarantine(verdict.detail, source); return;
     }
-
     const { snapshot, summary } = reapGraphSnapshot(verdict.snapshot, {
       sessionExists: this._sessionExists,
       now: this._now(),
     });
+    this._assertCurrent();
     this._graph.hydrate(snapshot);
 
     const hydrationSummary: CrossSessionGraphReapSummary = {
@@ -461,58 +495,42 @@ export class CrossSessionTaskRegistry {
     });
   }
 
-  /**
-   * Preserve an untrustworthy graph file aside instead of letting the next
-   * flush overwrite it. The quarantine name is fixed, so at most one such file
-   * ever exists; {@link _sweepQuarantine} ages it out.
-   */
-  private _quarantine(reason: string): void {
+  /** A second corrupt source never replaces the original forensic evidence.
+   * With one fixed quarantine slot, leave the new source intact and refuse. */
+  private _quarantine(reason: string, original: FileObservation): void {
     const quarantinePath = `${this._graphPath}${QUARANTINE_SUFFIX}`;
-    try {
-      renameSync(this._graphPath, quarantinePath);
-      logger.warn('CrossSessionTaskRegistry: preserved unreadable task graph aside', {
-        path: this._graphPath,
-        quarantinePath,
-        reason,
-      });
-    } catch (e) {
-      logger.error('CrossSessionTaskRegistry: failed to preserve unreadable task graph aside', {
-        path: this._graphPath,
-        error: summarizeError(e),
-      });
-    }
+    this._assertCurrent();
+    try { lstatSync(quarantinePath); this._retire('unavailable'); }
+    catch (error) { if (!missing(error)) throw error; }
+    this._parent?.assertCurrent();
+    if (fileObservationIdentity(this._graphPath) !== original.physical) this._retire('source-changed');
+    renameSync(this._graphPath, quarantinePath); this._source = null;
+    logger.warn('CrossSessionTaskRegistry: preserved unreadable task graph aside', { path: this._graphPath, quarantinePath, reason });
+    this._assertCurrent();
   }
 
-  /** Delete a preserved-aside graph file once it is past {@link QUARANTINE_RETENTION_MS}. ENOENT is success. */
+  /** Reap only the original single-link regular quarantine. Unknown future
+   * versions, aliases, replacements and foreign files remain available. */
   private _sweepQuarantine(): void {
-    const quarantinePath = `${this._graphPath}${QUARANTINE_SUFFIX}`;
-    let ageMs: number;
-    let bytes: number;
+    const path = `${this._graphPath}${QUARANTINE_SUFFIX}`;
     try {
-      const stat = statSync(quarantinePath);
-      ageMs = this._now() - stat.mtimeMs;
-      bytes = stat.size;
-    } catch {
-      return; // Missing quarantine file: nothing to sweep.
+      this._selectParent();
+      const source = readFileObservation(path), stat = lstatSync(path);
+      if (fileObservationIdentity(path) !== source.physical || process.geteuid && stat.uid !== process.geteuid()) return;
+      const ageMs = this._now() - stat.mtimeMs;
+      this._parent?.assertCurrent();
+      if (ageMs <= QUARANTINE_RETENTION_MS) return;
+      let verdict: ReturnType<typeof parseGraphFile>;
+      try { verdict = parseGraphFile(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)); }
+      catch { verdict = { kind: 'corrupt', detail: 'invalid UTF-8' }; }
+      if (verdict.kind === 'future') return;
+      this._parent?.assertCurrent();
+      if (fileObservationIdentity(path) !== source.physical) return;
+      unlinkSync(path);
+      logger.info('CrossSessionTaskRegistry: removed expired preserved task graph', { quarantinePath: path, ageMs, bytes: source.bytes.byteLength });
+    } catch (error) {
+      if (!missing(error)) logger.warn('CrossSessionTaskRegistry: preserved task graph cleanup unavailable', { error: summarizeError(error) });
     }
-    if (ageMs <= QUARANTINE_RETENTION_MS) return;
-    try {
-      unlinkSync(quarantinePath);
-    } catch (e) {
-      const code = (e as { code?: string }).code;
-      if (code !== 'ENOENT') {
-        logger.warn('CrossSessionTaskRegistry: failed to remove expired preserved task graph', {
-          quarantinePath,
-          error: summarizeError(e),
-        });
-      }
-      return;
-    }
-    logger.info('CrossSessionTaskRegistry: removed expired preserved task graph', {
-      quarantinePath,
-      ageMs,
-      bytes,
-    });
   }
 
   /**
@@ -523,54 +541,30 @@ export class CrossSessionTaskRegistry {
     this._scheduledFlush();
   }
 
-  /** Schedule a debounced async write (coalesces rapid successive mutations). */
+  /** Debounce the synchronous owned publication. No pending async stage can
+   * publish stale bytes after flush/dispose has already published newer state. */
   private _scheduledFlush(): void {
+    this._assertCurrent();
     if (this._flushTimer !== null) return;
-    this._flushTimer = setTimeout(async () => {
-      this._flushTimer = null;
-      try {
-        if (!this._dirEnsured) {
-          mkdirSync(this._dir, { recursive: true });
-          this._dirEnsured = true;
-        }
-        // Temp-file-plus-rename: a crash mid-write can only leave a stray temp
-        // file, never a torn graph file. The pid+timestamp suffix keeps two
-        // processes from sharing one temp path.
-        const tempPath = this._tempPath();
-        await writeFile(tempPath, JSON.stringify(this._graph.snapshot(), null, 2), 'utf-8');
-        renameSync(tempPath, this._graphPath);
-      } catch (e) {
-        logger.warn('CrossSessionTaskRegistry: failed to flush task graph', {
-          path: this._graphPath,
-          error: summarizeError(e),
-        });
-      }
-    }, 100);
+    this._flushTimer = setTimeout(() => { this._flushTimer = null; try { this._flushSync(); } catch (error) { logger.warn('CrossSessionTaskRegistry: scheduled flush refused; original graph preserved', { error: summarizeError(error) }); } }, 100);
     this._flushTimer.unref?.();
   }
 
-  /** Perform a synchronous write, used by shutdown/dispose and flush(). */
+  /** Complete the native atomic publication within this call. A failed write
+   * preserves in-memory work, but cannot overwrite another source incarnation. */
   private _flushSync(): void {
+    this._assertCurrent();
     try {
-      if (!this._dirEnsured) {
-        mkdirSync(this._dir, { recursive: true });
-        this._dirEnsured = true;
-      }
-      const snap = this._graph.snapshot();
-      const tempPath = this._tempPath();
-      writeFileSync(tempPath, JSON.stringify(snap, null, 2), 'utf-8');
-      renameSync(tempPath, this._graphPath);
-    } catch (e) {
-      // Failed persistence leaves the in-memory graph authoritative.
-      logger.warn('CrossSessionTaskRegistry: failed to flush task graph', {
-        path: this._graphPath,
-        error: summarizeError(e),
-      });
-    }
-  }
-
-  /** Per-process temp path for atomic writes. */
-  private _tempPath(): string {
-    return `${this._graphPath}.${process.pid}.${Date.now()}.tmp`;
+      const contents = JSON.stringify(this._graph.snapshot(), null, 2);
+      writeFileAtomic(this._graphPath, contents, { assertCurrent: () => this._assertCurrent(), cleanupStaleTemps: false,
+        onEffect: published => { if (published) { this._selectParent(); this._publishingSource = fileObservationIdentity(this._graphPath); } } });
+      this._assertCurrent();
+      if (this._publishingSource === undefined) this._retire('unavailable');
+      this._source = this._publishingSource;
+    } catch (error) {
+      logger.warn('CrossSessionTaskRegistry: task graph publication unavailable; original data preserved', { path: this._graphPath, error: summarizeError(error) });
+      if (error instanceof CrossSessionGraphUnavailableError || this._failure) throw this._failure ?? error;
+      this._retire('unavailable');
+    } finally { this._publishingSource = undefined; }
   }
 }

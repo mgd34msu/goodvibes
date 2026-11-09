@@ -13,7 +13,7 @@ import { afterEach, describe, expect, spyOn, test, type Mock } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { CrossSessionTaskRegistry } from '../sdk/src/platform/sessions/orchestration/registry.js';
+import { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError } from '../sdk/src/platform/sessions/orchestration/registry.js';
 import type { CrossSessionTaskRef, SessionTaskGraphSnapshot } from '../sdk/src/platform/sessions/orchestration/types.js';
 import {
   listSnapshotWorkstreamIds,
@@ -393,19 +393,12 @@ describe('cross-session task graph housekeeping', () => {
     }
   });
 
-  test('a graph written by a newer runtime is not interpreted and is preserved aside', () => {
-    const root = scratch('graph-future-');
-    const path = join(root, 'task-graph.json');
-    writeFileSync(path, JSON.stringify({ ...graphSnapshot({ refs: { 'live:t1': ref('live', 't1') } }), version: 99 }), 'utf-8');
-
-    const registry = makeRegistry(path);
-    try {
-      expect(registry.getAllRefs()).toEqual([]);
-      const preserved = JSON.parse(readFileSync(`${path}.unrecognized`, 'utf-8')) as { version: number };
-      expect(preserved.version).toBe(99);
-    } finally {
-      registry.dispose();
-    }
+  test('a newer graph stays at its original path and refuses construction before mutation or shutdown', () => {
+    const root = scratch('graph-future-'), path = join(root, 'task-graph.json');
+    const bytes = JSON.stringify({ ...graphSnapshot({ refs: { 'live:t1': ref('live', 't1') } }), version: 99 });
+    writeFileSync(path, bytes, 'utf-8');
+    expect(() => makeRegistry(path)).toThrow(CrossSessionGraphUnavailableError);
+    expect(readFileSync(path, 'utf-8')).toBe(bytes); expect(existsSync(`${path}.unrecognized`)).toBe(false);
   });
 
   test('an OLDER envelope version still hydrates (version equality no longer discards everything)', () => {

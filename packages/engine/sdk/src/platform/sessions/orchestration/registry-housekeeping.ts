@@ -82,7 +82,8 @@ const OWNERLESS_GRACE_MS = 24 * 60 * 60 * 1000;
  * 14 days: long enough that a crash noticed on Monday can still be
  * investigated the following week, short enough that a repeatedly-crashing
  * host does not keep forensic litter forever. Only ever one such file exists
- * (the quarantine name is fixed, so a later rename replaces it), so this is a
+ * (the quarantine name is fixed; a second corrupt source is refused rather
+ * than overwriting its original forensic evidence), so this is a
  * count cap of one plus an age TTL.
  */
 export const QUARANTINE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
@@ -254,8 +255,8 @@ type GraphFileVerdict =
  * envelope that no longer matches simply loses the records that fail
  * validation, and those losses are counted and disclosed. A version ABOVE the
  * current one is rejected (a newer runtime may have written fields whose
- * meaning we would misinterpret) and the file is preserved aside rather than
- * overwritten, so the newer runtime's data survives.
+ * meaning we would misinterpret) and the file stays at its original path rather than being
+ * overwritten or quarantined, so the newer runtime's data survives.
  */
 export function parseGraphFile(text: string): GraphFileVerdict {
   if (text.trim().length === 0) {

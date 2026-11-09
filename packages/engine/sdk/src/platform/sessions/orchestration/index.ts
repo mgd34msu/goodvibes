@@ -14,4 +14,4 @@ export type {
 
 export { makeRefKey, VALID_SCOPES } from './types.js';
 export { SessionTaskGraph } from './graph.js';
-export { CrossSessionTaskRegistry } from './registry.js';
+export { CrossSessionTaskRegistry, CrossSessionGraphUnavailableError } from './registry.js';

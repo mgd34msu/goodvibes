@@ -214,8 +214,8 @@ Skipping the publishing-status step means this integration silently stops workin
 2. If it is missing, install it into your home directory without root:
 3.   curl -sSLO https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-linux-x86_64.tar.gz
 4.   tar -xzf google-cloud-cli-linux-x86_64.tar.gz -C "$HOME"
-5.   "$HOME/google-cloud-platform/install.sh" --quiet
-6.   export PATH="$HOME/google-cloud-platform/bin:$PATH"
+5.   "$HOME/google-cloud-sdk/install.sh" --quiet
+6.   export PATH="$HOME/google-cloud-sdk/bin:$PATH"
 
 ### 2. Signing gcloud in to your Google account
 

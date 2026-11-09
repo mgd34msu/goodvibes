@@ -4,3 +4,4 @@ export function signalNativeProcessGroup(child: ChildProcess, signal?: NodeJS.Si
 export function assertNativeProcessGroupDrained(child: ChildProcess): void;
 export function boundedNativeProcessClose<T>(stopped: Promise<T>, milliseconds: number, message: string): Promise<T>;
 export function drainNativeProcessGroup(child: ChildProcess, stopped: Promise<unknown>): Promise<void>;
+export function runNativeArchive(members: readonly string[], cwd: string, fd: number, signal?: AbortSignal): Promise<void>;

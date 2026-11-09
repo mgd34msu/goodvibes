@@ -14,7 +14,7 @@
  *     `./platform/email`, `./platform/google`, `./platform/config`,
  *     `./platform/cluster`, `./platform/devices` and `./platform/channels`.
  *
- * `etc/goodvibes.api.md` contains no occurrence of `EmailInboxListResult`,
+ * `etc/goodvibes-platform.api.md` contains no occurrence of `EmailInboxListResult`,
  * `EmailSummary` or `ImapMessageDetail`, because `platform/src/index.ts`
  * is the CLIENT surface and re-exports none of `platform/**`. Running the
  * extractor after changing the email module produces no diff at all.

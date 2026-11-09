@@ -600,6 +600,9 @@ function currentEvidence(value: unknown, input: StaticSourceInput, selection: bo
     || value.requestedModel !== DEFAULT_MODEL || typeof value.observedModel !== 'string' || !matchesJudgmentModel(DEFAULT_MODEL, value.observedModel)
     || !(value.requestId === null || nonempty(value.requestId)) || !object(value.answers)
     || (value.captureDecisionSourceHash !== undefined && !nonempty(value.captureDecisionSourceHash))) return null;
+  const recordedStateHash = value.stateHash, recordedQuestionsHash = value.questionsHash;
+  if (typeof recordedStateHash !== 'string' || !/^[a-f0-9]{64}$/.test(recordedStateHash)
+    || typeof recordedQuestionsHash !== 'string' || !/^[a-f0-9]{64}$/.test(recordedQuestionsHash)) return null;
   const decision = selection ? (weakSelection ? staticWeakAnchor : staticOffendingAnchor) : batteryFor(input.kind);
   if (value.battery !== decision.name || value.version !== decision.version || value.site !== `${STATIC_SITE}.${input.kind}`) return null;
   const current = selection ? selectionInput(input, weakSelection)
@@ -609,9 +612,9 @@ function currentEvidence(value: unknown, input: StaticSourceInput, selection: bo
   let exact: { stateHash: string; questionsHash: string } | undefined;
   for (const wire of variants) {
     const stateHash = hashState(wire.state);
-    if (stateHash !== value.stateHash) continue;
+    if (stateHash !== recordedStateHash) continue;
     const questionsHash = sha256(canonicalJson(toJson(wire.questions)));
-    if (questionsHash !== value.questionsHash) continue;
+    if (questionsHash !== recordedQuestionsHash) continue;
     exact = { stateHash, questionsHash };
     break;
   }

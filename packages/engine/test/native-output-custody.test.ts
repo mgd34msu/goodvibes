@@ -4,20 +4,20 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { archiveNativeExecutionArtifact, nativeExecutionPayloadMembers, recordNativeExecutionArtifact } from '../../../scripts/native-execution-artifact.mjs';
-import { runNativeArchive } from '../../../scripts/native-execution-process.mjs';
-import { cleanupNativeReleaseStages, createNativeReleaseInput, createNativeReleaseOutput } from '../../../../../.github/scripts/stage-native-release-assets.mjs';
-import { makeOwnedTempDir } from '../helpers/owned-temp.js';
+import { archiveNativeExecutionArtifact, nativeExecutionPayloadMembers, recordNativeExecutionArtifact } from '../../../products/daemon/scripts/native-execution-artifact.mjs';
+import { runNativeArchive } from '../../../products/daemon/scripts/native-execution-process.mjs';
+import { cleanupNativeReleaseStages, createNativeReleaseInput, createNativeReleaseOutput } from '../../../.github/scripts/stage-native-release-assets.mjs';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 import { createReleaseStage } from '@goodvibes-jev/engine/toolchain/release-publication';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0).reverse()) rmSync(root, { recursive: true, force: true }); });
-function scratch() { const root = makeOwnedTempDir('native-output-custody'); roots.push(root); return root; }
+function scratch() { const root = makeProjectTempDir('native-output-custody'); roots.push(root); return root; }
 function nativeCohort() {
   const root = scratch(), product = join(root, 'products/daemon'); mkdirSync(product, { recursive: true });
-  copyFileSync(new URL('../../../toolchain.config.json', import.meta.url), join(product, 'toolchain.config.json'));
+  copyFileSync(new URL('../../../products/daemon/toolchain.config.json', import.meta.url), join(product, 'toolchain.config.json'));
   writeFileSync(join(product, 'package.json'), JSON.stringify({ name: '@goodvibes-jev/daemon', version: '3.1.2' }));
-  const source = { sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40), target: 'linux-x64', runId: '17', runAttempt: '2' };
+  const source = { sourceCommit: 'a'.repeat(40), sourceTree: 'b'.repeat(40), headCommit: 'c'.repeat(40), target: 'linux-x64' as const, runId: '17', runAttempt: '2' };
   const members = nativeExecutionPayloadMembers(product, source.target);
   for (const member of members) {
     const path = join(product, 'native', member.path); mkdirSync(dirname(path), { recursive: true });

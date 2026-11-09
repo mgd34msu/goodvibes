@@ -1420,6 +1420,9 @@ export function createMemoryTokenStore(initialToken?: string | null, initialExpi
 // @public
 export function createOpenTelemetryObserver(tracer: OtelTracer, meter: OtelMeter): PlatformObserver;
 
+// @public
+export function createOperatorApiClient(options: OperatorApiClientOptions): OperatorApiClient;
+
 // Warning: (ae-forgotten-export) The symbol "ContractExternalWorkAdapter" needs to be exported by the entry point index.d.ts
 //
 // @public
@@ -1429,13 +1432,10 @@ export function createOperatorContractWorkAdapter(client: Pick<OperatorRemoteCli
 export function createOperatorRemoteClient(transport: HttpTransport, contract: OperatorContractManifest, clientOptions?: OperatorRemoteClientOptions): OperatorRemoteClient;
 
 // @public
-export function createOperatorApiClient(options: OperatorApiClientOptions): OperatorApiClient;
+export function createPeerApiClient(options: PeerApiClientOptions): PeerApiClient;
 
 // @public
 export function createPeerRemoteClient(transport: HttpTransport, contract: PeerContractManifest, clientOptions?: PeerRemoteClientOptions): PeerRemoteClient;
-
-// @public
-export function createPeerApiClient(options: PeerApiClientOptions): PeerApiClient;
 
 // @public
 export function createReactNativeGoodVibesPlatform(options: ReactNativeGoodVibesPlatformOptions): ReactNativeGoodVibesPlatform;
@@ -1729,6 +1729,41 @@ export type DomainEvents<TDomain extends string, TEvent extends EventLike = Even
 
 // @public (undocumented)
 export function encodeWebSocketMessage(text: string): Generator<string>;
+
+// @public
+export type EngineErrorCode = 'AUTH_REQUIRED' | 'TOKEN_EXPIRED' | 'PERMISSION_DENIED' | 'PAYMENT_REQUIRED' | 'RATE_LIMITED' | 'NETWORK_UNREACHABLE' | 'TIMEOUT' | 'CANCELLED' | 'NOT_FOUND' | 'CONFLICT' | 'SESSION_CLOSED' | 'NOT_INVOKABLE' | 'METHOD_NOT_FOUND' | 'VALIDATION_FAILED' | 'AGENT_TIMEOUT' | 'AGENT_FAILED' | 'TOOL_EXEC_FAILED' | 'SERVICE_UNAVAILABLE' | 'CONTRACT_MISMATCH' | 'PROTOCOL_ERROR' | 'INTERNAL_ERROR' | 'ENGINE_CONFIGURATION_ERROR' | 'ENGINE_CONTRACT_ERROR' | 'ENGINE_HTTP_STATUS_ERROR' | 'UNKNOWN';
+
+// @public
+export const EngineErrorCodes: {
+    readonly AUTH_REQUIRED: "AUTH_REQUIRED";
+    readonly TOKEN_EXPIRED: "TOKEN_EXPIRED";
+    readonly PERMISSION_DENIED: "PERMISSION_DENIED";
+    readonly PAYMENT_REQUIRED: "PAYMENT_REQUIRED";
+    readonly RATE_LIMITED: "RATE_LIMITED";
+    readonly NETWORK_UNREACHABLE: "NETWORK_UNREACHABLE";
+    readonly TIMEOUT: "TIMEOUT";
+    readonly CANCELLED: "CANCELLED";
+    readonly NOT_FOUND: "NOT_FOUND";
+    readonly CONFLICT: "CONFLICT";
+    readonly SESSION_CLOSED: "SESSION_CLOSED";
+    readonly NOT_INVOKABLE: "NOT_INVOKABLE";
+    readonly METHOD_NOT_FOUND: "METHOD_NOT_FOUND";
+    readonly VALIDATION_FAILED: "VALIDATION_FAILED";
+    readonly AGENT_TIMEOUT: "AGENT_TIMEOUT";
+    readonly AGENT_FAILED: "AGENT_FAILED";
+    readonly TOOL_EXEC_FAILED: "TOOL_EXEC_FAILED";
+    readonly SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE";
+    readonly CONTRACT_MISMATCH: "CONTRACT_MISMATCH";
+    readonly PROTOCOL_ERROR: "PROTOCOL_ERROR";
+    readonly INTERNAL_ERROR: "INTERNAL_ERROR";
+    readonly ENGINE_CONFIGURATION_ERROR: "ENGINE_CONFIGURATION_ERROR";
+    readonly ENGINE_CONTRACT_ERROR: "ENGINE_CONTRACT_ERROR";
+    readonly ENGINE_HTTP_STATUS_ERROR: "ENGINE_HTTP_STATUS_ERROR";
+    readonly UNKNOWN: "UNKNOWN";
+};
+
+// @public
+export type EngineErrorKind = 'auth' | 'config' | 'contract' | 'network' | 'not-found' | 'protocol' | 'rate-limit' | 'service' | 'internal' | 'tool' | 'validation' | 'unknown';
 
 // @public (undocumented)
 export type EnvelopeSubscriber<TEvent extends EventLike> = <TType extends TEvent['type']>(type: TType, listener: (envelope: EventEnvelope<TType, EventForType<TEvent, TType>>) => void) => () => void;
@@ -2245,45 +2280,6 @@ export interface GoodVibesCloudflareWorkerOptions {
 export type GoodVibesCurrentAuth = OperatorMethodOutput<'control.auth.current'>;
 
 // @public
-export interface GoodVibesExpiringTokenStore extends GoodVibesTokenStore {
-    // (undocumented)
-    getTokenEntry(): Promise<{
-        token: string | null;
-        expiresAt?: number;
-    }>;
-    // (undocumented)
-    setTokenEntry(token: string | null, expiresAt?: number): Promise<void>;
-}
-
-// @public
-export type GoodVibesLoginInput = OperatorMethodInput<'control.auth.login'>;
-
-// @public
-export type GoodVibesLoginOutput = OperatorMethodOutput<'control.auth.login'>;
-
-// @public
-export interface GoodVibesRealtime {
-    viaSse(): RemoteRuntimeEvents<AnyRuntimeEvent>;
-    viaWebSocket(webSocketImpl?: typeof WebSocket): RemoteRuntimeEvents<AnyRuntimeEvent>;
-}
-
-// @public
-export interface GoodVibesRealtimeOptions {
-    readonly onError?: ((error: unknown) => void) | undefined;
-    readonly sseReconnect?: StreamReconnectPolicy | undefined;
-    readonly webSocketReconnect?: StreamReconnectPolicy | undefined;
-}
-
-// @public
-export interface GoodVibesPlatform {
-    readonly auth: GoodVibesAuthClient;
-    readonly operator: OperatorApiClient;
-    readonly peer: PeerApiClient;
-    readonly realtime: GoodVibesRealtime;
-    use(middleware: TransportMiddleware): void;
-}
-
-// @public
 export class GoodVibesError extends Error {
     // (undocumented)
     static [Symbol.hasInstance](value: unknown): boolean;
@@ -2365,6 +2361,32 @@ export interface GoodVibesErrorOptions {
 }
 
 // @public
+export interface GoodVibesExpiringTokenStore extends GoodVibesTokenStore {
+    // (undocumented)
+    getTokenEntry(): Promise<{
+        token: string | null;
+        expiresAt?: number;
+    }>;
+    // (undocumented)
+    setTokenEntry(token: string | null, expiresAt?: number): Promise<void>;
+}
+
+// @public
+export type GoodVibesLoginInput = OperatorMethodInput<'control.auth.login'>;
+
+// @public
+export type GoodVibesLoginOutput = OperatorMethodOutput<'control.auth.login'>;
+
+// @public
+export interface GoodVibesPlatform {
+    readonly auth: GoodVibesAuthClient;
+    readonly operator: OperatorApiClient;
+    readonly peer: PeerApiClient;
+    readonly realtime: GoodVibesRealtime;
+    use(middleware: TransportMiddleware): void;
+}
+
+// @public
 export interface GoodVibesPlatformOptions {
     readonly authToken?: string | null | undefined;
     readonly autoRefresh?: AutoRefreshOptions | undefined;
@@ -2379,6 +2401,19 @@ export interface GoodVibesPlatformOptions {
     readonly retry?: HttpRetryPolicy | undefined;
     readonly tokenStore?: GoodVibesTokenStore | undefined;
     readonly WebSocketImpl?: typeof WebSocket | undefined;
+}
+
+// @public
+export interface GoodVibesRealtime {
+    viaSse(): RemoteRuntimeEvents<AnyRuntimeEvent>;
+    viaWebSocket(webSocketImpl?: typeof WebSocket): RemoteRuntimeEvents<AnyRuntimeEvent>;
+}
+
+// @public
+export interface GoodVibesRealtimeOptions {
+    readonly onError?: ((error: unknown) => void) | undefined;
+    readonly sseReconnect?: StreamReconnectPolicy | undefined;
+    readonly webSocketReconnect?: StreamReconnectPolicy | undefined;
 }
 
 // @public
@@ -2717,7 +2752,7 @@ export type KnowledgeEvent = {
 * **Integration note:** Emission sites live in `platform/knowledge`. Wire by calling
 * `bus.emit('knowledge', { type: 'KNOWLEDGE_INGEST_PROGRESS', ... })` at each
 * phase-transition or item-complete checkpoint in the ingest pipeline. The contract
-* is defined here so SDK consumers can subscribe without depending on the internal
+* is defined here so platform consumers can subscribe without depending on the internal
 * knowledge module.
 *
 * **Scope note:** `operationId` is operation-scoped (not task-scoped). See `lifecycle.ts`
@@ -3121,6 +3156,21 @@ export const OPERATOR_METHOD_IDS: readonly ["accounts.snapshot", "acp.agents.lis
 
 // @public
 export const OPERATOR_WORK_CANCEL_REASON = "cancelled by the requester";
+
+// @public
+export type OperatorApiClient = Omit<OperatorRemoteClient, 'getOperation'> & {
+    readonly transport: HttpTransport;
+    getOperation(methodId: OperatorMethodId): OperatorMethodContract;
+    dispose(): void;
+    asyncDispose(): Promise<void>;
+    [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
+};
+
+// @public
+export interface OperatorApiClientOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> {
+    readonly validateResponses?: boolean | undefined;
+}
 
 // @public (undocumented)
 export interface OperatorContractManifest {
@@ -34858,21 +34908,6 @@ export interface OperatorSchemaCoverageContract {
     readonly typedOutputs: number;
 }
 
-// @public
-export type OperatorApiClient = Omit<OperatorRemoteClient, 'getOperation'> & {
-    readonly transport: HttpTransport;
-    getOperation(methodId: OperatorMethodId): OperatorMethodContract;
-    dispose(): void;
-    asyncDispose(): Promise<void>;
-    [Symbol.dispose](): void;
-    [Symbol.asyncDispose](): Promise<void>;
-};
-
-// @public
-export interface OperatorApiClientOptions extends HttpTransportOptions, Pick<OperatorRemoteClientOptions, 'regexReading' | 'getRegexReading'> {
-    readonly validateResponses?: boolean | undefined;
-}
-
 // @public (undocumented)
 export type OperatorStreamMethodId = Extract<OperatorTypedMethodId, 'companion.chat.events.stream' | 'control.events.stream' | 'telemetry.stream'>;
 
@@ -35162,6 +35197,24 @@ export const PEER_CONTRACT: PeerContractManifest;
 
 // @public (undocumented)
 export const PEER_ENDPOINT_IDS: readonly ["operator.snapshot", "pair.request", "pair.verify", "peer.heartbeat", "work.complete", "work.pull"];
+
+// @public
+export type PeerApiClient = Omit<PeerRemoteClient, 'getOperation'> & {
+    readonly transport: HttpTransport;
+    getOperation(endpointId: PeerEndpointId): PeerEndpointContract;
+    dispose(): void;
+    asyncDispose(): Promise<void>;
+    [Symbol.dispose](): void;
+    [Symbol.asyncDispose](): Promise<void>;
+};
+
+// @public
+export interface PeerApiClientBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> {
+    readonly validateResponses?: boolean | undefined;
+}
+
+// @public
+export type PeerApiClientOptions = HttpTransportOptions & PeerApiClientBehaviorOptions;
 
 // @public (undocumented)
 export interface PeerContractManifest {
@@ -35818,24 +35871,6 @@ export interface PeerRemoteClientOptions {
     readonly validateResponses?: boolean | undefined;
 }
 
-// @public
-export type PeerApiClient = Omit<PeerRemoteClient, 'getOperation'> & {
-    readonly transport: HttpTransport;
-    getOperation(endpointId: PeerEndpointId): PeerEndpointContract;
-    dispose(): void;
-    asyncDispose(): Promise<void>;
-    [Symbol.dispose](): void;
-    [Symbol.asyncDispose](): Promise<void>;
-};
-
-// @public
-export interface PeerApiClientBehaviorOptions extends Pick<PeerRemoteClientOptions, 'regexReading' | 'getRegexReading'> {
-    readonly validateResponses?: boolean | undefined;
-}
-
-// @public
-export type PeerApiClientOptions = HttpTransportOptions & PeerApiClientBehaviorOptions;
-
 // @public (undocumented)
 export type PeerTypedEndpointId = PeerEndpointId;
 
@@ -35933,6 +35968,14 @@ export type PlannerEvent = ({
 
 // @public (undocumented)
 export type PlannerEventType = PlannerEvent['type'];
+
+// @public
+export interface PlatformObserver extends TransportObserver {
+    onAuthTransition?(transition: AuthTransitionInfo): void;
+    onError?(err: GoodVibesError): void;
+    onEvent?(event: AnyRuntimeEvent): void;
+    onTransportActivity?(activity: TransportActivityInfo): void;
+}
 
 // @public
 export type PluginEvent =
@@ -36176,14 +36219,6 @@ export interface RawServerSentEventOptions {
 }
 
 // @public (undocumented)
-export interface ReactNativeGoodVibesRealtime {
-    // (undocumented)
-    runtime(): RemoteRuntimeEvents<RuntimeEventRecord>;
-    // (undocumented)
-    viaWebSocket(webSocketImpl?: typeof WebSocket): RemoteRuntimeEvents<RuntimeEventRecord>;
-}
-
-// @public (undocumented)
 export type ReactNativeGoodVibesPlatform = Omit<GoodVibesPlatform, 'realtime'> & {
     readonly realtime: ReactNativeGoodVibesRealtime;
 };
@@ -36192,6 +36227,14 @@ export type ReactNativeGoodVibesPlatform = Omit<GoodVibesPlatform, 'realtime'> &
 export interface ReactNativeGoodVibesPlatformOptions extends GoodVibesPlatformOptions {
     // (undocumented)
     readonly WebSocketImpl?: typeof WebSocket | undefined;
+}
+
+// @public (undocumented)
+export interface ReactNativeGoodVibesRealtime {
+    // (undocumented)
+    runtime(): RemoteRuntimeEvents<RuntimeEventRecord>;
+    // (undocumented)
+    viaWebSocket(webSocketImpl?: typeof WebSocket): RemoteRuntimeEvents<RuntimeEventRecord>;
 }
 
 // @public (undocumented)
@@ -36675,49 +36718,6 @@ export type RuntimeEventTurnScope = 'session-current' | 'off' | {
 export type RuntimeEventTypedDomain = keyof RuntimeDomainEventPayloadMap & string;
 
 // @public
-export type EngineErrorCode = 'AUTH_REQUIRED' | 'TOKEN_EXPIRED' | 'PERMISSION_DENIED' | 'PAYMENT_REQUIRED' | 'RATE_LIMITED' | 'NETWORK_UNREACHABLE' | 'TIMEOUT' | 'CANCELLED' | 'NOT_FOUND' | 'CONFLICT' | 'SESSION_CLOSED' | 'NOT_INVOKABLE' | 'METHOD_NOT_FOUND' | 'VALIDATION_FAILED' | 'AGENT_TIMEOUT' | 'AGENT_FAILED' | 'TOOL_EXEC_FAILED' | 'SERVICE_UNAVAILABLE' | 'CONTRACT_MISMATCH' | 'PROTOCOL_ERROR' | 'INTERNAL_ERROR' | 'ENGINE_CONFIGURATION_ERROR' | 'ENGINE_CONTRACT_ERROR' | 'ENGINE_HTTP_STATUS_ERROR' | 'UNKNOWN';
-
-// @public
-export const EngineErrorCodes: {
-    readonly AUTH_REQUIRED: "AUTH_REQUIRED";
-    readonly TOKEN_EXPIRED: "TOKEN_EXPIRED";
-    readonly PERMISSION_DENIED: "PERMISSION_DENIED";
-    readonly PAYMENT_REQUIRED: "PAYMENT_REQUIRED";
-    readonly RATE_LIMITED: "RATE_LIMITED";
-    readonly NETWORK_UNREACHABLE: "NETWORK_UNREACHABLE";
-    readonly TIMEOUT: "TIMEOUT";
-    readonly CANCELLED: "CANCELLED";
-    readonly NOT_FOUND: "NOT_FOUND";
-    readonly CONFLICT: "CONFLICT";
-    readonly SESSION_CLOSED: "SESSION_CLOSED";
-    readonly NOT_INVOKABLE: "NOT_INVOKABLE";
-    readonly METHOD_NOT_FOUND: "METHOD_NOT_FOUND";
-    readonly VALIDATION_FAILED: "VALIDATION_FAILED";
-    readonly AGENT_TIMEOUT: "AGENT_TIMEOUT";
-    readonly AGENT_FAILED: "AGENT_FAILED";
-    readonly TOOL_EXEC_FAILED: "TOOL_EXEC_FAILED";
-    readonly SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE";
-    readonly CONTRACT_MISMATCH: "CONTRACT_MISMATCH";
-    readonly PROTOCOL_ERROR: "PROTOCOL_ERROR";
-    readonly INTERNAL_ERROR: "INTERNAL_ERROR";
-    readonly ENGINE_CONFIGURATION_ERROR: "ENGINE_CONFIGURATION_ERROR";
-    readonly ENGINE_CONTRACT_ERROR: "ENGINE_CONTRACT_ERROR";
-    readonly ENGINE_HTTP_STATUS_ERROR: "ENGINE_HTTP_STATUS_ERROR";
-    readonly UNKNOWN: "UNKNOWN";
-};
-
-// @public
-export type EngineErrorKind = 'auth' | 'config' | 'contract' | 'network' | 'not-found' | 'protocol' | 'rate-limit' | 'service' | 'internal' | 'tool' | 'validation' | 'unknown';
-
-// @public
-export interface PlatformObserver extends TransportObserver {
-    onAuthTransition?(transition: AuthTransitionInfo): void;
-    onError?(err: GoodVibesError): void;
-    onEvent?(event: AnyRuntimeEvent): void;
-    onTransportActivity?(activity: TransportActivityInfo): void;
-}
-
-// @public
 export type SecurityEvent =
 /** A token was found to hold scopes beyond its policy's allowedScopes. */
     {
@@ -37125,7 +37125,7 @@ export type TaskEvent =
 *
 * **Integration note:** Emission sites live in `platform/batch`. Wire by calling
 * `bus.emit('tasks', { type: 'BATCH_JOB_PROGRESS', ... })` at each item-complete
-* checkpoint inside the batch runner. The contract is defined here so SDK consumers
+* checkpoint inside the batch runner. The contract is defined here so platform consumers
 * can subscribe to it without depending on the internal batch module.
 *
 * **Scope note:** `operationId` is operation-scoped (not task-scoped). See `lifecycle.ts`
@@ -37148,7 +37148,7 @@ export type TaskEvent =
 *
 * **Integration note:** Emission sites live in `platform/export`. Wire by calling
 * `bus.emit('tasks', { type: 'EXPORT_PROGRESS', ... })` at each record-write
-* checkpoint inside the export runner. The contract is defined here so SDK consumers
+* checkpoint inside the export runner. The contract is defined here so platform consumers
 * can subscribe without depending on the internal export module.
 *
 * **Scope note:** `operationId` is operation-scoped (not task-scoped). See `lifecycle.ts`
@@ -38086,7 +38086,7 @@ export type YesNoVerdict = (typeof YES_NO_VERDICTS)[number];
 
 // Warnings were encountered during analysis:
 //
-// sdk/src/events/turn.ts:157:134 - (ae-forgotten-export) The symbol "TurnCompletedMetadata" needs to be exported by the entry point index.d.ts
+// platform/src/events/turn.ts:157:134 - (ae-forgotten-export) The symbol "TurnCompletedMetadata" needs to be exported by the entry point index.d.ts
 
 // (No @packageDocumentation comment for this package)
 

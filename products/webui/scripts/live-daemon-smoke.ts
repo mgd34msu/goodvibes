@@ -187,7 +187,7 @@ async function main(): Promise<void> {
     // at module evaluation). A loopback http origin is a secure context, so the engine transport
     // guard does not fire.
     process.env.VITE_GOODVIBES_BASE_URL = daemon.url;
-    const { engine } = await import('../src/lib/goodvibes');
+    const { client: engine } = await import('../src/lib/goodvibes');
     const { SESSION_UPDATE_WIRE_EVENT } = await import('../src/lib/sessions-union');
     await engine.auth.setToken(TOKEN);
 

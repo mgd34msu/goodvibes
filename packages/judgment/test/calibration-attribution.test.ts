@@ -7,7 +7,6 @@ import {
   actionOf,
   calibrate,
   defineBattery,
-  hashState,
   isoTime,
   noul,
   SqliteDecisionLog,
@@ -28,6 +27,7 @@ import {
   type NamedDecision,
   type NewDecisionEntry,
   type Questions,
+  type StateHash,
 } from '../src/index.ts';
 import { fakePort, noulAnswer } from '../src/testing/fake-port.ts';
 
@@ -38,6 +38,9 @@ const questions = { q: noul('Is it urgent?') };
 const context = { site: 'calibration', battery: name, fixture: 'shared' };
 const boundedQuery = { site: 'calibration', status: 'answered', limit: 100_000 } as const;
 const answering = () => fakePort(() => noulAnswer(0.95)).port;
+// Attribution uses recorded IDs/context/truth, never this synthetic field's
+// source digest. Actual withDecisionLog calls below still record real hashes.
+const shapeOnlyStateHash = 'b'.repeat(64) as StateHash;
 
 const battery = defineBattery({
   name,
@@ -58,7 +61,7 @@ function decision(run: NamedDecision['checkFixtures']): NamedDecision {
 
 function answered(callContext: DecisionContext = context): Extract<NewDecisionEntry, { status: 'answered' }> {
   return {
-    at: isoTime(fixedNow()), context: callContext, stateHash: hashState('urgent'), questions: toJson(questions),
+    at: isoTime(fixedNow()), context: callContext, stateHash: shapeOnlyStateHash, questions: toJson(questions),
     requestedModel: 'jev-1.13.0', model: 'jev-1.13.0', status: 'answered', answers: { q: noulAnswer(0.95) },
     usage: { inputTokens: 1, outputTokens: 1 }, latencyMs: 1, requestId: undefined,
   };

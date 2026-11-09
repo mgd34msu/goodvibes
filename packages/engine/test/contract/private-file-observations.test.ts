@@ -4,7 +4,7 @@ import * as crypto from 'node:crypto';
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from '../_helpers/project-temp.js';
-import { hashState, toJson } from '@goodvibes-jev/judgment';
+import { toJson } from '@goodvibes-jev/judgment';
 import { contractWorkReceipts, workReceiptIdentity } from '../../platform/src/platform/contract/work-receipts.js';
 import { currentFileObservations, currentFileMatchesText, isCurrentNativeFileObservation } from '../../platform/src/platform/contract/current-file-observations.js';
 import { reviewedFileFromObservation, reviewedFileVersionState } from '../../platform/src/platform/contract/review-file-observations.js';
@@ -70,15 +70,15 @@ test('actual owned checkpoint restart preserves unchanged refusal and repair sou
     returnedRanges: ['1-1'], returnedLines: 1 }];
   const observe = (contract: typeof f.contract) => currentFileObservations(f.root, ['report.md'], { owner: contract });
   const originalFiles = observe(f.contract);
-  // Both actual consumers are used: completion's evidence digest and the
-  // repair candidate's workReceiptIdentity source scope.
-  const refusalDigest = hashState({ currentFiles: originalFiles });
+  // Compare the actual native projections across owned restart. These local
+  // values are not independently recorded completion/repair commitments.
+  const expectedFiles = structuredClone(originalFiles);
   const repairIdentity = (contract: typeof f.contract) => {
     const value = toJson(workReceiptIdentity(contractWorkReceipts(contract, { readObservations: true })));
     if (value === null || typeof value !== 'object' || Array.isArray(value)) throw new Error('Missing native work receipt object');
     return value;
   };
-  const repairDigest = hashState(repairIdentity(f.contract));
+  const expectedRepair = repairIdentity(f.contract);
   f.store.hold(f.contract); expect(f.store.write(f.contract.id)).toBe(true);
   const envelope = JSON.parse(readFileSync(contractPath(f.root, f.contract.id), 'utf8'));
   expect(envelope.nativeFileLabels.entries).toHaveLength(2);
@@ -86,16 +86,16 @@ test('actual owned checkpoint restart preserves unchanged refusal and repair sou
   expect(JSON.stringify(restored)).not.toContain('nativeFileLabels');
   expect(JSON.stringify(restored)).not.toContain('nativeFileObservation');
   const restoredFiles = observe(restored);
-  expect(hashState({ currentFiles: restoredFiles })).toBe(refusalDigest);
-  expect(hashState(repairIdentity(restored))).toBe(repairDigest);
+  expect(restoredFiles).toEqual(expectedFiles);
+  expect(repairIdentity(restored)).toEqual(expectedRepair);
   expect(currentFileMatchesText(restoredFiles[0]!, 'Ready.\n')).toBe(true);
   expect(currentFileMatchesText(structuredClone(restoredFiles[0]!), 'Ready.\n')).toBe(false);
   // Public import cannot seed those labels, even from the same saved bytes.
   const imported = deserializeContract(JSON.stringify(envelope))!;
-  expect(hashState({ currentFiles: observe(imported) })).not.toBe(refusalDigest);
+  expect(observe(imported)).not.toEqual(expectedFiles);
   // An identical-byte replacement cannot adopt the saved old observation label.
   const stage = join(f.root, 'replacement.md'); writeFileSync(stage, 'Ready.\n'); renameSync(stage, f.path);
-  expect(hashState({ currentFiles: observe(restored) })).not.toBe(refusalDigest);
+  expect(observe(restored)).not.toEqual(expectedFiles);
 });
 
 test('changing source bytes with the same observation pointer and restored mtime cannot adopt replacement evidence', () => {

@@ -3,13 +3,14 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { actionOf, hashState, isoTime, readingsOf, SqliteDecisionLog, truthOf, type DecisionTruth, type NewDecisionEntry } from '../src/index.ts';
+import { actionOf, isoTime, readingsOf, SqliteDecisionLog, truthOf, type DecisionTruth, type NewDecisionEntry, type StateHash } from '../src/index.ts';
 
 const collisionUuid = '01a126ad-991e-7023-9665-055983b11cdd';
 const encodedCollision = 'abkbcgkn-jjbo-hacd-jggf-affjidlbbmnn';
 const entry: NewDecisionEntry = {
   at: isoTime(new Date('2026-10-01T00:00:00Z')), context: { battery: 'test.identifiers', site: 'calibration', fixture: 'one' },
-  stateHash: hashState('one'), requestedModel: 'test', model: 'test', status: 'answered', questions: {}, answers: {},
+  // Identifier/entry persistence tests consume only this field's valid shape.
+  stateHash: 'a'.repeat(64) as StateHash, requestedModel: 'test', model: 'test', status: 'answered', questions: {}, answers: {},
   latencyMs: 1, usage: { inputTokens: 1, outputTokens: 1 }, requestId: undefined,
 };
 const truth: DecisionTruth = { source: 'fixture', checks: [

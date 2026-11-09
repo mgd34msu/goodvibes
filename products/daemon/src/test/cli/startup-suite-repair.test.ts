@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { suiteReleaseFixture } from '@goodvibes-jev/engine/toolchain/testing/suite-release';
 import { captureUpdateFileIo, realUpdateFileIo, createInstalledReaderCohort, nativeReaderCapabilities } from '@goodvibes-jev/engine/platform/platform/runtime/self-update';
@@ -9,12 +9,24 @@ import { parseDaemonCli } from '../../cli/parser.js';
 import { repairDaemonSuiteBeforeStartup } from '../../cli/startup-suite-repair.js';
 import { EventEmitter } from 'node:events';
 import { runConfiguredDaemonCli } from '../../cli/serve.js';
+import { makeOwnedTempDir } from '../helpers/owned-temp.js';
 import type { DaemonUpdateArtifact } from '@goodvibes-jev/engine/platform/platform/daemon';
 
 class ProcessTarget extends EventEmitter { readonly exits: number[] = []; exit(code: 0 | 1): void { this.exits.push(code); } }
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
-function fixture(auto = true) {
+function configurationFixture(auto = true, suite?: Pick<ReturnType<typeof suiteReleaseFixture>, 'root' | 'webui'>) {
+  const root = suite?.root ?? makeOwnedTempDir('startup-suite-configuration');
+  if (!suite) cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, 'home'), settings = join(home, '.goodvibes', 'daemon', 'settings.json');
+  mkdirSync(dirname(settings), { recursive: true });
+  writeFileSync(settings, JSON.stringify({ update: { auto, releasesUrl: 'https://example.test/releases/latest' },
+    controlPlane: { webui: { serve: true, bundleDir: suite?.webui ?? join(root, 'webui', '3.1.3') } } }));
+  const env = { HOME: home }, flags = parseDaemonCli(['serve']).flags;
+  const configuration = createDaemonCliConfiguration(flags, env, root, { readOnly: true, diagnosticMode: 'structural' });
+  return { root, configuration, env, settings };
+}
+function fixture() {
   const f = suiteReleaseFixture(); cleanups.push(() => f.cleanup());
   const daemon = join(f.root, 'goodvibes-daemon');
   // Historical daemon-only update: the daemon's selected version is current,
@@ -26,18 +38,14 @@ function fixture(auto = true) {
   ]) writeFileSync(join(f.root, relative!), f.release.get(asset!)!);
   unlinkSync(join(f.root, 'goodvibes.readers.json')); unlinkSync(join(f.root, 'goodvibes-agent.readers.json'));
   unlinkSync(join(f.root, '.goodvibes-reader-requirements.json'));
-  const home = join(f.root, 'home'), settings = join(home, '.goodvibes', 'daemon', 'settings.json');
-  mkdirSync(dirname(settings), { recursive: true });
-  writeFileSync(settings, JSON.stringify({ update: { auto, releasesUrl: 'https://example.test/releases/latest' }, controlPlane: { webui: { serve: true, bundleDir: f.webui } } }));
-  const env = { HOME: home }, flags = parseDaemonCli(['serve']).flags;
-  const configuration = createDaemonCliConfiguration(flags, env, f.root, { readOnly: true, diagnosticMode: 'structural' });
+  const configured = configurationFixture(true, f);
   const ownFiles = [daemon, daemon + '.readers.json', ...['lib/sqlite-vec-darwin-x64/vec0.dylib', 'lib/sqlite-darwin-x64/libsqlite3.dylib', 'lib/sqlite-darwin-x64/libsqlite3.dylib.json'].map(path => join(f.root, path))];
   const current = retainNativeUpdateSources(ownFiles, captureUpdateFileIo(realUpdateFileIo));
   // Code-owned OS-admission port only: inert byte fixtures are never executed
   // as a native daemon. All subsequent suite verification/publication is real.
   const artifact: DaemonUpdateArtifact = { suite: true, execPath: daemon, version: '3.1.3', assertCurrent: current,
     currentReader: { readers: nativeReaderCapabilities('3.1.3'), assertCurrent: current } };
-  return { ...f, daemon, configuration, env, settings, artifact, current };
+  return { ...f, ...configured, daemon, artifact, current };
 }
 
 test('a current daemon with historical sibling profiles repairs the real suite before any new data floor', async () => {
@@ -71,9 +79,9 @@ test('a current daemon with historical sibling profiles repairs the real suite b
 });
 
 test('saved automatic-update opt-out admits no repair, download or replacement process', async () => {
-  const f = fixture(false); let admissions = 0, downloads = 0, restarts = 0;
+  const f = configurationFixture(false); let admissions = 0, downloads = 0, restarts = 0;
   expect(await repairDaemonSuiteBeforeStartup({ configuration: f.configuration, argv: ['serve'], env: f.env, signal: new AbortController().signal,
-    print() {}, platform: 'darwin', arch: 'x64' }, { admit() { admissions++; return f.artifact; },
+    print() {}, platform: 'darwin', arch: 'x64' }, { admit() { admissions++; throw new Error('Must not admit'); },
     async fetchImpl() { downloads++; throw new Error('Must not fetch'); }, async restart() { restarts++; return 0; } })).toBe(false);
   expect([admissions, downloads, restarts]).toEqual([0, 0, 0]);
 });
@@ -88,7 +96,7 @@ test('missing release evidence fails before data writes or relaunch', async () =
 
 
 test('shutdown fences and drains the original startup preparation before any graph or token acquisition', async () => {
-  const f = fixture(), target = new ProcessTarget(), entered = Promise.withResolvers<AbortSignal>(), release = Promise.withResolvers<void>();
+  const f = configurationFixture(), target = new ProcessTarget(), entered = Promise.withResolvers<AbortSignal>(), release = Promise.withResolvers<void>();
   let graphStarts = 0;
   const handle = runConfiguredDaemonCli(f.configuration, { inboxFactory() { graphStarts++; throw new Error('Graph must not start'); } }, f.env,
     { process: target }, () => {}, () => {}, undefined, async signal => { entered.resolve(signal); await release.promise; return null; });

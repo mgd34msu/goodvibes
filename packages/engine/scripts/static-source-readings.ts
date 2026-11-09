@@ -153,6 +153,11 @@ export function staticInputKey(input: StaticSourceInput): string {
 }
 
 const object = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const hasOwnEntry = (value: unknown): boolean => {
+  if (!object(value)) return false;
+  for (const key in value) if (Object.hasOwn(value, key)) return true;
+  return false;
+};
 const probability = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 const nonempty = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
 const ownValue = (values: Readonly<Record<string, unknown>> | undefined, key: string): unknown =>
@@ -524,9 +529,10 @@ export async function readStaticInput(port: JudgmentPort, log: DecisionLog, inpu
       // No saved lookup exists without progress. Compute one key for these
       // synchronous original/previous lookups; later receipt publication still
       // binds the actual current input, including changes across an await.
-      const original = progress ? (() => {
+      const originalReadings = progress?.original?.readings, previousReadings = progress?.previous.readings;
+      const original = hasOwnEntry(originalReadings) || hasOwnEntry(previousReadings) ? (() => {
         const key = staticInputKey(current);
-        return ownValue(progress.original?.readings, key) ?? ownValue(progress.previous.readings, key) ?? inherited;
+        return ownValue(originalReadings, key) ?? ownValue(previousReadings, key) ?? inherited;
       })() : inherited;
       const options = { site: `${STATIC_SITE}.${current.kind}`, ...(signal ? { signal } : {}) };
       let presence = prior && object(prior) ? receiptEvidence(current, prior, false, sourceHash, progress?.previous.captureSources ?? {}, progress?.previous.captureBatterySources ?? {}) : null;
@@ -672,12 +678,9 @@ function capturePolicyMatches(captureHash: unknown, kind: StaticRule, manifests:
 /** Produce explicit revalidation provenance, retaining original captures and any held observations. */
 export function revalidateStaticInput(input: StaticSourceInput, readings: StaticSourceReadings | null): unknown | null {
   return withStaticSourcePolicyPass(() => {
-    if (!readings || !object(readings.readings)) return null;
+    if (!readings || !hasOwnEntry(readings.readings)) return null;
     // Stop on the first own entry: a large stored set is checked for every
     // input, so allocating its complete key array here would be quadratic.
-    let candidate = false;
-    for (const key in readings.readings) if (Object.hasOwn(readings.readings, key)) { candidate = true; break; }
-    if (!candidate) return null;
     return revalidateReceipt(input, ownValue(readings.readings, staticInputKey(input)), readings);
   });
 }

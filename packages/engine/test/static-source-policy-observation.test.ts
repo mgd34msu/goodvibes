@@ -30,7 +30,7 @@ test('missing or empty static stores and non-object receipts do not hash an impo
   } finally { hash.mockRestore(); }
 });
 
-for (const failed of [false, true]) test(`an actual no-progress static read computes only its published key (failed=${failed})`, async () => {
+for (const withProgress of [false, true]) for (const failed of [false, true]) test(`a static read without saved candidates hashes only published receipts (progress=${withProgress}, failed=${failed})`, async () => {
   const input = captureStaticInputs('internal-identifier', 'platform/src/example.ts', 'const value = 3;')[0]!;
   const expectedInput = canonicalJson(toJson(input));
   const native = crypto.createHash; let inputKeys = 0;
@@ -45,10 +45,12 @@ for (const failed of [false, true]) test(`an actual no-progress static read comp
   using log = new SqliteDecisionLog(':memory:');
   const model = fakePort(() => { if (failed) throw new Error('Original unavailable fixture'); return noulAnswer(0.01); });
   try {
-    const reading = readStaticInput(withDecisionLog(model.port, log), log, input);
+    const reading = readStaticInput(withDecisionLog(model.port, log), log, input, undefined, withProgress ? {
+      previous: { format: 1, decisionSourceHash: 'no-saved-candidates', readings: {} }, onReceipt() {},
+    } : undefined);
     if (failed) await expect(reading).rejects.toThrow();
     else expect((await reading).inputHash).toEqual(expect.any(String));
-    expect(inputKeys).toBe(failed ? 0 : 1);
+    expect(inputKeys).toBe(failed ? 0 : withProgress ? 2 : 1);
   } finally { hash.mockRestore(); }
 });
 const scripts = resolve(import.meta.dir, '../scripts'), packages = resolve(scripts, '../..');

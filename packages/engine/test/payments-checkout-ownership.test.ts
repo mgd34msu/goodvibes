@@ -21,7 +21,6 @@ import { usePaymentsReadings } from './helpers/payments-readings.ts';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { withExecutionMode } from '../sdk/src/platform/gate/execution-context.js';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../sdk/src/platform/payments/checkout-window-checkpoint.js';
-import { PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
 
 const readings = usePaymentsReadings();
 const roots: string[] = [];

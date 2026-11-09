@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { JudgmentError } from '@goodvibes-jev/judgment';
-import { PaymentReplyInbox, PaymentReplyInboxClosedError, PaymentReplyWindowError } from '../sdk/src/platform/payments/reply-inbox.js';
+import { PaymentReplyInbox, PaymentReplyInboxClosedError } from '../sdk/src/platform/payments/reply-inbox.js';
 import { createChannelPaymentNotifier } from '../sdk/src/platform/payments/notice-delivery.js';
 import { runCheckout, type CheckoutFlowDeps } from '../sdk/src/platform/payments/checkout-flow.js';
 import { CheckoutRegistry, MemoryCheckoutJournal, type CheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
@@ -109,11 +109,11 @@ test('decision-model exhaustion while reading an owner veto cannot later buy on 
   let replaced = false;
   try {
     await Promise.race([opened, purchase.then(() => { throw new Error('Checkout never opened its veto window'); })]);
-    previous = installJudgmentPort({ model: 'fixture-unavailable', async ask() { throw new JudgmentError('unavailable', 'No decision models are available'); } });
+    const unavailable = new JudgmentError('unavailable', 'No decision models are available');
+    previous = installJudgmentPort({ model: 'fixture-unavailable', async ask() { throw unavailable; } });
     replaced = true;
-    await expect(inbox.offer('telegram', 'stop')).rejects.toBeInstanceOf(JudgmentError);
-    await expect(purchase).rejects.toBeInstanceOf(PaymentReplyWindowError);
-    await expect(purchase).rejects.toMatchObject({ kind: 'reading-failed' });
+    await expect(inbox.offer('telegram', 'stop')).rejects.toBe(unavailable);
+    await expect(purchase).rejects.toBe(unavailable);
     expect(inbox.pending).toBe(0);
     expect(outward).toEqual([]);
     expect(await journal.list()).toEqual([]);

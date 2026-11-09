@@ -178,7 +178,7 @@ test('retiring the poller during semantic reading cannot settle its late answer'
   });
 });
 
-test('identity verification still in flight at the deadline is not owner silence and remains owned until drained', async () => {
+test('identity verification in flight cannot establish missing pre-notice source custody and remains owned until drained', async () => {
   let release!: () => void, entered!: () => void;
   const pending = new Promise<void>(resolve => { release = resolve; }), admitted = new Promise<void>(resolve => { entered = resolve; });
   let clock = 1;
@@ -188,7 +188,9 @@ test('identity verification still in flight at the deadline is not owner silence
   const observedOffer = offer.catch(error => error as unknown);
   await admitted;
   clock = 1000; f.inbox.inspect();
-  await expect(f.waiting).rejects.toMatchObject({ kind: 'unsettled-reply' });
+  // This window deliberately has no retained pre-notice receive source.
+  // An independently acquired reply account cannot retrofit that custody.
+  await expect(f.waiting).rejects.toMatchObject({ kind: 'source-unavailable' });
   let drained = false; const closing = f.inbox.close().then(() => { drained = true; });
   await Promise.resolve(); expect(drained).toBe(false);
   release(); await observedOffer; await closing; expect(drained).toBe(true);

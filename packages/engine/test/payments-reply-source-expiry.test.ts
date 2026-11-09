@@ -210,6 +210,28 @@ test('a reply admitted before expiry remains on time across slow account verific
   });
 });
 
+test('completed original receive coverage cannot turn an in-flight owner reply into quiet expiry and close drains it', async () => {
+  await withPaymentsReadings({}, async requests => {
+    const account = source(), f = await window(account, '123', 5000); await account.ready();
+    const entered = deferred(), resume = deferred(); cleanup.push(resume.resolve);
+    const original = reply(account);
+    const offering = f.inbox.offer('telegram', 'stop', { ...original, async verifyAccount() {
+      entered.resolve(); await resume.promise; return original.verifyAccount();
+    } });
+    // Observe eventual cancellation immediately; the borrowed verifier remains
+    // owned even after the original native receive barrier completes.
+    const observed = offering.catch(error => error as unknown);
+    await entered.promise; f.expire(); account.cover(5000);
+    await expect(f.waiting).rejects.toMatchObject({ kind: 'unsettled-reply' });
+    let drained = false;
+    const closing = f.inbox.close().then(() => { drained = true; });
+    await Promise.resolve(); expect(drained).toBe(false);
+    resume.resolve(); await observed; await closing;
+    expect(drained).toBe(true); expect(f.inbox.pending).toBe(0);
+    expect(requests).toHaveLength(0);
+  });
+});
+
 test('decision-model exhaustion survives a queued reply and cannot be converted to quiet expiry', async () => {
   const account = source(), f = await window(account, '123', 5000); await account.ready();
   const failure = new JudgmentError('unavailable', 'No decision models are currently available');

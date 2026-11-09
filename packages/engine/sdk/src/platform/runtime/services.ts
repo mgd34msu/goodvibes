@@ -994,7 +994,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     }),
     actions: createTriggerActionExecutor({ agents: agentManager, processManager }),
     processHost: createProcessManagerTriggerHost(processManager),
-    streamHost: createBunStreamHost(),
+    streamHost: createBunStreamHost(processManager),
     sessionIsLive: (sessionId: string) => sessionBroker.getSession(sessionId) !== null,
   });
 

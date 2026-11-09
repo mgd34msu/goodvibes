@@ -40,6 +40,8 @@ export interface TriggerStreamHost {
     readonly onExit: (exitCode: number | null) => void;
   }): Promise<{ readonly streamId: string; readonly pid: number }>;
   stop(streamId: string): void;
+  /** Drain only children actually admitted by this host, including output. */
+  join?(): Promise<void>;
 }
 
 /** The resolved `watchers.triggers.*` settings the supervisor reads. */

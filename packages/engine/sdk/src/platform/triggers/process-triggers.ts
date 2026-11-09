@@ -68,6 +68,10 @@ export interface TriggerProcessHost {
   /** Null when the host has no record of this process at all. */
   observe(processId: string): ObservedTermination | null;
   cancel(processId: string): void;
+  /** Forget an original completed child after its terminal observation is consumed. */
+  release?(processId: string): void;
+  /** Drain only children actually admitted by this host, including output. */
+  join?(): Promise<void>;
   /**
    * Whether a remembered pid still belongs to the process we launched. Used
    * only for reporting after a restart, the trigger never re-binds to it.

@@ -58,7 +58,7 @@ export function createTriggerServices(deps: {
     }),
     actions: createTriggerActionExecutor({ agents: deps.agentManager, processManager: deps.processManager }),
     processHost: createProcessManagerTriggerHost(deps.processManager),
-    streamHost: createBunStreamHost(),
+    streamHost: createBunStreamHost(deps.processManager),
     sessionIsLive: (sessionId: string) => deps.sessionBroker.getSession(sessionId) !== null,
   });
 }

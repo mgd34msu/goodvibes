@@ -14,8 +14,8 @@
  * weaker guarantees than a plain background command.
  */
 
-import { summarizeError } from '../utils/error-display.js';
-import { logger } from '../utils/logger.js';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import { TriggerChildProcesses } from './host-processes.js';
 import type { ProcessManager } from '../tools/shared/process-manager.js';
 import type { LaunchedProcess, ObservedTermination, TriggerProcessHost } from './process-triggers.js';
 import type { TriggerActionExecutor, TriggerStreamHost } from './manager-types.js';
@@ -23,51 +23,53 @@ import type { TriggerActionGrant } from './types.js';
 
 /** ProcessManager-backed on-exit host. Binds only to processes we launched. */
 export function createProcessManagerTriggerHost(processManager: ProcessManager): TriggerProcessHost {
-  /** processId -> the pid/startedAt we recorded, for restart reporting only. */
-  const launched = new Map<string, { pid: number; startedAt: number }>();
+  /** Exact original children; remembered PIDs are never adopted after restart. */
+  const launched = new TriggerChildProcesses(processManager);
 
-  return {
+  return Object.freeze<TriggerProcessHost>({
     async launch(spec): Promise<LaunchedProcess> {
-      const result = await processManager.spawnArgv(
-        spec.command,
-        spec.args,
-        spec.cwd,
-        spec.env ? { ...spec.env } : undefined,
-        {
-          timeout_ms: spec.maxDurationMs,
-          // 'none' closes stdin outright; 'empty' hands over a pipe that is
-          // never written and therefore EOFs immediately. Neither ever waits
-          // for a human.
-          stdin: spec.stdin === 'empty' ? 'pipe' : 'ignore',
-        },
-      );
-      const processId = result.process_id;
-      if (!processId) {
-        throw new Error(`Failed to launch supervised process: ${spec.command}`);
-      }
-      const record = { pid: result.pid ?? 0, startedAt: Date.now() };
-      launched.set(processId, record);
-      return { processId, pid: record.pid, startedAt: record.startedAt };
+      return launched.admit(async () => {
+        const result = await processManager.spawnArgv(
+          spec.command,
+          spec.args,
+          spec.cwd,
+          spec.env ? { ...spec.env } : undefined,
+          {
+            timeout_ms: spec.maxDurationMs,
+            // Both input-free policies must provide EOF. An unwritten pipe
+            // remains open and can leave a child waiting forever.
+            stdin: 'ignore',
+          },
+        );
+        const processId = result.process_id;
+        if (!processId) {
+          throw new Error('Failed to launch supervised process');
+        }
+        const original = launched.capture(result);
+        return { processId, pid: original.pid, startedAt: original.startedAt };
+      });
     },
 
     observe(processId: string): ObservedTermination | null {
-      const entry = processManager.getStatus(processId);
+      const entry = launched.get(processId)?.readStatus();
       if (!entry) return null;
       return {
-        running: !entry.done,
+        running: entry.running,
         exitCode: entry.exitCode,
         signal: entry.signal ?? null,
         timedOut: entry.timedOut === true,
-        stdoutTail: entry.stdout.join(''),
-        stderrTail: entry.stderr.join(''),
+        stdoutTail: entry.stdoutTail,
+        stderrTail: entry.stderrTail,
         ...(entry.completedAt !== undefined ? { endedAt: entry.completedAt } : {}),
       };
     },
 
     cancel(processId: string): void {
-      processManager.stop(processId);
-      launched.delete(processId);
+      launched.stop(processId);
     },
+
+    release: (processId) => launched.release(processId),
+    join: () => launched.join(),
 
     /**
      * Reporting only, the trigger never re-binds to this pid. A pid from a
@@ -84,72 +86,34 @@ export function createProcessManagerTriggerHost(processManager: ProcessManager):
         return false;
       }
     },
-  };
+  });
 }
 
-/**
- * Bun-backed stream host: spawns the long-lived command from argv (no shell)
- * and pushes decoded chunks to the manager as they arrive.
- */
-export function createBunStreamHost(): TriggerStreamHost {
-  const running = new Map<string, { kill: () => void }>();
-  let counter = 0;
-
-  return {
+/** Streams through the SAME native manager used by ordinary supervised jobs:
+ * credential scrub, private process groups, bounded output and owned drainage. */
+export function createBunStreamHost(processManager: ProcessManager): TriggerStreamHost {
+  const running = new TriggerChildProcesses(processManager);
+  return Object.freeze<TriggerStreamHost>({
     start(input) {
-      const streamId = `stream_${++counter}_${Date.now()}`;
-      const proc = Bun.spawn([input.command, ...input.args], {
-        ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
-        stdin: 'ignore',
-        stdout: 'pipe',
-        stderr: 'pipe',
-      } as Parameters<typeof Bun.spawn>[1]);
-
-      running.set(streamId, {
-        kill: () => {
-          try { proc.kill('SIGTERM'); } catch { /* already gone */ }
-        },
+      // Capture callbacks before async admission; a later mutable port object
+      // cannot transfer output or completion to a different observer.
+      const onChunk = input.onChunk, onExit = input.onExit;
+      return running.admit(async () => {
+        const result = await processManager.spawnArgv(input.command, input.args, input.cwd, undefined,
+          { timeout_ms: 0, stdin: 'ignore', onOutput: (chunk) => onChunk(chunk) });
+        const original = running.capture(result);
+        // The watcher itself is retained until its final callback returns.
+        running.watch(original, async () => {
+          await original.completion;
+          const returned: unknown = onExit(original.readStatus().exitCode);
+          if (returned !== undefined) { drainOwned(returned); throw new Error('Trigger exit observer must be synchronous'); }
+        });
+        return { streamId: original.processId, pid: original.pid };
       });
-
-      const pump = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
-        const reader = stream.getReader();
-        const decoder = new TextDecoder();
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const text = decoder.decode(value, { stream: true });
-            if (text.length > 0) input.onChunk(text);
-          }
-          const tail = decoder.decode();
-          if (tail.length > 0) input.onChunk(tail);
-        } finally {
-          reader.releaseLock();
-        }
-      };
-
-      void (async () => {
-        try {
-          await Promise.all([
-            pump(proc.stdout as ReadableStream<Uint8Array>),
-            pump(proc.stderr as ReadableStream<Uint8Array>),
-          ]);
-        } catch (error) {
-          logger.warn('Stream trigger output pump failed', { streamId, error: summarizeError(error) });
-        }
-        const exitCode = await proc.exited.catch(() => null);
-        running.delete(streamId);
-        input.onExit(exitCode);
-      })();
-
-      return Promise.resolve({ streamId, pid: proc.pid });
     },
-
-    stop(streamId: string): void {
-      running.get(streamId)?.kill();
-      running.delete(streamId);
-    },
-  };
+    stop: (streamId) => running.stop(streamId),
+    join: () => running.join(),
+  });
 }
 
 /** What a fired trigger needs in order to actually start an agent turn. */
@@ -162,7 +126,7 @@ export interface TriggerAgentSpawner {
  *
  * `runGrant` runs the grant's argv through the same no-shell path as an
  * on-exit child. By the time it is reached the manager has already verified
- * the digest against the registered grant, so what runs here is exactly what a
+ * the independently pinned action against the registered grant, so what runs here is exactly what a
  * person confirmed.
  */
 export function createTriggerActionExecutor(deps: {
@@ -188,7 +152,13 @@ export function createTriggerActionExecutor(deps: {
         undefined,
         { timeout_ms: deps.grantTimeoutMs ?? 300_000, stdin: 'ignore' },
       );
-      return `grant:${input.grant.id}:${result.process_id ?? 'unknown'}`;
+      const original = deps.processManager.captureProcessLifetime(result);
+      await original.completion;
+      const status = original.readStatus();
+      if (status.running || status.exitCode !== 0 || status.signal !== null || status.timedOut) {
+        throw new Error('Supervised trigger grant did not complete successfully');
+      }
+      return `grant:${input.grant.id}:${original.processId}`;
     },
   };
 }

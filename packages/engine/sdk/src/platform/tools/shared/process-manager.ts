@@ -84,6 +84,9 @@ export interface ProcessInputOptions {
 // ─── SpawnOptions ─────────────────────────────────────────────────────────────
 
 export interface SpawnOptions {
+  /** Native host-owned observer of decoded output. Never supplied by tool args.
+   * It runs synchronously; failure terminates this exact managed child. */
+  onOutput?: ((chunk: string, stream: 'stdout' | 'stderr') => void) | undefined;
   /** Trusted per-invocation guard after all asynchronous preparation. */
   beforeSpawn?: (() => void) | undefined;
   /** Cancel admission, including pending credential resolution. Once spawned,
@@ -154,6 +157,18 @@ export interface OwnedBoundaryExecution {
   readonly stop: () => Promise<void>;
 }
 
+/** Read-only observation of an actual returned native spawn result. A copied
+ * result or supplied process ID cannot acquire another child's lifetime. */
+export interface ManagedProcessLifetime {
+  readonly processId: string;
+  readonly pid: number;
+  readonly startedAt: number;
+  readonly completion: Promise<void>;
+  stop(): Promise<void>;
+  readStatus(): { readonly running: boolean; readonly exitCode: number | null; readonly signal: string | null;
+    readonly timedOut: boolean; readonly stdoutTail: string; readonly stderrTail: string; readonly completedAt?: number | undefined };
+}
+
 interface ManagedProcessShutdown {
   readonly killOnClose: boolean;
   stopRequested: boolean;
@@ -174,6 +189,7 @@ interface ManagedProcessInput {
 
 export class ProcessManager {
   private _counter = 0;
+  private readonly _nativeLifetimes = new WeakMap<BgCommandResult, ManagedProcessLifetime>();
   private readonly _boundaryExecutions = new Map<string, OwnedBoundaryExecution>();
   private _processes = new Map<string, BackgroundProcess>();
   private readonly _shutdowns = new Map<string, ManagedProcessShutdown>();
@@ -292,6 +308,12 @@ export class ProcessManager {
     return this._closing;
   }
 
+  captureProcessLifetime(result: BgCommandResult): ManagedProcessLifetime {
+    const original = this._nativeLifetimes.get(result);
+    if (!original) throw new Error('Original managed process ownership is unavailable');
+    return original;
+  }
+
   private async launchProcess(
     argv: readonly string[],
     cmd: string,
@@ -304,7 +326,7 @@ export class ProcessManager {
   ): Promise<BgCommandResult> {
     admissionSignal?.throwIfAborted(); assertSynchronousAdmission(assertAdmissionCurrent);
     admissionSignal?.throwIfAborted();
-    const timeoutMs = opts?.timeout_ms ?? 0;
+    const timeoutMs = opts?.timeout_ms ?? 0, outputObserver = opts?.onOutput;
     const sigtermGraceMs = opts?.sigterm_grace_ms ?? 5_000;
     assertTimerRange('timeout_ms', timeoutMs);
     assertTimerRange('sigterm_grace_ms', sigtermGraceMs);
@@ -385,16 +407,30 @@ export class ProcessManager {
     // Cast stdout/stderr to ReadableStream, Bun guarantees these are ReadableStream
     // when stdout/stderr is set to 'pipe', but the return type is a union.
     const drain = new AbortController();
-    const streams = Promise.all([
-      readProcessStream(proc.stdout as ReadableStream<Uint8Array>, entry.stdout, drain.signal),
-      readProcessStream(proc.stderr as ReadableStream<Uint8Array>, entry.stderr, drain.signal),
-    ]).catch((error: unknown) => {
-      // A cancelled or broken pipe ends collection early; the exit code still
-      // decides the outcome, so this is reported rather than thrown.
-      logger.debug('Background process output collection ended early', {
-        processId: id,
-        error: summarizeError(error),
-      });
+    let processOwner: ManagedProcessShutdown | undefined, observerFailed = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    let collectedStatus: { exitCode: number; signal: string | null; timedOut: boolean; completedAt: number } | undefined;
+    let timedOut = false;
+    const publishOutput = (stream: 'stdout' | 'stderr') => (chunk: string): void => {
+      if (!outputObserver || observerFailed) return;
+      try {
+        const returned: unknown = outputObserver(chunk, stream);
+        if (returned !== undefined) { drainOwned(returned); throw new Error(); }
+      } catch {
+        observerFailed = true;
+        void processOwner?.stop().catch(() => logger.warn('Managed output observer child cleanup could not be confirmed', { processId: id }));
+        throw new Error('Managed output observer failed');
+      }
+    };
+    const streams = Promise.allSettled([
+      readProcessStream(proc.stdout as ReadableStream<Uint8Array>, entry.stdout, drain.signal, publishOutput('stdout')),
+      readProcessStream(proc.stderr as ReadableStream<Uint8Array>, entry.stderr, drain.signal, publishOutput('stderr')),
+    ]).then((results) => {
+      for (const result of results) if (result.status === 'rejected') {
+        logger.debug('Background process output collection ended early', {
+          processId: id, error: summarizeError(result.reason),
+        });
+      }
     });
     let groupStopping: Promise<void> | undefined;
     const stopOwnedGroup = (): Promise<void> => {
@@ -424,6 +460,7 @@ export class ProcessManager {
       entry.signal = readSignalCode(proc);
       entry.done = true;
       entry.completedAt = Date.now();
+      collectedStatus = { exitCode, signal: readSignalCode(proc), timedOut, completedAt: entry.completedAt };
       this._inputs.delete(id);
       this.pruneCompletedProcesses();
     })();
@@ -455,6 +492,7 @@ export class ProcessManager {
       },
       detach: () => { clearTimeout(timeoutHandle); },
     };
+    processOwner = owner;
     this._shutdowns.set(id, owner);
     if (inputPipe) this._inputs.set(id, {
       entry, child: proc, pipe: inputPipe, write: inputPipe.write, flush: inputPipe.flush, shutdown: owner,
@@ -462,9 +500,9 @@ export class ProcessManager {
 
     // Timeout opt-outs preserve externally owned lifetimes. Explicit stop and
     // runtime close share one termination sequence, including escalation/reap.
-    const timeoutHandle = timeoutMs > 0 ? setTimeout(() => {
+    timeoutHandle = timeoutMs > 0 ? setTimeout(() => {
       if (entry.done) return;
-      entry.timedOut = true;
+      entry.timedOut = true; timedOut = true;
       if (!killOnTimeout) {
         logger.info('Background process passed its timeout and was left running', { processId: id, pid: entry.pid, cmd, timeoutMs });
         return;
@@ -475,6 +513,7 @@ export class ProcessManager {
       });
     }, timeoutMs) : undefined;
     timeoutHandle?.unref?.();
+    if (observerFailed) void owner.stop().catch(() => logger.warn('Managed output observer child cleanup could not be confirmed', { processId: id }));
 
     // Reject the spawn promise if the process errors immediately (ENOENT/EACCES
     // on the child process level), the outer try/catch handles Bun.spawn throws;
@@ -505,15 +544,12 @@ export class ProcessManager {
         if (!ownsGroup) this._shutdowns.delete(id);
       });
 
-    return {
-      cmd,
-      exit_code: null,
-      stdout: '',
-      stderr: '',
-      success: true,
-      process_id: id,
-      pid: proc.pid,
-    };
+    const result: BgCommandResult = { cmd, exit_code: null, stdout: '', stderr: '', success: true, process_id: id, pid: proc.pid };
+    this._nativeLifetimes.set(result, Object.freeze({ processId: id, pid: proc.pid, startedAt: entry.startTime,
+      completion: collectionPromise, stop: () => owner.stop(), readStatus: () => Object.freeze({ running: collectedStatus === undefined,
+        exitCode: collectedStatus?.exitCode ?? null, signal: collectedStatus?.signal ?? null, timedOut: collectedStatus?.timedOut ?? timedOut,
+        stdoutTail: entry.stdout.join(''), stderrTail: entry.stderr.join(''), ...(collectedStatus === undefined ? {} : { completedAt: collectedStatus.completedAt }) }) }));
+    return result;
   }
 
   /** Adopt an already-contained owned execution without spawning a host process. */
@@ -858,16 +894,18 @@ async function readProcessStream(
   stream: ReadableStream<Uint8Array>,
   sink: string[],
   cancelSignal?: AbortSignal,
+  onChunk?: (chunk: string) => void,
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let total = 0;
   let spill: FileHandle | undefined;
+  let cancellation: Promise<void> | undefined;
 
   // Abort releases the read loop for a pipe whose write end a surviving
   // descendant still holds; without it the pending read outlives the process.
   const onAbort = (): void => {
-    void reader.cancel().catch(() => {
+    cancellation ??= reader.cancel().catch(() => {
       /* the stream is already gone; nothing to release */
     });
   };
@@ -889,14 +927,18 @@ async function readProcessStream(
       if (spill) await spill.writeFile(decoded);
       else if (decoded.length > 0) sink.push(decoded);
       total += value.byteLength;
+      if (decoded.length > 0) onChunk?.(decoded);
     }
     const tail = decoder.decode();
     if (spill) await spill.writeFile(tail);
     else if (tail.length > 0) sink.push(tail);
+    if (tail.length > 0) onChunk?.(tail);
   } finally {
-    await spill?.close();
-    cancelSignal?.removeEventListener('abort', onAbort);
-    reader.releaseLock();
+    try { await spill?.close(); }
+    finally {
+      cancelSignal?.removeEventListener('abort', onAbort);
+      try { await cancellation; } finally { reader.releaseLock(); }
+    }
   }
 }
 

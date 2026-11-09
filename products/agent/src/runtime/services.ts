@@ -1819,7 +1819,7 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
     }),
     actions: createTriggerActionExecutor({ agents: agentManager, processManager }),
     processHost: createProcessManagerTriggerHost(processManager),
-    streamHost: createBunStreamHost(),
+    streamHost: createBunStreamHost(processManager),
     // Answered from the sessions THIS process is running, not from the daemon's
     // register. A trigger scoped to a session this agent is not hosting is not
     // this agent's to fire.

@@ -14,7 +14,7 @@
 import { observeTriggers } from './manager-observer.js';
 import { restartDueStreams } from './manager-stream-restarts.js';
 import { TriggerStoreOwnershipError } from './store-owner.js';
-import { TriggerManagerWork } from './manager-work.js';
+import { TriggerManagerWork, stopTriggerResources } from './manager-work.js';
 import { randomUUID } from 'node:crypto';
 import { readFailureTransience, type FailureTransience } from '../integrations/delivery.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -74,7 +74,7 @@ export class TriggerManager {
   private readonly work: TriggerManagerWork;
 
   constructor(options: TriggerManagerOptions) {
-    this.options = options;
+    this.options = { ...options };
     const writer = options.nativeDataWriter;
     this.store = new TriggerSnapshotStore(options.storePath, () => writer?.declare('trigger-snapshots-v2'), options.previousStorePath);
     this.work = new TriggerManagerWork(() => this.store.release());
@@ -268,12 +268,7 @@ export class TriggerManager {
     this.stopSweep();
     if (this.supervisionTimer) clearInterval(this.supervisionTimer);
     this.supervisionTimer = null;
-    for (const [triggerId, runtime] of this.streams) {
-      if (runtime.timer) clearInterval(runtime.timer);
-      this.streams.delete(triggerId);
-      const streamId = runtime.streamId; runtime.streamId = null; if (streamId) this.options.streamHost?.stop(streamId);
-    }
-    this.work.finishStop();
+    this.work.finishStop(stopTriggerResources(this.streams, this.options.streamHost, this.options.processHost));
   }
 
   join(): Promise<void> { return this.work.join(); }
@@ -699,7 +694,8 @@ export class TriggerManager {
         now,
         ...(this.config.outputTailBytes !== undefined ? { outputTailBytes: this.config.outputTailBytes } : {}),
       });
-      await this.fireOnExit(record.definition.id, termination, now);
+      try { await this.fireOnExit(record.definition.id, termination, now); }
+      finally { if (this.records.get(record.definition.id)?.state !== 'running') host.release?.(record.process.processId); }
     }
   }
 

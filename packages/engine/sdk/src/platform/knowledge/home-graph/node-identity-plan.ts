@@ -15,7 +15,7 @@ export interface HomeGraphNodeIdentity {
 const owners = new WeakMap<object, { readonly store: KnowledgeStore; readonly prepare: (selector: HomeGraphNodeSelector) => HomeGraphNodeIdentity }>();
 export function createHomeGraphNodeIdentityPlanner(store: KnowledgeStore) {
   const pending = new Map<string, HomeGraphNodeIdentity>(), labels = new Map<string, string>();
-  const candidates = (selector: HomeGraphNodeSelector) => store.getHomeGraphNodeCandidates(selector).filter(record => homeGraphNodeMatches(record, selector));
+  const candidates = (selector: HomeGraphNodeSelector) => store.getHomeGraphNodeCandidates(selector).filter(record => { if (!homeGraphNodeMatches(record, selector)) return false; if (!['active','draft','stale'].includes(record.status)) throw new Held('unsupported-format'); return true; });
   const planner = Object.freeze({
     lookup(input: HomeGraphNodeSelector) {
       const selector = homeGraphNodeSelector(input), rows = candidates(selector);

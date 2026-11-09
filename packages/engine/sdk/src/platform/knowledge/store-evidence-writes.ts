@@ -1,3 +1,4 @@
+import { assertHomeGraphSourceIdentityWrite } from './store-homegraph-source-selector.js';
 import { knowledgeRawRepresentation, knowledgeSourceMetadataView, prepareKnowledgeOwnedClocks, retainKnowledgePreparedRecord, retainKnowledgeRepresentation } from './store-record-representation.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import type { SQLiteStore } from '../state/sqlite-store.js';
@@ -63,7 +64,8 @@ export function prepareKnowledgeSourceRecord(input: KnowledgeSourceUpsertInput, 
       ...(typeof input.lastCrawledAt === 'number' ? { lastCrawledAt: inputRaw.lastCrawledAt } : existing?.lastCrawledAt ? { lastCrawledAt: existingRaw?.lastCrawledAt } : {}) }));
 }
 
-export function writeKnowledgeSourceRow(sqlite: Pick<SQLiteStore, 'run'>, record: Omit<KnowledgeSourceRecord, 'createdAt' | 'updatedAt'> & { readonly createdAt: number | string; readonly updatedAt: number | string }): void {
+export function writeKnowledgeSourceRow(sqlite: Pick<SQLiteStore, 'run' | 'exec'>, record: Omit<KnowledgeSourceRecord, 'createdAt' | 'updatedAt'> & { readonly createdAt: number | string; readonly updatedAt: number | string }): void {
+    assertHomeGraphSourceIdentityWrite(sqlite, record);
     const raw = knowledgeRawRepresentation(record);
     sqlite.run(`
       INSERT OR REPLACE INTO knowledge_sources (

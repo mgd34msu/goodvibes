@@ -1,3 +1,4 @@
+import { homeGraphSourceIdentityIndexes } from '../sdk/src/platform/knowledge/store-homegraph-source-selector.js';
 /** Source regressions for actual persisted scope/target publication. UNRUN until
  * coding is complete; these drive native stores/services, not formatter mocks. */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
@@ -132,7 +133,7 @@ describe('native generated projection scope and saved identity', () => {
     expect(refreshed.listSources().filter(source => source.connectorId === 'knowledge-projection')).toHaveLength(1);
   });
 
-  test('an actual schema13 store installs the new index through schema15 without rewriting existing rows', async () => {
+  test('an actual schema13 store installs the new index through the current schema without rewriting existing rows', async () => {
     const item = fixture();
     const source = await item.store.upsertSource({ id: 'existing-source', connectorId: 'manual', sourceType: 'document', title: 'Existing source', status: 'indexed' });
     const generation = item.store.getSourceGeneration(source.id);
@@ -146,6 +147,7 @@ describe('native generated projection scope and saved identity', () => {
     database.run('DROP INDEX idx_knowledge_nodes_semantic_role_scope');
     database.run('DROP INDEX idx_knowledge_nodes_homegraph_object');
     database.run('DROP INDEX idx_knowledge_nodes_homegraph_object_v1');
+    for (const index of homeGraphSourceIdentityIndexes) database.run(`DROP INDEX ${index.name}`);
     database.run('PRAGMA user_version=13'); database.close();
     const migrated = item.open(); await migrated.init();
     expect(migrated.getSourceGeneration(source.id)).toBe(generation);
@@ -155,7 +157,7 @@ describe('native generated projection scope and saved identity', () => {
     await migrated.close();
     const check = new Database(item.dbPath, { readonly: true });
     try {
-      expect(check.query('PRAGMA user_version').get()).toEqual({ user_version: 16 });
+      expect(check.query('PRAGMA user_version').get()).toEqual({ user_version: 17 });
       expect(check.query("SELECT name FROM sqlite_schema WHERE name='idx_knowledge_sources_generated_projection_identity'").get()).not.toBeNull();
     } finally { check.close(); }
   });

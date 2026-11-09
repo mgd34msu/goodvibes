@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Reuse Home Graph source IDs and URLs by their saved role and locator instead
+  of hashing them. Preserve explicit snapshot replay and distinct capture
+  events; keep earlier sources unchanged. Hold ambiguous or unsupported records
+  before publication, retain artifact ownership through ingestion, and clean
+  superseded owned artifacts only after their references have been released.
+
 - Return the committed knowledge import receipt when a completion observer
   throws, and observe async notification failures without waiting on them.
   Later memory-sync failures remain visible without a false extraction-failed

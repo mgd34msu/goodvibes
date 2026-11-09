@@ -1,3 +1,4 @@
+import { createHomeGraphSourceIdentityIndexes, homeGraphSourceIdentityIndexes } from './store-homegraph-source-selector.js';
 import { createHomeGraphNodeIdentityIndexes, homeGraphNodeIdentityIndexes } from './store-homegraph-node-selector.js';
 import { createSemanticNodeIdentityIndex, semanticNodeIdentityIndexSql } from './store-semantic-node-selector.js';
 import { createSemanticFactIdentityIndex, semanticFactIdentityIndexSql } from './store-semantic-fact-selector.js';
@@ -293,6 +294,7 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
     createSemanticFactIdentityIndex(native);
     createSemanticNodeIdentityIndex(native);
     createHomeGraphNodeIdentityIndexes(native);
+    createHomeGraphSourceIdentityIndexes(native);
   }
   else {
     // Schema documentation collects DDL without constructing a database.
@@ -306,6 +308,7 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
     db.run(semanticFactIdentityIndexSql);
     db.run(semanticNodeIdentityIndexSql);
     for (const index of homeGraphNodeIdentityIndexes) db.run(index.sql);
+    for (const index of homeGraphSourceIdentityIndexes) db.run(index.sql);
   }
 
 }

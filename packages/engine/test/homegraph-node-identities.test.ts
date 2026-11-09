@@ -1,4 +1,6 @@
+import { homeGraphSourceIdentityIndexes } from '../sdk/src/platform/knowledge/store-homegraph-source-selector.js';
 /** Source regressions for the complete node16 producer/read/migration family. UNRUN. */
+import { KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema-version.js';
 import { Database } from 'bun:sqlite';
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -133,14 +135,14 @@ test('a copied store or replaced closed native selector cannot supply invented t
 test('native tuple index drives EXPLAIN, rejects duplicate v1 rows and is added to an original v15 without rewriting data', async () => {
   const f = await fixture(), original = await f.store.upsertNode({ id: 'saved-before16', kind: 'ha_device', slug: 'saved-readable-slug', title: 'Saved', status: 'draft', metadata: metadata(selector.spaceId, 'device') });
   const snapshot = f.store.getRecordSnapshot('node', original.id); await f.store.close();
-  const before15 = new Database(f.dbPath); try { for (const index of homeGraphNodeIdentityIndexes) before15.run(`DROP INDEX ${index.name}`); before15.run('PRAGMA user_version=15'); } finally { before15.close(); }
+  const before15 = new Database(f.dbPath); try { for (const index of [...homeGraphNodeIdentityIndexes, ...homeGraphSourceIdentityIndexes]) before15.run(`DROP INDEX ${index.name}`); before15.run('PRAGMA user_version=15'); } finally { before15.close(); }
   const before = readFileSync(f.dbPath); let declared = false;
-  const denied = new KnowledgeStore({ dbPath: f.dbPath, nativeDataWriter: { declare(format) { if (format === 'knowledge-schema-v16') { declared = true; throw Error('Reader floor held'); } } } }); stores.push(denied);
+  const denied = new KnowledgeStore({ dbPath: f.dbPath, nativeDataWriter: { declare(format) { if (format === 'knowledge-schema-v17') { declared = true; throw Error('Reader floor held'); } } } }); stores.push(denied);
   await expect(denied.init()).rejects.toThrow('Reader floor held'); expect(declared).toBe(true); expect(readFileSync(f.dbPath)).toEqual(before); await denied.close();
   const next = await fixture(f.dbPath); expect(next.store.getNode(original.id)).toEqual(original); expect(next.store.getRecordSnapshot('node', original.id).generation).toBe(snapshot.generation);
   const sqlite = (next.store as unknown as { sqlite: SQLiteStore }).sqlite, query = homeGraphNodeCandidateQuery(selector);
   expect(sqlite.exec('EXPLAIN QUERY PLAN ' + query.sql, query.params)[0]?.values.map(row => String(row[3])).join(' ')).toContain('idx_knowledge_nodes_homegraph_object');
-  expect(sqlite.exec('PRAGMA user_version')[0]?.values[0]?.[0]).toBe(16);
+  expect(sqlite.exec('PRAGMA user_version')[0]?.values[0]?.[0]).toBe(KNOWLEDGE_SCHEMA_VERSION);
   const encoded = JSON.stringify(metadata(selector.spaceId, 'same-current', true));
   sqlite.run("INSERT INTO knowledge_nodes (id,kind,slug,title,status,confidence,aliases,metadata,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", ['sql-one','ha_device','sql-one','One','draft',0,'[]',encoded,1,1]);
   expect(() => sqlite.run("INSERT INTO knowledge_nodes (id,kind,slug,title,status,confidence,aliases,metadata,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", ['sql-two','ha_device','sql-two','Two','draft',0,'[]',encoded,1,1])).toThrow();
@@ -150,6 +152,6 @@ test('future schema and unknown saved identity versions preserve the original da
   const f = await fixture(); await f.store.upsertNode({ id: 'future-node', kind: 'ha_device', slug: 'future-node', title: 'Future', status: 'draft', metadata: metadata(selector.spaceId, 'device') }); await f.store.close();
   const edit = new Database(f.dbPath); try { edit.run("UPDATE knowledge_nodes SET metadata=json_set(metadata,'$.homeGraphIdentityVersion',2) WHERE id='future-node'"); } finally { edit.close(); }
   const next = await fixture(f.dbPath), before = readFileSync(f.dbPath); expect(() => createHomeGraphNodeIdentityPlanner(next.store).lookup(selector)).toThrow(HomeGraphIdentityHeldError); expect(readFileSync(f.dbPath)).toEqual(before); await next.store.close();
-  const future = new Database(f.dbPath); try { future.run('PRAGMA user_version=17'); } finally { future.close(); }
+  const future = new Database(f.dbPath); try { future.run(`PRAGMA user_version=${KNOWLEDGE_SCHEMA_VERSION + 1}`); } finally { future.close(); }
   const futureBytes = readFileSync(f.dbPath), incompatible = new KnowledgeStore({ dbPath: f.dbPath }); stores.push(incompatible); await expect(incompatible.init()).rejects.toThrow(); expect(readFileSync(f.dbPath)).toEqual(futureBytes);
 });

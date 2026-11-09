@@ -160,6 +160,13 @@ receive opaque IDs once when they are created; inspecting a missing object does
 not create it. If several saved records claim the same object, the update holds
 and preserves those records instead of choosing one or replacing them.
 
+Sources and generated pages also keep their saved IDs and canonical URLs when
+their content is refreshed. Repeating a snapshot with an explicit `capturedAt`
+updates that capture; leaving it out records a new capture event, even if another
+capture happened during the same millisecond. Device and room pages resolve
+known registry and native-node references to the same saved page, while ambiguous
+saved aliases remain preserved for inspection.
+
 Snapshot groups are partial updates: an omitted group retains its existing
 objects and original evidence source. Supplying an empty group retires only that
 group's missing members. `helpers` imports helper entities and reports

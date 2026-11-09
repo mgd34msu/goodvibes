@@ -1,6 +1,5 @@
 import { prepareKnowledgeRecordAdmission } from '../sdk/src/platform/knowledge/store-record-snapshot.js';
 import { extractionValueFixtureFor, extractionValueFixtureReading, type ExtractionValueFixtures } from './_helpers/knowledge-extraction-value-readings.js';
-import * as crypto from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -11,7 +10,6 @@ import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { ArtifactStore } from '../sdk/src/platform/artifacts/store.js';
 import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
-import { homeGraphSourceId, namespacedCanonicalUri } from '../sdk/src/platform/knowledge/home-graph/helpers.js';
 import { prepareSourceLinkedRepairProfileFacts } from '../sdk/src/platform/knowledge/semantic/self-improvement-promotion.js';
 import { prepareGeneratedFactSupport, type GeneratedFactSupportInput } from '../sdk/src/platform/knowledge/semantic/verification/generated-fact-support.js';
 import { withStoredKnowledgeSourceReferences } from '../sdk/src/platform/knowledge/semantic/verification/structural-references.js';
@@ -30,7 +28,7 @@ const spaceId = 'homeassistant:house';
 let previous: JudgmentPort | undefined; const roots: string[] = [], services: HomeGraphService[] = [];
 const extractionValues: Array<ExtractionValueFixtures[number]> = [];
 beforeEach(() => { extractionValues.length = 0; previous = installJudgmentPort(undefined); });
-afterEach(() => { services.splice(0).forEach((service) => service.dispose()); installJudgmentPort(previous); roots.splice(0).forEach((root) => rmSync(root, { recursive: true, force: true })); });
+afterEach(async () => { await Promise.all(services.splice(0).map(service => service.dispose())); installJudgmentPort(previous); roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })); });
 function readings() { const fake = fakePort((name, question, state) => {
     const extractionValue = extractionValueFixtureReading(name, question, state, extractionValues);
     if (extractionValue !== undefined) return noulAnswer(extractionValue);
@@ -42,10 +40,15 @@ async function fixture(hex = '0000020d') {
   const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); await store.init();
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
   const service = new HomeGraphService(store, artifactStore); services.push(service);
-  const random = spyOn(crypto, 'randomUUID').mockReturnValue(`${hex}-0000-4000-8000-000000000000`);
+  // Saved labels are ordinary identity data. Reuse these actual earlier
+  // protected-shaped labels through the real native mutation; no live derivation.
+  const saved: readonly [string, string] = hex === '0000020d' ? ['hg-src-4379310550672ab16c7e530b', 'homegraph://homeassistant%3Ahouse/source/8a23474bf2c2f59d'] : ['hg-src-d56c2919137db9481a731406', 'homegraph://homeassistant%3Ahouse/source/59545886275506db'];
+  const publication = await artifactStore.createForPublication({ kind: 'document', mimeType: 'text/markdown', filename: 'AC-7 manual.md', text: 'AC-7 has four HDMI ports. It does not support Bluetooth.' });
+  await store.upsertSource({ id: saved[0], connectorId: 'homeassistant', sourceType: 'document', canonicalUri: saved[1], artifactId: publication.artifact.id, status: 'indexed', metadata: { knowledgeSpaceId: spaceId, homeGraph: true, homeGraphSourceKind: 'note' } });
+  const create = spyOn(artifactStore, 'createForPublication').mockResolvedValue(publication);
   let result: Awaited<ReturnType<HomeGraphService['ingestNote']>>;
   try { result = await service.ingestNote({ installationId: 'house', title: 'AC-7 manual', body: 'AC-7 has four HDMI ports. It does not support Bluetooth.', category: 'manual' }); }
-  finally { random.mockRestore(); }
+  finally { create.mockRestore(); }
   const source = store.getSource(result.source.id)!; const extraction = store.getExtractionBySourceId(source.id)!;
   extractionValues.push(extractionValueFixtureFor(source, extraction, 0.99));
   return { store, source, extraction, service, artifactId: result.artifactId!, dbPath: store.storagePath };
@@ -54,7 +57,7 @@ function candidate(source: GeneratedFactSupportInput['source'], extraction: Gene
   return { spaceId, source, extraction, subjects: [], claim: { id: 'synthetic-claim', kind: 'specification', title: 'AC-7 ports', summary: 'AC-7 has four HDMI ports.' } };
 }
 
-describe('fresh generated source and extraction references', () => {
+describe('refreshed saved source and extraction references', () => {
   test('node admission represents only an exact current generated source reference', async () => {
     readings(); const { store, source, dbPath } = await fixture();
     const node = await store.upsertNode({ kind: 'ha_device', slug: 'node-source-reference', title: 'AC-7 ports',
@@ -116,6 +119,7 @@ describe('fresh generated source and extraction references', () => {
 
   test('snapshot sync registers only its freshly minted structural URI and preserves ordinary content preflight', async () => {
     const fake = readings(); const { store, service, dbPath } = await fixture();
+    await store.upsertSource({ id: 'saved-snapshot', connectorId: 'homeassistant', sourceType: 'dataset', canonicalUri: 'homegraph://homeassistant%3Ahouse/snapshot/63c1920295667438', status: 'indexed', lastCrawledAt: 1791110401109, metadata: { knowledgeSpaceId: spaceId, homeGraph: true, homeGraphSourceKind: 'snapshot', capturedAt: 1791110401109 } });
     const result = await service.syncSnapshot({ installationId: 'house', capturedAt: 1791110401109,
       pageAutomation: { enabled: false }, title: 'Synthetic card material 4111111111111111' });
     const source = store.getSource(result.source.id)!;
@@ -158,12 +162,10 @@ describe('fresh generated source and extraction references', () => {
     expect(fake.requests).toHaveLength(0);
   });
 
-  test('the real generator reproduces a protected-shaped source identity without changing its value', () => {
-    expect(homeGraphSourceId(spaceId, 'note', 'synthetic-artifact-323')).toBe('hg-src-1470179648492cbe3c32885b');
-    expect(judgmentInputProblem(homeGraphSourceId(spaceId, 'note', 'synthetic-artifact-323'))).toBe('card-material');
-    expect(homeGraphSourceId(spaceId, 'note', 'artifact-0000020d')).toBe('hg-src-4379310550672ab16c7e530b');
-    expect(judgmentInputProblem(homeGraphSourceId(spaceId, 'note', 'artifact-0000020d'))).toBe('card-material');
-    expect(judgmentInputProblem(namespacedCanonicalUri(spaceId, 'source', 'artifact-00001af0'))).toBe('card-material');
+  test('actual saved earlier source labels remain subject to the same privacy screen', () => {
+    expect(judgmentInputProblem('hg-src-1470179648492cbe3c32885b')).toBe('card-material');
+    expect(judgmentInputProblem('hg-src-4379310550672ab16c7e530b')).toBe('card-material');
+    expect(judgmentInputProblem('homegraph://homeassistant%3Ahouse/source/59545886275506db')).toBe('card-material');
   });
   test('actual artifact ingestion and supported fact planning minimize fresh IDs while retaining exact receipts', async () => {
     const fake = readings(); const { store, source, extraction } = await fixture();

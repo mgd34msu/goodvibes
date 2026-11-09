@@ -1,3 +1,4 @@
+import { validateHomeGraphSourceIdentityIndexes } from './store-homegraph-source-selector.js';
 import { validateHomeGraphNodeIdentityIndexes } from './store-homegraph-node-selector.js';
 import { validateSemanticNodeIdentityIndex } from './store-semantic-node-selector.js';
 import { validateSemanticFactIdentityIndex } from './store-semantic-fact-selector.js';
@@ -47,8 +48,14 @@ export function validateKnowledgeSchemaV15(db: Pick<SqlDatabase, 'exec'>): void 
   validateSemanticNodeIdentityIndex(db);
 }
 
-/** Current v16 adds Home Graph exact object tuple selectors without rewriting rows. */
-export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): void {
+/** Original v16 includes exact Home Graph object tuple selectors. */
+export function validateKnowledgeSchemaV16(db: Pick<SqlDatabase, 'exec'>): void {
   validateKnowledgeSchemaV15(db);
   validateHomeGraphNodeIdentityIndexes(db);
+}
+
+/** Current v17 adds native Home Graph source tuple selectors without rewriting rows. */
+export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): void {
+  validateKnowledgeSchemaV16(db);
+  validateHomeGraphSourceIdentityIndexes(db);
 }

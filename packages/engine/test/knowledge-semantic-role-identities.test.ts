@@ -1,3 +1,4 @@
+import { homeGraphSourceIdentityIndexes } from '../sdk/src/platform/knowledge/store-homegraph-source-selector.js';
 import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { Database } from 'bun:sqlite';
 /** Authored source regressions; runtime qualification is deferred. */
@@ -101,11 +102,11 @@ test('an actual v14 image adds role and object indexes through the current versi
   const original = await save(store, entity), generation = store.getRecordSnapshot('node', original.id).generation;
   await store.close(); stores.splice(stores.indexOf(store), 1);
   const older = new Database(dbPath);
-  try { older.run('DROP INDEX idx_knowledge_nodes_homegraph_object'); older.run('DROP INDEX idx_knowledge_nodes_homegraph_object_v1'); older.run('DROP INDEX idx_knowledge_nodes_semantic_role_scope'); older.run('PRAGMA user_version=14'); }
+  try { for (const index of homeGraphSourceIdentityIndexes) older.run(`DROP INDEX ${index.name}`); older.run('DROP INDEX idx_knowledge_nodes_homegraph_object'); older.run('DROP INDEX idx_knowledge_nodes_homegraph_object_v1'); older.run('DROP INDEX idx_knowledge_nodes_semantic_role_scope'); older.run('PRAGMA user_version=14'); }
   finally { older.close(); }
   const originalBytes = readFileSync(dbPath); let floorSeen = false;
   const denied = new KnowledgeStore({ dbPath, nativeDataWriter: { declare(format) {
-    if (format !== 'knowledge-schema-v16') return;
+    if (format !== 'knowledge-schema-v17') return;
     floorSeen = true; const actual = new Database(dbPath, { readonly: true });
     try {
       expect(actual.query('PRAGMA user_version').get()).toEqual({ user_version: 14 });
@@ -120,7 +121,7 @@ test('an actual v14 image adds role and object indexes through the current versi
   expect(migrated.getNode(original.id)).toEqual(original);
   expect(migrated.getRecordSnapshot('node', original.id).generation).toBe(generation);
   const sqlite = (migrated as unknown as { sqlite: SQLiteStore }).sqlite;
-  expect(sqlite.exec('PRAGMA user_version')[0]?.values[0]?.[0]).toBe(16);
+  expect(sqlite.exec('PRAGMA user_version')[0]?.values[0]?.[0]).toBe(17);
   expect(sqlite.exec("SELECT name FROM sqlite_master WHERE name='idx_knowledge_nodes_semantic_role_scope'")[0]?.values).toHaveLength(1);
 });
 

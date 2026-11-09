@@ -81,16 +81,8 @@ export function objectKindForNodeKind(kind: HomeGraphNodeKind): HomeGraphObjectK
   return OBJECT_KIND_BY_NODE[kind] ?? 'entity';
 }
 
-export function homeGraphSourceId(spaceId: string, kind: string, value: string): string {
-  return `hg-src-${stableHash(`${spaceId}:${kind}:${value}`)}`;
-}
-
 export function homeGraphIssueId(spaceId: string, code: string, subjectId: string): string {
   return `hg-issue-${stableHash(`${spaceId}:${code}:${subjectId}`)}`;
-}
-
-export function namespacedCanonicalUri(spaceId: string, kind: string, value: string): string {
-  return `homegraph://${encodeURIComponent(spaceId)}/${kind}/${stableHash(value, 16)}`;
 }
 
 export function buildHomeGraphMetadata(

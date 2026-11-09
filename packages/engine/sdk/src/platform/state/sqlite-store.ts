@@ -1,3 +1,4 @@
+import { homeGraphSourceCandidateQuery, type HomeGraphSourceSelector } from '../knowledge/store-homegraph-source-selector.js';
 import { homeGraphNodeCandidateQuery, type HomeGraphNodeSelector } from '../knowledge/store-homegraph-node-selector.js';
 import { semanticNodeCandidateSql, semanticNodeCandidateParams, semanticIssueCandidateSql, semanticIssueCandidateParams, semanticRefinementTaskCandidateSql, semanticRefinementTaskCandidateParams, type SemanticNodeSelector, type SemanticIssueSelector } from '../knowledge/store-semantic-node-selector.js';
 import { semanticFactCandidateSql, semanticFactCandidateParams, type SemanticFactSelector } from '../knowledge/store-semantic-fact-selector.js';
@@ -1368,6 +1369,20 @@ export class SQLiteStore {
    * same-batch writes. This is not persisted semantic/execution evidence. */
   readHomeGraphNodeCandidates(selector: HomeGraphNodeSelector): ReturnType<SqlDatabase['exec']> {
     const query = homeGraphNodeCandidateQuery(selector), db = this.getDb(), engine = this.sqlEngine;
+    const state = privateMapGet(ownedDatabases, db), origin = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
+    if (!state || !origin?.statement) throw new SQLiteObservationRetiredError();
+    const revision = state.revision, epoch = this.imageEpoch;
+    const check = () => {
+      assertNativeEngineIdentity(engine);
+      if (this.db !== db || this.sqlEngine !== engine || this.imageEpoch !== epoch || state.inFlight || state.revision !== revision
+        || !nativeMethodsMatch(engine, state.raw) || !nativeExecutionDependenciesMatch(origin.statement!, state.raw)) throw new SQLiteObservationRetiredError();
+    };
+    check(); const rows = nativeApply(origin.methods.exec, state.raw, [query.sql, query.params]); check(); return rows;
+  }
+
+  /** Closed current-image source identity lookup, not semantic evidence. */
+  readHomeGraphSourceCandidates(selector: HomeGraphSourceSelector): ReturnType<SqlDatabase['exec']> {
+    const query = homeGraphSourceCandidateQuery(selector), db = this.getDb(), engine = this.sqlEngine;
     const state = privateMapGet(ownedDatabases, db), origin = engine ? privateMapGet(nativeEngineIdentities, engine) : undefined;
     if (!state || !origin?.statement) throw new SQLiteObservationRetiredError();
     const revision = state.revision, epoch = this.imageEpoch;

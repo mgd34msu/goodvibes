@@ -1,3 +1,4 @@
+export type { HomeGraphSourceSelector } from './store-homegraph-source-selector.js';
 export { configureKnowledgeArtifactReferences } from './artifact-reference-ensemble.js';
 export { KnowledgeUriCanonicalizationHeldError } from './uri-canonicalization/types.js';
 export { KnowledgeConnectorRegistry, createDefaultKnowledgeConnectorRegistry } from './connectors.js';

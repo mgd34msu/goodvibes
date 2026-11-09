@@ -1,3 +1,4 @@
+import { createHomeGraphSourceIdentityIndexes, type HomeGraphSourceSelector } from './store-homegraph-source-selector.js';
 import { createHomeGraphNodeIdentityIndexes, HomeGraphIdentityHeldError, type HomeGraphNodeSelector } from './store-homegraph-node-selector.js';
 import { createSemanticNodeIdentityIndex, type SemanticNodeSelector, type SemanticIssueSelector } from './store-semantic-node-selector.js';
 import { createSemanticFactIdentityIndex, SemanticIdentityHeldError, type SemanticFactSelector } from './store-semantic-fact-selector.js';
@@ -8,7 +9,7 @@ import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13, validateKnowledgeSchemaV14, validateKnowledgeSchemaV15 } from './store-current-schema-validation.js';
+import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13, validateKnowledgeSchemaV14, validateKnowledgeSchemaV15, validateKnowledgeSchemaV16 } from './store-current-schema-validation.js';
 import { createKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
 import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
 import { createGeneratedProjectionIdentityIndex } from './store-generated-projection-selector.js';
@@ -186,6 +187,7 @@ interface NativeArtifactReferenceStore {
   readonly pathSlot: PropertyDescriptor;
 }
 const nativeArtifactReferenceStores = new WeakMap<KnowledgeStore, NativeArtifactReferenceStore>();
+const nativeHomeGraphSourceRead = SQLiteStore.prototype.readHomeGraphSourceCandidates;
 const nativeHomeGraphNodeRead = SQLiteStore.prototype.readHomeGraphNodeCandidates;
 const nativeArtifactReferenceRead = SQLiteStore.prototype.withArtifactReferenceReads;
 const nativeArtifactReferenceSubscribe = SQLiteStore.prototype.subscribeArtifactReferenceClean;
@@ -274,7 +276,7 @@ export class KnowledgeStore {
       if (record.metadata.homeGraphIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('homegraph-object-identities-v1'));
     };
     this.declareSemanticSourceFormat = declareNativeData ? () => declareNativeData('knowledge-semantic-source-revisions-v2') : undefined;
-    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v16'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
+    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v17'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
     nativePublicationApply(nativePublicationSet, nativeArtifactReferenceStores, [this, Object.freeze({
       sqlite: this.sqlite, path: this.dbPath,
       sqliteSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'sqlite')!),
@@ -680,6 +682,31 @@ export class KnowledgeStore {
       const snapshot = knowledgeRecordSnapshotFromRows('node', [{ columns: result.columns, values: [values] }]);
       const record = snapshot.record ? this.nodes.get(snapshot.record.id) : undefined;
       if (!record || !snapshot.record || !snapshot.generation || !sameKnowledgeRecord(record, snapshot.record)) throw new HomeGraphIdentityHeldError('stale');
+      candidates.push(record);
+    }
+    check(); return Object.freeze(candidates);
+  }
+
+  /** Actual owned prefix source tuples, including pending native writes.
+   * This cannot mint persisted semantic/execution evidence or permissions. */
+  getHomeGraphSourceCandidates(selector: HomeGraphSourceSelector): readonly KnowledgeSourceRecord[] {
+    const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [this]);
+    if (!core || this.closed) throw new HomeGraphIdentityHeldError('stale');
+    const check = () => {
+      for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot]] as const) {
+        const actual = Object.getOwnPropertyDescriptor(this, name);
+        if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
+          || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new HomeGraphIdentityHeldError('stale');
+      }
+      if (this.closed || Object.hasOwn(core.sqlite, 'readHomeGraphSourceCandidates') || Object.getOwnPropertyDescriptor(SQLiteStore.prototype, 'readHomeGraphSourceCandidates')?.value !== nativeHomeGraphSourceRead) throw new HomeGraphIdentityHeldError('stale');
+    };
+    check(); const result = (nativePublicationApply(nativeHomeGraphSourceRead, core.sqlite, [selector]) as ReturnType<SQLiteStore['exec']>)[0]; check();
+    const candidates: KnowledgeSourceRecord[] = [];
+    for (const values of result?.values ?? []) {
+      if (!result) throw new HomeGraphIdentityHeldError('stale');
+      const snapshot = knowledgeSourceSnapshotFromRows([{ columns: result.columns, values: [values] }]);
+      const record = snapshot.source ? this.sources.get(snapshot.source.id) : undefined;
+      if (!record || !snapshot.source || !snapshot.generation || !sameKnowledgeRecord(record, snapshot.source)) throw new HomeGraphIdentityHeldError('stale');
       candidates.push(record);
     }
     check(); return Object.freeze(candidates);
@@ -1683,6 +1710,11 @@ export class KnowledgeStore {
         { toVersion: 16, migrate: db => {
           validateKnowledgeSchemaV15(db);
           createHomeGraphNodeIdentityIndexes(db);
+          validateKnowledgeSchemaV16(db);
+        } },
+        { toVersion: 17, migrate: db => {
+          validateKnowledgeSchemaV16(db);
+          createHomeGraphSourceIdentityIndexes(db);
           validateCurrentKnowledgeSchema(db);
         } },
       ],

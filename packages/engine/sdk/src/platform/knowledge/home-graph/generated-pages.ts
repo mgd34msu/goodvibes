@@ -1,3 +1,5 @@
+import { assertKnowledgeRestriction } from '../extraction-ownership.js';
+import { createHomeGraphSourceIdentityPlanner } from './source-identity-plan.js';
 import { createHomeGraphNodeIdentityPlanner, prepareHomeGraphNodeIdentity } from './node-identity-plan.js';
 import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import { isClassicOperation, requireDecisionFeature } from '../../runtime/decision-policy.js';
@@ -29,9 +31,7 @@ import {
   buildHomeGraphMetadata,
   edgeIsActive,
   factSourceIds,
-  homeGraphSourceId,
   isGeneratedPageSource,
-  namespacedCanonicalUri,
   readStringArray,
   readHomeAssistantMetadataString,
   readRecord,
@@ -236,7 +236,7 @@ export async function refreshHomeGraphDevicePassport(
   const requestState = () => JSON.stringify({ input: context.input, spaceId: context.spaceId, installationId: context.installationId,
     sameAuthority: context.assertCurrent === requestAuthority, sameInput: context.input === requestInput, sameData: context.state === requestData, sameStore: context.store === store, sameArtifacts: context.artifactStore === artifactStore, sameSignal: context.signal === signal });
   return withDevicePageRefresh(store, JSON.stringify([context.spaceId, context.input.deviceId]), signal, requestState,
-    (assertQueueCurrent) => refreshHomeGraphDevicePassportNow({ ...context, assertCurrent: () => { assertQueueCurrent(); requestAuthority?.(); } }));
+    (assertQueueCurrent) => refreshHomeGraphDevicePassportNow({ ...context, assertCurrent: () => { assertQueueCurrent(); assertKnowledgeRestriction(requestAuthority); } }));
 }
 
 async function refreshHomeGraphDevicePassportNow(
@@ -250,7 +250,7 @@ async function refreshHomeGraphDevicePassportNow(
 ): Promise<HomeGraphDevicePassportResult & { readonly artifactCreated: boolean }> {
   const { store, artifactStore, spaceId, installationId, input } = context;
   const assertCallerCurrent = context.assertCurrent;
-  assertCallerCurrent?.();
+  assertKnowledgeRestriction(assertCallerCurrent);
   throwIfAborted(context.signal);
   if (!input.deviceId) {
     throw new GoodVibesSdkError('refreshDevicePassport requires deviceId.', {
@@ -342,7 +342,7 @@ async function refreshHomeGraphDevicePassportNow(
   });
   const factPlan = await factReader.prepare(candidateFacts);
   const assertPageCurrent = () => {
-    assertCallerCurrent?.();
+    assertKnowledgeRestriction(assertCallerCurrent);
     assertPageInputsCurrent();
     factPlan.assertCurrent();
     sourceReader.assertCurrent((id) => store.getSource(id));
@@ -368,7 +368,7 @@ async function refreshHomeGraphDevicePassportNow(
     passportIdentity.assertCurrent();
     for (const check of qualityGuards) check();
     throwIfAborted(context.signal);
-    assertCallerCurrent?.();
+    assertKnowledgeRestriction(assertCallerCurrent);
     assertPageInputsCurrent();
     sourceReader.assertCurrent((id) => store.getSource(id));
     writeGuard.assertCurrent();
@@ -417,7 +417,7 @@ async function refreshHomeGraphDevicePassportNow(
       markdown,
       projectionKind: 'device-passport',
       assertCurrent: assertPublicationCurrent,
-      canonicalValue: `device-passport:${passportIdentity.objectId}`,
+      identityKeys: [...new Set([deviceObjectId, input.deviceId!, device.id, passportIdentity.objectId])],
       title: `${device.title} passport`,
       summary: `Living device profile for ${device.title}.`,
       tags: ['homeassistant', 'home-graph', 'generated-page', 'device-passport'],
@@ -492,7 +492,7 @@ export async function generateHomeGraphRoomPage(
     return factReader;
   });
   const assertRoomCurrent = () => {
-    context.assertCurrent?.();
+    assertKnowledgeRestriction(() => context.assertCurrent?.());
     if (!factReader || !assertPageInputsCurrent) throw new Error('Room page quality readers were not prepared.');
     assertPageInputsCurrent();
     factReader.assertCurrent();
@@ -514,7 +514,7 @@ export async function generateHomeGraphRoomPage(
     projectionKind: 'room-page',
     assertCurrent: assertRoomCurrent,
     signal: context.signal,
-    canonicalValue: `room-page:${areaId ?? 'home'}`,
+    identityKeys: areaId ? [...new Set([areaId, ...(targetNode ? [targetNode.id, readHomeAssistantMetadataString(targetNode, 'objectId', 'areaId') ?? targetNode.id] : [])])] : [''],
     title,
     summary: `Living Home Graph room page for ${title}.`,
     tags: ['homeassistant', 'home-graph', 'generated-page', 'room-page'],
@@ -551,7 +551,7 @@ export async function generateHomeGraphPacket(
     filename: `${safeHomeGraphFilename(title)}.md`,
     markdown,
     projectionKind: 'packet',
-    canonicalValue: `packet:${input.packetKind ?? 'home'}:${input.sharingProfile ?? 'default'}`,
+    identityKeys: [input.packetKind ?? 'home'],
     title,
     summary: `Generated ${title} packet for ${input.sharingProfile ?? 'default'} sharing.`,
     tags: ['homeassistant', 'home-graph', 'generated-page', 'packet'],
@@ -571,7 +571,7 @@ async function materializeGeneratedMarkdown(input: HomeGraphPageContext & {
   readonly markdown: string;
   readonly projectionKind: 'device-passport' | 'room-page' | 'packet';
   readonly assertCurrent?: (() => void) | undefined;
-  readonly canonicalValue: string;
+  readonly identityKeys: readonly string[];
   readonly title: string;
   readonly summary: string;
   readonly tags: readonly string[];
@@ -597,15 +597,20 @@ async function materializeGeneratedMarkdown(input: HomeGraphPageContext & {
     regeneration,
     ...(input.targetNodeId ? { generatedTargetNodeId: input.targetNodeId } : {}),
   };
-  const homeGraphMetadata = buildHomeGraphMetadata(input.spaceId, input.installationId, metadata);
+  const identity = createHomeGraphSourceIdentityPlanner(input.store).prepare({ spaceId: input.spaceId, role: 'generated-page', projectionKind: input.projectionKind, keys: input.identityKeys, ...(input.projectionKind === 'packet' ? { sharingProfile: metadata.sharingProfile as string } : {}) });
+  const homeGraphMetadata = buildHomeGraphMetadata(input.spaceId, input.installationId, { ...metadata, ...identity.metadata });
+  const assertCurrent = () => {
+    assertKnowledgeRestriction(() => input.assertCurrent?.());
+    identity.assertCurrent();
+  };
   throwIfAborted(input.signal);
   const projectionInput = {
     store: input.store,
     artifactStore: input.artifactStore,
     connectorId: HOME_GRAPH_CONNECTOR_ID,
-    sourceId: homeGraphSourceId(input.spaceId, 'generated-page', input.canonicalValue),
+    sourceId: identity.id,
     sourceType: 'document' as const,
-    canonicalUri: namespacedCanonicalUri(input.spaceId, 'generated-page', input.canonicalValue),
+    canonicalUri: identity.canonicalUri,
     title: input.title,
     summary: input.summary,
     tags: uniqueStrings(input.tags),
@@ -616,7 +621,7 @@ async function materializeGeneratedMarkdown(input: HomeGraphPageContext & {
     sourceMetadata: homeGraphMetadata,
     artifactMetadata: homeGraphMetadata,
     signal: input.signal,
-    assertCurrent: input.assertCurrent,
+    assertCurrent,
     edgeMetadata: buildHomeGraphMetadata(input.spaceId, input.installationId, {
       homeGraphGeneratedPage: true,
       projectionKind: input.projectionKind,
@@ -687,7 +692,7 @@ async function prioritizeNodesForGeneratedPages(context: HomeGraphPageContext, n
     purpose: 'Prioritize useful household subjects for reference page generation',
     signal: context.signal,
     assertCurrent: () => {
-      context.assertCurrent?.();
+      assertKnowledgeRestriction(() => context.assertCurrent?.());
       for (const node of nodes) if (JSON.stringify(context.store.getNode(node.id)) !== versions.get(node.id)) throw new HomeGraphPagePriorityHeldError('stale');
     },
   });

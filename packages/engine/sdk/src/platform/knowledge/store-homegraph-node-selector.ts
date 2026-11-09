@@ -81,7 +81,7 @@ export function assertHomeGraphNodeIdentityWrite(db: Pick<SqlDatabase, 'exec'>, 
   const current = db.exec('SELECT kind,metadata FROM knowledge_nodes WHERE id = ? LIMIT 1', [record.id])[0]?.values[0];
   const matchesRow = (kind: unknown, rawMetadata: unknown): boolean => {
     if (typeof kind !== 'string' || typeof rawMetadata !== 'string') throw new HomeGraphIdentityHeldError('malformed');
-    const metadata: unknown = JSON.parse(rawMetadata);
+    let metadata: unknown; try { metadata = JSON.parse(rawMetadata); } catch { throw new HomeGraphIdentityHeldError('malformed'); }
     if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw new HomeGraphIdentityHeldError('malformed');
     return homeGraphNodeMatches({ kind: kind as KnowledgeNodeRecord['kind'], metadata: metadata as Record<string, unknown> }, selector);
   };

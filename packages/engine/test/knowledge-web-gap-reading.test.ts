@@ -1,3 +1,4 @@
+import { acquireArtifactPublication, type ArtifactStore, type ArtifactDescriptor } from '../sdk/src/platform/artifacts/index.js';
 import { KnowledgeExtractionJudgmentHoldError } from '../sdk/src/platform/knowledge/extraction-policy.js';
 import { KnowledgeEntityAliasHoldError, readKnowledgeEntityAliases } from '../sdk/src/platform/knowledge/entity-aliases.js';
 import { createKnowledgeExtractionOwner } from '../sdk/src/platform/knowledge/extraction-ownership.js';
@@ -25,6 +26,14 @@ import { KnowledgeService } from '../sdk/src/platform/knowledge/service.js';
 import { HomeGraphService } from '../sdk/src/platform/knowledge/home-graph/service.js';
 import { isKnowledgeSourceQualityFailure } from '../sdk/src/platform/knowledge/source-quality.js';
 
+/** Fake only the fetch result; retain the actual original artifact/lock. */
+function stubUrlFetch(route: 'knowledge-service'|'homegraph-service', store: ArtifactStore, artifact: ArtifactDescriptor, fetched?: () => void) {
+  if (route === 'knowledge-service') return spyOn(store, 'create').mockImplementation(async () => { fetched?.(); return artifact; });
+  return spyOn(store, 'createForPublication').mockImplementation(async () => {
+    const original = store.captureOriginal(artifact.id), lease = await acquireArtifactPublication(original); fetched?.();
+    return { artifact, original, lease };
+  });
+}
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
 afterEach(() => { installJudgmentPort(previous); });
@@ -180,7 +189,7 @@ for (const route of ['knowledge-service', 'homegraph-service'] as const) describ
     readings(); const { store, artifactStore } = createStores(); await store.init();
     const artifact = await artifactStore.createFromStream({ kind: 'document', filename: 'manual.txt', mimeType: 'text/plain', sourceUri: 'https://example.invalid/manual', stream: ['A complete reference manual.'] });
     let current = true;
-    const fetch = spyOn(artifactStore, 'create').mockImplementation(async () => { current = false; return artifact; });
+    const fetch = stubUrlFetch(route, artifactStore, artifact, () => { current = false; });
     const owner = { assertCurrent: () => { if (!current) throw new Held('stale'); } };
     const service = route === 'knowledge-service' ? new KnowledgeService(store, artifactStore, undefined, { memoryRegistry: { async add() { throw new Error('Unexpected memory write'); }, getAll: () => [], getStore() { return { init: async () => {} } as unknown as MemoryStore; } } }) : new HomeGraphService(store, artifactStore);
     try {
@@ -194,7 +203,7 @@ for (const route of ['knowledge-service', 'homegraph-service'] as const) describ
   for (const revoked of [false, true]) test(revoked ? 'revocation at the atomic boundary leaves no source or extraction' : 'current ownership commits usable evidence once', async () => {
     readings(); const { store, artifactStore } = createStores(); await store.init();
     const artifact = await artifactStore.createFromStream({ kind: 'document', filename: 'manual.txt', mimeType: 'text/plain', sourceUri: 'https://example.invalid/manual', stream: ['A complete reference manual describes maintenance.'] });
-    const fetch = spyOn(artifactStore, 'create').mockImplementation(async () => artifact);
+    const fetch = stubUrlFetch(route, artifactStore, artifact);
     let current = true; const commits: string[] = [];
     const owner = { assertCurrent: () => { if (!current) throw new Held('stale'); }, onCommitted: (id: string) => { commits.push(id); } };
     const apply = store.applyPreparedIngest.bind(store);
@@ -396,7 +405,7 @@ for (const route of ['knowledge-service', 'homegraph-service'] as const) describ
     const { store, artifactStore } = createStores(); await store.init();
     const artifact = await artifactStore.createFromStream({ kind: 'document', filename: 'manual.html', mimeType: 'text/html', sourceUri: 'https://example.invalid/manual', stream: ['<article><h1>Manual</h1><p>Concrete reference.</p></article>'] });
     let current = true;
-    const fetch = spyOn(artifactStore, 'create').mockImplementation(async () => { current = false; return artifact; });
+    const fetch = stubUrlFetch(route, artifactStore, artifact, () => { current = false; });
     const read = spyOn(artifactStore, 'readContent');
     const service = route === 'knowledge-service' ? new KnowledgeService(store, artifactStore, undefined, { memoryRegistry: { async add() { throw new Error('unused'); }, getAll: () => [], getStore() { return { init: async () => {} } as unknown as MemoryStore; } } }) : new HomeGraphService(store, artifactStore);
     try {
@@ -411,7 +420,7 @@ for (const route of ['knowledge-service', 'homegraph-service'] as const) describ
     installJudgmentPort({ ...fake.port, async ask(input) { attempts++; entered.resolve(); await release.promise; input.beforeAttempt?.(); return fake.port.ask(input); } });
     const { store, artifactStore } = createStores(); await store.init();
     const artifact = await artifactStore.createFromStream({ kind: 'document', filename: `manual.${format}`, mimeType: format === 'html' ? 'text/html' : 'application/pdf', sourceUri: 'https://example.invalid/manual', stream: [format === 'html' ? Buffer.from('<title>Manual</title><article><h1>Manual</h1><p>Concrete reference.</p></article>') : createCompressedPdfBuffer('Concrete reference manual.')] });
-    const fetch = spyOn(artifactStore, 'create').mockImplementation(async () => artifact);
+    const fetch = stubUrlFetch(route, artifactStore, artifact);
     const service = route === 'knowledge-service' ? new KnowledgeService(store, artifactStore, undefined, { memoryRegistry: { async add() { throw new Error('unused'); }, getAll: () => [], getStore() { return { init: async () => {} } as unknown as MemoryStore; } } }) : new HomeGraphService(store, artifactStore);
     try {
       const work = service.ingestUrl({ url: 'https://example.invalid/manual' }, { signal: controller.signal, assertCurrent: () => { if (!current) throw new Held('stale'); } });
@@ -439,13 +448,12 @@ for (const deferred of [false, true]) test(deferred ? 'explicit repair ownership
 
 test('HomeGraph owned refresh does not mint generated-reference proof for an ordinary existing extraction ID', async () => {
   readings(); const { store, artifactStore } = createStores(); await store.init();
-  const { homeGraphSourceId, namespacedCanonicalUri } = await import('../sdk/src/platform/knowledge/home-graph/helpers.js');
   const spaceId = 'homeassistant:default', url = 'https://example.invalid/manual';
-  const id = homeGraphSourceId(spaceId, 'url', url);
-  await store.upsertSource({ id, connectorId: 'fixture', sourceType: 'url', sourceUri: url, canonicalUri: namespacedCanonicalUri(spaceId, 'source', url), status: 'indexed', metadata: { knowledgeSpaceId: spaceId } });
+  const id = 'hg-src-0bdcc0e021ae52228e16febb'; // Actual earlier label is retained, never rebuilt.
+  await store.upsertSource({ id, connectorId: 'homeassistant', sourceType: 'url', sourceUri: url, canonicalUri: 'homegraph://homeassistant%3Adefault/source/2b4636cf3cb4bedc', status: 'indexed', metadata: { knowledgeSpaceId: spaceId, homeGraphSourceKind: 'url' } });
   await store.upsertExtraction({ id: 'ordinary-existing-extraction', sourceId: id, extractorId: 'text', format: 'text', sections: [], links: [], estimatedTokens: 1, structure: {}, metadata: { knowledgeSpaceId: spaceId } });
   const artifact = await artifactStore.createFromStream({ kind: 'document', filename: 'manual.txt', mimeType: 'text/plain', sourceUri: url, stream: ['A reference about maintenance.'] });
-  const fetch = spyOn(artifactStore, 'create').mockImplementation(async () => artifact), service = new HomeGraphService(store, artifactStore);
+  const fetch = stubUrlFetch('homegraph-service', artifactStore, artifact), service = new HomeGraphService(store, artifactStore);
   try {
     const result = await service.ingestUrl({ url }, { assertCurrent: () => {}, deferSemanticEnrichment: true });
     const extraction = store.getExtractionBySourceId(result.source.id)!;

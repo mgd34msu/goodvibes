@@ -1,3 +1,4 @@
+import { createHomeGraphSourceIdentityPlanner } from './source-identity-plan.js';
 import { createHomeGraphNodeIdentityPlanner, prepareHomeGraphNodeIdentity, type HomeGraphNodeIdentityPlanner } from './node-identity-plan.js';
 import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 import { captureSnapshotGroups, currentSnapshotMembership, storedSnapshotGroups, snapshotGroups, type CapturedSnapshotGroups } from './snapshot-groups.js';
@@ -20,9 +21,7 @@ import {
   edgeIsActive,
   homeGraphObjectId,
   nodeKindForHomeGraphObject,
-  homeGraphSourceId,
   isGeneratedPageSource,
-  namespacedCanonicalUri,
   normalizeHomeGraphObjectInput,
   readRecord,
   resolveHomeGraphSpace,
@@ -70,10 +69,10 @@ export async function runHomeGraphSnapshotSync(input: {
       }
       return undefined;
     });
+    const capturedAt = snapshot.capturedAt ?? Date.now();
+    const sourceIdentity = createHomeGraphSourceIdentityPlanner(store).prepare({ spaceId, role: 'snapshot', ...(snapshot.capturedAt === undefined ? {} : { capturedAt: snapshot.capturedAt }) });
+    const { id: sourceId, canonicalUri } = sourceIdentity;
     const captured = await store.batch(async () => {
-      const capturedAt = snapshot.capturedAt ?? Date.now();
-      const sourceId = homeGraphSourceId(spaceId, 'snapshot', String(capturedAt));
-      const canonicalUri = namespacedCanonicalUri(spaceId, 'snapshot', String(capturedAt));
       const sourceInput = {
         id: sourceId,
         connectorId: HOME_GRAPH_CONNECTOR_ID,
@@ -88,11 +87,12 @@ export async function runHomeGraphSnapshotSync(input: {
           ...(snapshot.metadata ?? {}),
           homeGraphSourceKind: 'snapshot',
           capturedAt: snapshot.capturedAt ?? knowledgeClockIso(capturedAt),
+          ...sourceIdentity.metadata,
         }),
       };
       const source = await store.upsertSource(snapshot.capturedAt === undefined
         ? retainKnowledgeRepresentation(sourceInput, { ...knowledgeRawRepresentation(sourceInput), lastCrawledAt: knowledgeClockIso(capturedAt) })
-        : sourceInput);
+        : sourceInput, sourceIdentity.assertCurrent);
       registerGeneratedKnowledgeSourceReferences(store, source, { id: sourceId, canonicalUri });
       const home = await upsertHomeNode(store, spaceId, installationId, snapshot, nodeIdentities);
       const beforeState = readHomeGraphState(store, spaceId);
@@ -276,7 +276,9 @@ async function retireMissingSnapshotRecords(
   for (const node of store.listNodesInSpace(spaceId)) {
     if (!isSnapshotOwnedNode(node, installationId)) continue;
     if (activeNodeIds.has(node.id)) continue;
-    if (node.status === 'stale') continue;
+    // Unknown future lifecycle states remain inspection data; this version may
+    // neither refresh them through a tuple nor retire them as an omitted member.
+    if (!['active','draft','stale'].includes(node.status) || node.status === 'stale') continue;
     const membership = currentSnapshotMembership(captured, node);
     if (membership.length) {
       const before = storedSnapshotGroups(node);
@@ -298,7 +300,7 @@ async function retireMissingSnapshotRecords(
   const retainedSourceIds = new Set(store.listNodesInSpace(spaceId).filter(node => node.status !== 'stale').flatMap(node => node.sourceId ? [node.sourceId] : []));
   for (const source of store.listSourcesInSpace(spaceId)) {
     if (!isPreviousSnapshotSource(source, currentSnapshotSourceId, installationId) || retainedSourceIds.has(source.id)) continue;
-    if (source.status === 'stale') continue;
+    if (!['pending','indexed','failed','stale'].includes(source.status) || source.status === 'stale') continue;
     await markSourceStale(store, spaceId, installationId, source, 'superseded-by-newer-home-assistant-snapshot', staleAt);
   }
 
@@ -328,15 +330,18 @@ async function retireGeneratedRecordsForStaleSnapshotNodes(
     }
   }
 
+  const staleGeneratedTargetIds = new Set<string>();
   for (const nodeId of generatedTargetIds) {
     const node = nodesById.get(nodeId);
-    if (!node || node.status === 'stale') continue;
+    if (!node || !['active','draft','stale'].includes(node.status)) continue;
+    staleGeneratedTargetIds.add(node.id);
+    if (node.status === 'stale') continue;
     await markNodeStale(store, spaceId, installationId, node, 'target-missing-from-latest-home-assistant-snapshot', staleAt);
   }
 
-  const staleTargetIds = new Set([...retiredNodeIds, ...generatedTargetIds]);
+  const staleTargetIds = new Set([...retiredNodeIds, ...staleGeneratedTargetIds]);
   for (const source of store.listSourcesInSpace(spaceId)) {
-    if (source.status === 'stale') continue;
+    if (!['pending','indexed','failed','stale'].includes(source.status) || source.status === 'stale') continue;
     if (!isGeneratedPageSource(source)) continue;
     const targetsStaleNode = edges.some((edge) => (
       edgeIsActive(edge)

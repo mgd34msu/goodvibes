@@ -1,9 +1,9 @@
+import { createHomeGraphSourceIdentityPlanner } from './source-identity-plan.js';
 import type { KnowledgeNodeRecord } from '../types.js';
 import type { KnowledgeStore } from '../store.js';
 import {
   HOME_GRAPH_CONNECTOR_ID,
   buildHomeGraphMetadata,
-  homeGraphSourceId,
   readRecord,
   readString,
   uniqueStrings,
@@ -20,14 +20,16 @@ export async function upsertIntegrationDocumentationCandidates(
   const domain = integrationDomain(node, object);
   if (!domain) return 0;
   let count = 0;
+  const identities = createHomeGraphSourceIdentityPlanner(store);
   for (const candidate of documentationCandidates(domain, object)) {
+    const identity = identities.prepare({ spaceId, role: 'documentation-candidate', locator: 'uri', value: candidate.url });
     const source = await store.upsertSource({
-      id: homeGraphSourceId(spaceId, 'ha-doc', candidate.url),
+      id: identity.id,
       connectorId: HOME_GRAPH_CONNECTOR_ID,
       sourceType: 'url',
       title: candidate.title,
       sourceUri: candidate.url,
-      canonicalUri: candidate.url,
+      canonicalUri: identity.canonicalUri,
       summary: `Suggested documentation source for the ${domain} Home Assistant integration.`,
       tags: uniqueStrings(['homeassistant', 'home-graph', 'documentation', 'suggested-source', domain, candidate.kind]),
       status: 'pending',
@@ -36,8 +38,9 @@ export async function upsertIntegrationDocumentationCandidates(
         suggested: true,
         documentationKind: candidate.kind,
         integrationDomain: domain,
+        ...identity.metadata,
       }),
-    });
+    }, identity.assertCurrent);
     await store.upsertEdge({
       fromKind: 'source',
       fromId: source.id,

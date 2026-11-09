@@ -133,6 +133,8 @@ export function createAtomicTempPath(filePath: string): string {
 }
 
 export interface AtomicWriteOptions {
+  /** False publishes the complete staged image only if the target is absent. */
+  readonly replaceExisting?: boolean;
   /** Defaults to true here. A false requires an already-existing parent. */
   readonly mkdirp?: boolean;
   /** Native owner advances only its own filesystem effects: false for created
@@ -142,7 +144,7 @@ export interface AtomicWriteOptions {
   readonly assertCurrent?: (() => void) | undefined;
   /**
    * Exact mode of the resulting file. Applied with an explicit `chmod` before
-   * the rename, so the result does not vary with the process umask.
+   * publication, so the result does not vary with the process umask.
    * Defaults to `0o600`.
    */
   readonly mode?: number;
@@ -381,6 +383,7 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
   const input = typeof contents === 'string' ? contents : Buffer.from(contents);
   const expectedLength = typeof input === 'string' ? Buffer.byteLength(input, 'utf8') : input.byteLength;
   const guard = options.assertCurrent?.bind(options), onEffect = options.onEffect?.bind(options), mode = options.mode ?? DEFAULT_STORE_FILE_MODE;
+  const replaceExisting = options.replaceExisting !== false;
   const durable = options.durable === true, sweep = options.cleanupStaleTemps !== false, mkdirp = options.mkdirp !== false;
   const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
   const leaf = basename(absolute);
@@ -447,7 +450,27 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
     // publication does not need to read back or hash the completed file.
     // No borrowed callback or async gap is allowed between the identity proof
     // and the native rename into the retained original physical parent.
-    attempted = true; renameSync(tmpPath, target); published = true;
+    attempted = true;
+    if (replaceExisting) { renameSync(tmpPath, target); published = true; }
+    else {
+      // Linking a complete same-directory stage is atomic no-replace across
+      // processes. EEXIST (including a symlink) never replaces a foreign leaf.
+      linkSync(tmpPath, target); published = true;
+      const samePrepared = (stat: BigIntStats): boolean => !!prepared && stat.isFile() && !stat.isSymbolicLink()
+        && stat.dev === prepared.dev && stat.ino === prepared.ino && stat.mode === prepared.mode
+        && stat.uid === prepared.uid && stat.gid === prepared.gid && stat.birthtimeNs === prepared.birthtimeNs
+        && stat.size === prepared.size && stat.mtimeNs === prepared.mtimeNs;
+      const linked = fstatSync(fd, { bigint: true });
+      if (!samePrepared(linked) || linked.nlink !== 2n
+        || atomicFileStamp(lstatSync(tmpPath, { bigint: true })) !== atomicFileStamp(linked)
+        || atomicFileStamp(lstatSync(target, { bigint: true })) !== atomicFileStamp(linked)) throw new Error('Exclusive atomic publication changed');
+      parent.assertCurrent(); unlinkSync(tmpPath);
+      const transferred = fstatSync(fd, { bigint: true });
+      if (!samePrepared(transferred) || transferred.nlink !== 1n
+        || atomicFileStamp(lstatSync(target, { bigint: true })) !== atomicFileStamp(transferred)) throw new Error('Exclusive atomic publication changed');
+      // No observer is acknowledged until the exact original stage has become
+      // the single-link destination. Failed transfer preserves its evidence.
+    }
     if (!onEffect && !durable) {
       // A plain atomic write promises complete publication, with the latest
       // concurrent writer winning. A later valid rename may already replace
@@ -472,7 +495,7 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
     const completedFd = fd; fd = undefined; closeSync(completedFd);
   } catch (error) {
     if (!published && attempted) {
-      // A thrown rename is only pre-publication when the exact original stage
+      // A thrown publication is only pre-publication when the exact original stage
       // still exists under the original parent. Otherwise retain uncertainty.
       try { assertTemporary(); } catch { published = true; }
       if (onEffect && published && !publicationNotified && target && parent) {

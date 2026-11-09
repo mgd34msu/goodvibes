@@ -91,6 +91,26 @@ describe('/workstream attempts', () => {
     expect(printed.join('\n')).toContain('READY');
   });
 
+  test('full opaque group IDs remain copyable through list and the judge pick command', async () => {
+    const groupId = 'boN-abcdefgh-abcd-efgh-ijkl-abcdefghijkl';
+    const peerId = 'boN-abcdefgh-abcd-efgh-ijkl-abcdefghijkm';
+    const { engine, calls } = makeEngine({ groups: [group({ groupId }), group({ groupId: peerId })] });
+    const { ctx, printed, hasQuestion, answer } = makeCtx();
+    await handleAttemptsSubcommand(ctx, svc(engine), ['attempts', 'list']);
+    expect(printed.join('\n')).toContain(groupId);
+    expect(printed.join('\n')).toContain(peerId);
+    await handleAttemptsSubcommand(ctx, svc(engine), ['attempts', 'judge', groupId]);
+    const line = printed.join('\n').split('\n').find(value => value.includes('Accept it with: '));
+    expect(line).toBeDefined();
+    const command = line!.split('Accept it with: ')[1]!;
+    expect(command).toBe(`/workstream attempts pick ${groupId} 2`);
+    const picking = handleAttemptsSubcommand(ctx, svc(engine), command.split(' ').slice(1));
+    await waitFor(hasQuestion);
+    answer(true);
+    await picking;
+    expect(calls.find(call => call.method === 'pick')?.args).toEqual([groupId, 'item-b']);
+  });
+
   test('list shows dependents held by a non-leaf best-of-N group', async () => {
     const engine = {
       listHeldMergeGroups: async () => [group()],

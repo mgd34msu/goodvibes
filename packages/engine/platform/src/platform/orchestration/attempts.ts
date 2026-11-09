@@ -1,3 +1,4 @@
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 /** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 /**
@@ -67,6 +68,8 @@ export interface AttemptsCoordinator {
     specs: readonly WorkItemSpec[],
     build: (spec: WorkItemSpec) => WorkItem,
   ): WorkItem[];
+  /** Validate group labels without publishing any imported state. */
+  assertImportable(workstream: Workstream): void;
   /** Rebuild the in-memory group registry from an imported workstream's items (resume path). */
   reconcileGroups(workstream: Workstream): void;
   /** At an item's terminal PASS: hold it as a best-of-N candidate, or (non-attempt) enqueue its integration. */
@@ -102,7 +105,7 @@ export function attemptItemId(sourceId: string, index: number): string {
 }
 
 function siblingId(spec: WorkItemSpec, index: number): string {
-  return spec.id ? attemptItemId(spec.id, index) : `item-${crypto.randomUUID().slice(0, 8)}`;
+  return spec.id ? attemptItemId(spec.id, index) : `item-${opaqueUuid()}`;
 }
 
 export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): AttemptsCoordinator {
@@ -126,6 +129,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
     build: (spec: WorkItemSpec) => WorkItem,
   ): WorkItem[] {
     const items: WorkItem[] = [];
+    const pendingGroups = new Map<string, GroupEntry>();
     for (const spec of specs) {
       const n = clampAttempts(spec.attempts);
       // Attempts need isolated worktrees to compare; under shared isolation (or
@@ -136,7 +140,8 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
         items.push(item);
         continue;
       }
-      const groupId = `boN-${crypto.randomUUID().slice(0, 8)}`;
+      const groupId = `boN-${opaqueUuid()}`;
+      if (groups.has(groupId) || pendingGroups.has(groupId)) throw new AttemptError('Attempt group identity already exists');
       const siblingIds: string[] = [];
       for (let i = 0; i < n; i++) {
         const id = siblingId(spec, i);
@@ -163,7 +168,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
         siblingIds.push(sib.id);
         items.push(sib);
       }
-      groups.set(groupId, {
+      pendingGroups.set(groupId, {
         workstreamId,
         sourceTitle: spec.title,
         sourceTask: spec.task,
@@ -172,12 +177,31 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
         judgment: null,
         readyEmitted: false,
       });
-      deps.emit({ type: 'item-attempts-spawned', workstreamId, groupId, itemIds: [...siblingIds], attempts: n });
     }
+    const ids = new Set<string>();
+    for (const item of items) {
+      if (typeof item.id !== 'string' || item.id.length === 0 || ids.has(item.id)) throw new AttemptError('Duplicate or invalid work item identity');
+      ids.add(item.id);
+    }
+    // Finish validation before any group is visible or a reentrant listener
+    // can observe a partly constructed workstream.
+    for (const [groupId, group] of pendingGroups) groups.set(groupId, group);
+    for (const [groupId, group] of pendingGroups) deps.emit({ type: 'item-attempts-spawned', workstreamId, groupId,
+      itemIds: [...group.siblingItemIds], attempts: group.siblingItemIds.length });
     return items;
   }
 
+  function assertImportable(workstream: Workstream): void {
+    for (const item of workstream.items) {
+      if (item.attemptGroupId === undefined) continue;
+      if (typeof item.attemptGroupId !== 'string' || item.attemptGroupId.length === 0) throw new AttemptError('Invalid attempt group identity');
+      const existing = groups.get(item.attemptGroupId);
+      if (existing && existing.workstreamId !== workstream.id) throw new AttemptError('Attempt group identity belongs to another workstream');
+    }
+  }
+
   function reconcileGroups(workstream: Workstream): void {
+    assertImportable(workstream);
     const byGroup = new Map<string, WorkItem[]>();
     for (const item of workstream.items) {
       if (!item.attemptGroupId) continue;
@@ -371,7 +395,7 @@ export function createAttemptsCoordinator(deps: AttemptsCoordinatorDeps): Attemp
   }
 
   return {
-    expandItems, reconcileGroups, onItemPassedTerminal, onItemFailedTerminal,
+    expandItems, assertImportable, reconcileGroups, onItemPassedTerminal, onItemFailedTerminal,
     listGroups: (workstreamId) => ownedWork.run(() => listGroups(workstreamId)),
     pickWinner: (groupId, winnerItemId) => ownedWork.run(() => pickWinner(groupId, winnerItemId)),
     proposeWinner: (groupId) => ownedWork.run(() => proposeWinner(groupId)),

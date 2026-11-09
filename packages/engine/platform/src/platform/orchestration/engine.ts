@@ -1,3 +1,4 @@
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 /** platform-owned platform module. This implementation is maintained in goodvibes-platform. */
 
 /**
@@ -135,7 +136,7 @@ export interface OrchestrationEngine {
   insertPhase(workstreamId: string, afterOrdinal: number, spec: PhaseSpec): Phase | null;
   /** Begin (or resume ticking) a workstream's pipeline. Idempotent. */
   start(workstreamId: string): void;
-  /** Abort an item's in-flight agent and mark it terminally failed (siblings untouched). */
+  /** Abort an item's in-flight agent and mark it terminally failed (siblings untouched). Item-only operations refuse labels shared by multiple workstreams. */
   kill(itemId: string): boolean;
   /** Replace/clear a workstream's budget ceiling and re-tick (the 'blocked-budget' recovery path). */
   updateBudget(workstreamId: string, ceiling: BudgetCeiling | undefined): boolean;
@@ -178,26 +179,41 @@ export interface OrchestrationEngine {
 }
 
 function generateId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
+  return `${prefix}-${opaqueUuid()}`;
+}
+
+function assertDistinctIds(entries: readonly { readonly id: string }[], kind: string): void {
+  if (!Array.isArray(entries)) throw new RangeError(`Invalid ${kind} identities`);
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (!entry || typeof entry.id !== 'string' || entry.id.length === 0 || ids.has(entry.id)) throw new RangeError(`Duplicate or invalid ${kind} identity`);
+    ids.add(entry.id);
+  }
 }
 
 export function createOrchestrationEngine(deps: OrchestrationEngineDeps): OrchestrationEngine {
   const now = deps.now ?? ((): number => Date.now());
-  const sessionId = deps.sessionId ?? crypto.randomUUID().slice(0, 8);
+  const sessionId = deps.sessionId ?? opaqueUuid();
   const stateRoot = deps.stateRoot ?? deps.projectRoot;
   const snapshotRoot: SnapshotRoot = deps.stateNamespace === undefined ? stateRoot : { root: stateRoot, namespace: deps.stateNamespace };
   const maxItemRetries = deps.maxItemRetries ?? 0;
   const stallAfterMs = deps.stallAfterMs ?? 10 * 60 * 1000;
   /** Workstreams currently in the announced at-cap state (event fires once per transition). */
   const atCapNoted = new Set<string>();
-  const requeuedInFlight = new Set<string>(); // requeued mid-flight: the settling run must not clobber the reset
+  const requeuedInFlight = new Set<WorkItem>(); // requeued mid-flight: the settling run must not clobber the reset
   const workstreams = new Map<string, Workstream>();
   const completedResults = new Map<string, PhaseResult[]>();
-  const cancellation: CancellationRegistry = createCancellationRegistry();
+  const cancellations = new WeakMap<Workstream, CancellationRegistry>();
+  const creatingWorkstreams = new Set<string>();
+  function cancellationFor(workstream: Workstream): CancellationRegistry {
+    let registry = cancellations.get(workstream);
+    if (!registry) { registry = createCancellationRegistry(); cancellations.set(workstream, registry); }
+    return registry;
+  }
   const listeners = new Set<OrchestrationEventListener>();
   let disposed = false;
   const ownedWork = new OwnedWork();
-  const activeItems = new Map<string, Promise<void>>();
+  const activeItems = new Map<WorkItem, Promise<void>>();
 
   function dispatch(event: OrchestrationEvent): void {
     for (const listener of listeners) {
@@ -278,7 +294,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     cleanupWorktree: async (workstream, item) => {
       // A failed best-of-N sibling is semantically terminal before its real
       // executor exits. Winner selection must not remove that live tree.
-      while (activeItems.has(item.id)) await activeItems.get(item.id);
+      while (activeItems.has(item)) await activeItems.get(item);
       if (!disposed) await worktreeIsolation.cleanupTerminated(workstream, item);
     },
     diffItem: (item) => worktreeIsolation.diffItem(item),
@@ -331,26 +347,33 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   }
 
   function createWorkstream(input: CreateWorkstreamInput): Workstream {
-    const phases = input.phases.map((spec, index) => buildPhase(spec, index + 1));
-    const workstream: Workstream = {
-      id: input.id ?? generateId('ws'),
-      title: input.title,
-      schemaVersion: CURRENT_WORKSTREAM_SCHEMA_VERSION,
-      phases,
-      items: [],
-      budget: input.budget,
-      isolation: input.isolation,
-      provenance: input.provenance,
-      releasePolicy: input.releasePolicy,
-      createdAt: now(),
-    };
-    const first = firstPhase(workstream)?.id ?? null;
-    // Expand any `attempts:N` item into N sibling attempts (worktree isolation
-    // only); every other item passes through unchanged (see attempts.ts).
-    workstream.items = attempts.expandItems(workstream.id, workstream.isolation, input.items, (spec) => buildItem(spec, first));
-    workstreams.set(workstream.id, workstream);
-    completedResults.set(workstream.id, []);
-    return workstream;
+    const id = input.id ?? generateId('ws');
+    if (typeof id !== 'string' || id.length === 0) throw new RangeError('Invalid workstream identity');
+    if (workstreams.has(id) || creatingWorkstreams.has(id)) throw new RangeError('Workstream identity already exists');
+    creatingWorkstreams.add(id);
+    try {
+      const phases = input.phases.map((spec, index) => buildPhase(spec, index + 1));
+      assertDistinctIds(phases, 'phase');
+      const workstream: Workstream = {
+        id,
+        title: input.title,
+        schemaVersion: CURRENT_WORKSTREAM_SCHEMA_VERSION,
+        phases,
+        items: [],
+        budget: input.budget,
+        isolation: input.isolation,
+        provenance: input.provenance,
+        releasePolicy: input.releasePolicy,
+        createdAt: now(),
+      };
+      const first = firstPhase(workstream)?.id ?? null;
+      // Expand any `attempts:N` item into N sibling attempts (worktree isolation
+      // only); every other item passes through unchanged (see attempts.ts).
+      workstream.items = attempts.expandItems(workstream.id, workstream.isolation, input.items, (spec) => buildItem(spec, first));
+      workstreams.set(workstream.id, workstream);
+      completedResults.set(workstream.id, []);
+      return workstream;
+    } finally { creatingWorkstreams.delete(id); }
   }
 
   function insertPhase(workstreamId: string, afterOrdinal: number, spec: PhaseSpec): Phase | null {
@@ -360,6 +383,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     const nextOrdinal = following[0]?.ordinal ?? afterOrdinal + 1;
     const ordinal = (afterOrdinal + nextOrdinal) / 2;
     const phase = buildPhase(spec, ordinal, now());
+    assertDistinctIds([...workstream.phases, phase], 'phase');
     workstream.phases.push(phase);
     emit({ type: 'phase-inserted', workstreamId, phase });
     return phase;
@@ -409,7 +433,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     emit({ type: 'item-failed', workstreamId: workstream.id, itemId: item.id, reason });
     // Shutdown preserves the saved worktree for restart, including a clean
     // read-only candidate awaiting verification. Live fail/kill still reclaims.
-    if (!disposed && workstream.isolation === 'worktree' && !activeItems.has(item.id)) {
+    if (!disposed && workstream.isolation === 'worktree' && !activeItems.has(item)) {
       void worktreeIsolation.cleanupTerminated(workstream, item).catch((error) => {
         logger.error('orchestration engine: worktree cleanup after item failure did not complete', {
           itemId: item.id, error: summarizeError(error),
@@ -467,7 +491,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
       projectRoot: deps.projectRoot,
       sessionId,
       createWorktree: deps.createWorktree,
-      cancellation,
+      cancellation: cancellationFor(workstream),
       cancellationSignal: signal,
       assertBookkeepingCurrent: () => {
         if (disposed || signal.aborted || workstreams.get(workstream.id) !== workstream
@@ -484,7 +508,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
 
     let phaseResult = outcome.result;
     // A killed/requeued phase cannot publish an old commit observation or result.
-    if ((disposed || signal.aborted || workstreams.get(workstream.id) !== workstream) && outcome.bookkeeping) { requeuedInFlight.delete(item.id); return; }
+    if ((disposed || signal.aborted || workstreams.get(workstream.id) !== workstream) && outcome.bookkeeping) { requeuedInFlight.delete(item); return; }
     let bookkeepingHeld = outcome.result.commit?.classification === 'held';
     const fenceBookkeeping = () => {
       try { outcome.bookkeeping?.assertCurrent(); } catch { bookkeepingHeld = true; }
@@ -506,7 +530,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     } catch (error) {
       warnItem(item, `usage rollup skipped: ${summarizeError(error)}`);
     }
-    if ((disposed || signal.aborted || workstreams.get(workstream.id) !== workstream) && outcome.bookkeeping) { requeuedInFlight.delete(item.id); return; }
+    if ((disposed || signal.aborted || workstreams.get(workstream.id) !== workstream) && outcome.bookkeeping) { requeuedInFlight.delete(item); return; }
     fenceBookkeeping();
     const results = completedResults.get(workstream.id) ?? [];
     results.push(phaseResult);
@@ -522,7 +546,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
 
     if (outcome.agentStatus === 'cancelled') {
       // A deliberate requeue already reset this item, never clobber it.
-      if (requeuedInFlight.delete(item.id)) return;
+      if (requeuedInFlight.delete(item)) return;
       failItem(workstream, item, 'cancelled by operator', true);
       return;
     }
@@ -609,7 +633,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     for (const { item, phase } of claims) {
       if (disposed) return;
       // Reentrant ticks and deliberate requeues must not overlap two real runs.
-      if (activeItems.has(item.id) || item.state === 'passed' || item.state === 'failed') continue;
+      if (activeItems.has(item) || item.state === 'passed' || item.state === 'failed') continue;
       if (item.orphaned) continue; // orphaned outcome already surfaced
       if (fleetProbe) {
         const decision = gateClaimAgainstFleet(workstream, item, { ...fleetProbe, active: fleetActive }, atCapNoted.has(workstreamId));
@@ -639,16 +663,17 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
         continue;
       }
       let releasePhase!: () => void;
-      activeItems.set(item.id, new Promise<void>((resolve) => { releasePhase = resolve; }));
+      activeItems.set(item, new Promise<void>((resolve) => { releasePhase = resolve; }));
       // Reserve before invoking runItemPhase: spawn/events can synchronously
       // call join(), dispose(), kill(), or requeue this very item.
       void ownedWork.run(async () => {
+        const cancellation = cancellationFor(workstream);
         const signal = cancellation.start(item.id);
         let capacityRefused = false;
         try {
           await runItemPhase(workstream, item, phase, signal);
         } catch (error) {
-          if (error instanceof AgentCapacityError && !signal.aborted && !disposed && !requeuedInFlight.has(item.id)) {
+          if (error instanceof AgentCapacityError && !signal.aborted && !disposed && !requeuedInFlight.has(item)) {
             capacityRefused = true;
             // Another manager may take the last slot while isolation/setup
             // yields. Admission refusal is a queue state, never task failure.
@@ -663,7 +688,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
             logger.error('orchestration engine: phase run threw before producing an outcome', {
               workstreamId, itemId: item.id, phaseId: phase.id, error: summarizeError(error),
             });
-            if (!requeuedInFlight.has(item.id)) failItem(workstream, item, summarizeError(error));
+            if (!requeuedInFlight.has(item)) failItem(workstream, item, summarizeError(error));
           }
         } finally {
           try {
@@ -674,8 +699,8 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
             }
           } finally {
             cancellation.release(item.id, signal);
-            requeuedInFlight.delete(item.id);
-            activeItems.delete(item.id);
+            requeuedInFlight.delete(item);
+            activeItems.delete(item);
             releasePhase();
             if (!disposed && !capacityRefused) {
               tick(workstreamId);
@@ -695,11 +720,16 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   }
 
   function findItemAndWorkstream(itemId: string): { workstream: Workstream; item: WorkItem } | null {
+    let found: { workstream: Workstream; item: WorkItem } | null = null;
     for (const workstream of workstreams.values()) {
-      const item = workstream.items.find((i) => i.id === itemId);
-      if (item) return { workstream, item };
+      const item = workstream.items.find((candidate) => candidate.id === itemId);
+      if (!item) continue;
+      // Item-only operations cannot select one of two independently scoped
+      // labels. Refuse rather than cancelling or mutating the first stream.
+      if (found) return null;
+      found = { workstream, item };
     }
-    return null;
+    return found;
   }
 
   function kill(itemId: string): boolean {
@@ -707,7 +737,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     if (!found) return false;
     const { workstream, item } = found;
     if (item.state === 'passed' || item.state === 'failed') return false;
-    cancellation.abort(itemId);
+    cancellationFor(workstream).abort(itemId);
     if (item.agentId) deps.agentManager.cancel(item.agentId, 'kill');
     failItem(workstream, item, 'cancelled by operator', true);
     emit({ type: 'item-cancelled', workstreamId: workstream.id, itemId, reason: 'cancelled by operator' });
@@ -734,7 +764,7 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     if (item.state !== 'failed') return false;
     const first = firstPhase(workstream);
     if (!first) return false;
-    if (activeItems.has(item.id)) requeuedInFlight.add(item.id);
+    if (activeItems.has(item)) requeuedInFlight.add(item);
     item.state = 'pending';
     item.currentPhaseId = first.id;
     item.failureReason = undefined;
@@ -762,8 +792,8 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
     if (task !== undefined && task.trim().length > 0) item.task = task;
     // The engine owns the item: a contract unit's fresh agent runs on the new route.
     if (route !== undefined) Object.assign(item, { route });
-    if (item.state === 'in-phase') requeuedInFlight.add(itemId);
-    cancellation.abort(itemId);
+    if (item.state === 'in-phase') requeuedInFlight.add(item);
+    cancellationFor(workstream).abort(itemId);
     if (item.agentId) deps.agentManager.cancel(item.agentId, 'interrupt');
     const first = firstPhase(workstream);
     if (!first) return false;
@@ -816,8 +846,19 @@ export function createOrchestrationEngine(deps: OrchestrationEngineDeps): Orches
   function importWorkstream(snapshotJson: string, force = false): boolean {
     const snapshot = deserializeWorkstreamSnapshot(snapshotJson);
     if (!snapshot) return false;
-    const workstream = deserializeWorkstreamModel(snapshot.workstream);
+    let workstream: Workstream;
+    try {
+      assertDistinctIds([snapshot.workstream], 'workstream');
+      assertDistinctIds(snapshot.workstream.phases, 'phase');
+      assertDistinctIds(snapshot.workstream.items, 'item');
+      workstream = deserializeWorkstreamModel(snapshot.workstream);
+      attempts.assertImportable(workstream);
+    } catch { return false; }
+    if (creatingWorkstreams.has(workstream.id)) return false;
     const existing = workstreams.get(workstream.id);
+    // A snapshot cannot replace an executor whose original finally still owns
+    // resources, even if its public state is already terminal or force is set.
+    if (existing?.items.some(item => activeItems.has(item))) return false;
     if (existing && !isTerminalWorkstream(existing) && !force) {
       logger.warn('orchestration engine: importWorkstream refused, existing workstream is non-terminal; use force=true to overwrite', {
         workstreamId: workstream.id,

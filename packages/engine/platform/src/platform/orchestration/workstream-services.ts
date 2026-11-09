@@ -1,3 +1,4 @@
+import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 // ---------------------------------------------------------------------------
 // workstream-services.ts, one OrchestrationEngine instance, plus the
 // command-facing facade a surface drives it through.
@@ -346,7 +347,7 @@ function createWorkstreamCommandService(
     return {
       title: task,
       phases: draftPhases(commitScope, 1),
-      items: [{ id: `item-${crypto.randomUUID().slice(0, 8)}`, title: task, task }],
+      items: [{ id: `item-${opaqueUuid()}`, title: task, task }],
     };
   }
 
@@ -399,7 +400,7 @@ function createWorkstreamCommandService(
       const result = await decompose(task);
       const spec = buildSpec(task, result.proposal);
       const draft: WorkstreamDraft = {
-        id: `wsd_${crypto.randomUUID().slice(0, 8)}`,
+        id: `wsd_${opaqueUuid()}`,
         task,
         spec: isolation ? { ...spec, isolation } : spec,
         gate: result.gate,
@@ -408,6 +409,7 @@ function createWorkstreamCommandService(
         approved: false,
         createdAt: Date.now(),
       };
+      if (drafts.has(draft.id)) throw new RangeError('Workstream draft identity already exists');
       drafts.set(draft.id, draft);
       store.save(draft);
       return draft;

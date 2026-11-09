@@ -30,10 +30,6 @@ import { type AttemptGraphItem, renderDependentHoldLines } from './workstream-at
 /** Resolve a workstream's items for dependent-hold display; null-safe against a stubbed engine. */
 type ResolveWorkstreamItems = (workstreamId: string) => readonly AttemptGraphItem[] | null;
 
-function shortId(id: string): string {
-  return id.length > 10 ? `${id.slice(0, 10)}…` : id;
-}
-
 /** Resolve a group by exact id or unambiguous id prefix. */
 function resolveGroup(groups: readonly HeldMergeGroup[], ref: string): HeldMergeGroup | { error: string } {
   const exact = groups.find((g) => g.groupId === ref);
@@ -48,12 +44,12 @@ function resolveGroup(groups: readonly HeldMergeGroup[], ref: string): HeldMerge
 function resolveCandidate(group: HeldMergeGroup, ref: string): AttemptCandidate | { error: string } {
   if (/^\d+$/.test(ref)) {
     const cand = group.candidates.find((c) => c.attemptIndex + 1 === Number(ref));
-    return cand ?? { error: `No attempt #${ref} in group ${shortId(group.groupId)} (1–${group.candidates.length}).` };
+    return cand ?? { error: `No attempt #${ref} in group ${group.groupId} (1–${group.candidates.length}).` };
   }
   const byId = group.candidates.filter((c) => c.itemId === ref || c.itemId.startsWith(ref));
   if (byId.length === 1) return byId[0]!;
   if (byId.length > 1) return { error: `Candidate ref "${ref}" is ambiguous. Use the attempt number instead.` };
-  return { error: `No candidate "${ref}" in group ${shortId(group.groupId)}.` };
+  return { error: `No candidate "${ref}" in group ${group.groupId}.` };
 }
 
 function candidateLine(c: AttemptCandidate): string {
@@ -63,7 +59,7 @@ function candidateLine(c: AttemptCandidate): string {
     : isTurnBudgetReason(c.failureReason)
       ? describeFailureReason(c.failureReason) // a spent budget, not an infrastructure failure
       : `failed${c.failureReason ? `: ${c.failureReason}` : ''}`;
-  return `    ${c.attemptIndex + 1}. [${state}] ${c.title}: ${files}, item ${shortId(c.itemId)}`;
+  return `    ${c.attemptIndex + 1}. [${state}] ${c.title}: ${files}, item ${c.itemId}`;
 }
 
 function renderGroupList(groups: readonly HeldMergeGroup[], resolveItems?: ResolveWorkstreamItems): string {
@@ -72,10 +68,10 @@ function renderGroupList(groups: readonly HeldMergeGroup[], resolveItems?: Resol
   }
   const lines: string[] = ['Best-of-N groups (held for a winner pick):'];
   for (const g of groups) {
-    lines.push(`  ${shortId(g.groupId)}: "${g.sourceTitle}" (workstream ${shortId(g.workstreamId)})  ${g.ready ? 'READY' : 'still running'}${g.autoAccept ? ', auto-accept' : ''}`);
+    lines.push(`  ${g.groupId}: "${g.sourceTitle}" (workstream ${g.workstreamId})  ${g.ready ? 'READY' : 'still running'}${g.autoAccept ? ', auto-accept' : ''}`);
     for (const c of g.candidates) lines.push(candidateLine(c));
     if (g.judgment?.proposedWinnerItemId) {
-      lines.push(`    judge proposal: item ${shortId(g.judgment.proposedWinnerItemId)} (model, advisory)`);
+      lines.push(`    judge proposal: item ${g.judgment.proposedWinnerItemId} (model, advisory)`);
     }
     // Non-leaf best-of-N: name the dependents this group holds, so a group that
     // gates downstream work reads as such (leaf groups add nothing here).
@@ -90,11 +86,11 @@ function renderGroupList(groups: readonly HeldMergeGroup[], resolveItems?: Resol
 
 /** The model proposal, CLEARLY labelled a model judgment (never ground truth), with reasons. */
 function renderJudgment(group: HeldMergeGroup, judgment: AttemptJudgment): string {
-  const lines: string[] = [`Judge proposal for group ${shortId(group.groupId)}: "${group.sourceTitle}"`];
+  const lines: string[] = [`Judge proposal for group ${group.groupId}: "${group.sourceTitle}"`];
   lines.push('  MODEL PROPOSAL (scoredBy: model); advisory only; a human still confirms the pick.');
   if (judgment.proposedWinnerItemId) {
     const cand = group.candidates.find((c) => c.itemId === judgment.proposedWinnerItemId);
-    lines.push(`  Proposed winner: ${cand ? `attempt ${cand.attemptIndex + 1}: ${cand.title}` : `item ${shortId(judgment.proposedWinnerItemId)}`}`);
+    lines.push(`  Proposed winner: ${cand ? `attempt ${cand.attemptIndex + 1}: ${cand.title}` : `item ${judgment.proposedWinnerItemId}`}`);
   } else {
     lines.push('  Proposed winner: none; the judge declined to choose.');
   }
@@ -105,7 +101,7 @@ function renderJudgment(group: HeldMergeGroup, judgment: AttemptJudgment): strin
   }
   if (judgment.proposedWinnerItemId) {
     const cand = group.candidates.find((c) => c.itemId === judgment.proposedWinnerItemId);
-    lines.push(`  Accept it with: /workstream attempts pick ${shortId(group.groupId)} ${cand ? cand.attemptIndex + 1 : judgment.proposedWinnerItemId}`);
+    lines.push(`  Accept it with: /workstream attempts pick ${group.groupId} ${cand ? cand.attemptIndex + 1 : judgment.proposedWinnerItemId}`);
   }
   return lines.join('\n');
 }
@@ -113,8 +109,8 @@ function renderJudgment(group: HeldMergeGroup, judgment: AttemptJudgment): strin
 function renderPickReceipt(result: AttemptPickResult): string {
   const losers = result.loserItemIds.length;
   return [
-    `[Workstream] Winner picked for group ${shortId(result.groupId)}${result.auto ? ' (auto-accepted by judge)' : ''}.`,
-    `  Winner item ${shortId(result.winnerItemId)} merged through the integration lane.`,
+    `[Workstream] Winner picked for group ${result.groupId}${result.auto ? ' (auto-accepted by judge)' : ''}.`,
+    `  Winner item ${result.winnerItemId} merged through the integration lane.`,
     `  ${losers} loser worktree(s) cleaned by the engine.`,
   ].join('\n');
 }
@@ -173,7 +169,7 @@ export async function handleAttemptsSubcommand(ctx: CommandContext, service: Wor
   if (action === 'diff') {
     const candRef = args[3];
     if (!candRef) {
-      ctx.print(`Candidates in group ${shortId(group.groupId)}:\n${group.candidates.map(candidateLine).join('\n')}\nView one: /workstream attempts diff ${shortId(group.groupId)} <#>`);
+      ctx.print(`Candidates in group ${group.groupId}:\n${group.candidates.map(candidateLine).join('\n')}\nView one: /workstream attempts diff ${group.groupId} <#>`);
       return true;
     }
     const cand = resolveCandidate(group, candRef);
@@ -191,8 +187,8 @@ export async function handleAttemptsSubcommand(ctx: CommandContext, service: Wor
 
   if (action === 'pick') {
     const candRef = args[3];
-    if (!candRef) { ctx.print(`Usage: /workstream attempts pick ${shortId(group.groupId)} <#>`); return true; }
-    if (!group.ready) { ctx.print(`Group ${shortId(group.groupId)} is not ready: its siblings are still running. Wait until every attempt is terminal.`); return true; }
+    if (!candRef) { ctx.print(`Usage: /workstream attempts pick ${group.groupId} <#>`); return true; }
+    if (!group.ready) { ctx.print(`Group ${group.groupId} is not ready: its siblings are still running. Wait until every attempt is terminal.`); return true; }
     const cand = resolveCandidate(group, candRef);
     if ('error' in cand) { ctx.print(cand.error); return true; }
     if (cand.state !== 'held-merge') { ctx.print(`Attempt ${cand.attemptIndex + 1} failed: only a held (pick-ready) candidate can win.`); return true; }

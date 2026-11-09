@@ -81,6 +81,16 @@ describe('workstream-draft-store', () => {
     expect(loaded[0]).toEqual(draft);
   });
 
+  test('complete opaque draft IDs and historical IDs coexist without rewriting either label', () => {
+    const root = scratchRoot();
+    const store = createWorkstreamDraftStore(root);
+    const current = makeDraft('wsd_abcdefgh-abcd-efgh-ijkl-abcdefghijkl', RECENT + 1);
+    const historical = makeDraft('wsd_abcd1234', RECENT);
+    store.save(current); store.save(historical);
+    expect(createWorkstreamDraftStore(root).loadAll()).toEqual([historical, current]);
+    expect(listDraftFiles(root)).toEqual([`${historical.id}.json`, `${current.id}.json`].sort());
+  });
+
   test('loadAll returns drafts oldest-first', () => {
     const root = scratchRoot();
     const store = createWorkstreamDraftStore(root);

@@ -115,7 +115,7 @@ export function formatWorkstreamDraftReclaim(summary: WorkstreamDraftReclaim): s
   return `Workstream drafts: reclaimed ${parts.join(', ')} draft file(s).`;
 }
 
-/** Draft ids are `wsd_<hex>`; this refuses anything else so a crafted id can never escape the drafts directory. */
+/** Generated opaque UUID labels and saved historical labels remain plain bounded path segments. */
 function isSafeId(id: string): boolean {
   return /^[A-Za-z0-9_-]{1,64}$/.test(id);
 }

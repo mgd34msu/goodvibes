@@ -69,19 +69,6 @@ export function projectPlanningCanonicalUri(
   return `goodvibes://planning/${encodeURIComponent(spaceId)}/${kind}/${encodeURIComponent(id)}`;
 }
 
-/** Historical saved-ID formatter, retained for existing stored references only.
- * @deprecated New sources use opaque IDs. Resolve all versions with
- * KnowledgeStore.getPlanningSourceSnapshot({ spaceId, kind, artifactId }).
- */
-export function projectPlanningSourceId(
-  spaceId: string,
-  kind: ProjectPlanningArtifactKind,
-  id: string,
-): string {
-  const digest = createHash('sha256').update(`${spaceId}:${kind}:${id}`).digest('hex').slice(0, 16);
-  return `project-planning-${kind}-${digest}`;
-}
-
 export function projectPlanningArtifactSummary(kind: ProjectPlanningArtifactKind, value: unknown): string {
   if (kind === 'state') {
     const state = value as Partial<ProjectPlanningState>;

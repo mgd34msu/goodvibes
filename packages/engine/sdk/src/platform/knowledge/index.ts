@@ -135,7 +135,6 @@ export {
   buildProjectPlanningAnswerActions,
   projectPlanningCanonicalUri,
   projectPlanningProjectIdFromPath,
-  projectPlanningSourceId,
   resolveProjectPlanningSpace,
 } from './project-planning/index.js';
 export type {

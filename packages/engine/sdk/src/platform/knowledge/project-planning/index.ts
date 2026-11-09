@@ -5,7 +5,6 @@ export {
   PROJECT_PLANNING_TAG,
   projectPlanningCanonicalUri,
   projectPlanningProjectIdFromPath,
-  projectPlanningSourceId,
   resolveProjectPlanningSpace,
 } from './helpers.js';
 export { evaluateProjectPlanningReadiness } from './readiness.js';

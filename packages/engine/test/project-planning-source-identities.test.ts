@@ -1,4 +1,4 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,43 +30,35 @@ const identity = { spaceId: projectKnowledgeSpaceId('alpha'), kind: 'state' as c
 
 test('fresh source identity is minted once and resolved by its persisted tuple across updates and restart', async () => {
   const f = await fixture();
-  const historicalFormatter = spyOn(helpers, 'projectPlanningSourceId');
-  try {
-    const first = await f.service.upsertState({ projectId: 'alpha', state });
-    const sourceId = first.source?.id;
-    expect(sourceId).toMatch(/^project-planning-state-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
-    expect(f.store.getPlanningSourceSnapshot(identity).source?.id).toBe(sourceId);
-    expect((await f.service.getState({ projectId: 'alpha' })).source?.id).toBe(sourceId);
-    expect((await f.service.upsertState({ projectId: 'alpha', state: { ...state, goal: 'A revised goal' } })).source?.id).toBe(sourceId);
-    const reopened = new KnowledgeStore({ dbPath: f.path }); cleanup.push(() => reopened.close());
-    const service = new ProjectPlanningService(reopened);
-    expect((await service.getState({ projectId: 'alpha' })).source?.id).toBe(sourceId);
-    expect((await service.upsertState({ projectId: 'alpha', state })).source?.id).toBe(sourceId);
-    expect(historicalFormatter).not.toHaveBeenCalled();
-  } finally { historicalFormatter.mockRestore(); }
+  const first = await f.service.upsertState({ projectId: 'alpha', state });
+  const sourceId = first.source?.id;
+  expect(sourceId).toMatch(/^project-planning-state-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+  expect(f.store.getPlanningSourceSnapshot(identity).source?.id).toBe(sourceId);
+  expect((await f.service.getState({ projectId: 'alpha' })).source?.id).toBe(sourceId);
+  expect((await f.service.upsertState({ projectId: 'alpha', state: { ...state, goal: 'A revised goal' } })).source?.id).toBe(sourceId);
+  const reopened = new KnowledgeStore({ dbPath: f.path }); cleanup.push(() => reopened.close());
+  const service = new ProjectPlanningService(reopened);
+  expect((await service.getState({ projectId: 'alpha' })).source?.id).toBe(sourceId);
+  expect((await service.upsertState({ projectId: 'alpha', state })).source?.id).toBe(sourceId);
 });
 
 test('historical hashed source without canonical URI is found from durable metadata and updated in place', async () => {
   const f = await fixture();
   const seeded = await f.service.upsertState({ projectId: 'alpha', state });
-  const oldId = helpers.projectPlanningSourceId(identity.spaceId, identity.kind, identity.artifactId);
-  expect(oldId).toBe('project-planning-state-4b7a24906e974844');
+  // Fixed independently recorded deployed-format fixture, not a live derivation.
+  const oldId = 'project-planning-state-4b7a24906e974844';
   const raw = new SQLiteStore(f.path, { coordinated: true });
   await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });
   raw.run('UPDATE knowledge_sources SET id = ?, canonical_uri = NULL WHERE id = ?', [oldId, seeded.source!.id]);
   await raw.save(); raw.close();
   const reopened = new KnowledgeStore({ dbPath: f.path }); cleanup.push(() => reopened.close());
   const service = new ProjectPlanningService(reopened);
-  const formatter = spyOn(helpers, 'projectPlanningSourceId');
-  try {
-    expect((await service.getState({ projectId: 'alpha' })).source?.id).toBe(oldId);
-    const saved = await service.upsertState({ projectId: 'alpha', state: { ...state, goal: 'Updated historical plan' } });
-    expect(saved.source?.id).toBe(oldId);
-    expect(reopened.getPlanningSourceSnapshot(identity).source?.canonicalUri)
-      .toBe(helpers.projectPlanningCanonicalUri(identity.spaceId, identity.kind, identity.artifactId));
-    expect(reopened.listSources(100).filter(source => source.metadata['planningArtifactKind'] === 'state')).toHaveLength(1);
-    expect(formatter).not.toHaveBeenCalled();
-  } finally { formatter.mockRestore(); }
+  expect((await service.getState({ projectId: 'alpha' })).source?.id).toBe(oldId);
+  const saved = await service.upsertState({ projectId: 'alpha', state: { ...state, goal: 'Updated historical plan' } });
+  expect(saved.source?.id).toBe(oldId);
+  expect(reopened.getPlanningSourceSnapshot(identity).source?.canonicalUri)
+    .toBe(helpers.projectPlanningCanonicalUri(identity.spaceId, identity.kind, identity.artifactId));
+  expect(reopened.listSources(100).filter(source => source.metadata['planningArtifactKind'] === 'state')).toHaveLength(1);
 });
 
 test('owned publication refuses a second opaque ID for an already committed planning tuple', async () => {
@@ -111,7 +103,8 @@ test('a single batch cannot publish duplicate absent tuples or overwrite one sel
 test('schema twelve migrates source identities and revisions unchanged and refuses old writers before their schema runs', async () => {
   const f = await fixture();
   const seeded = await f.service.upsertState({ projectId: 'alpha', state });
-  const historicalId = helpers.projectPlanningSourceId(identity.spaceId, identity.kind, identity.artifactId);
+  // Actual old saved source identity, retained without a runtime hash formatter.
+  const historicalId = 'project-planning-state-4b7a24906e974844';
   await f.store.close();
   const raw = new SQLiteStore(f.path, { coordinated: true });
   await raw.init(() => {}, { schemaVersion: KNOWLEDGE_SCHEMA_VERSION });

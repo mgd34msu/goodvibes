@@ -78,7 +78,7 @@ export class CheckoutOperations {
   private closed = false;
   private recovered = false;
   private readonly reserved = new Set<string>();
-  private readonly requests: Pick<PaymentRequestStore, 'retain' | 'read' | 'remove' | 'checkpointWindow' | 'appendReply'> | undefined;
+  private readonly requests: Pick<PaymentRequestStore, 'retain' | 'read' | 'remove' | 'checkpointWindow' | 'appendReply' | 'recordReceiveCoverage'> | undefined;
   private readonly history: Pick<PaymentReplyInbox, 'retainReplyHistory'> | undefined;
   private closing: Promise<void> | undefined;
   constructor(private readonly store: DurablePaymentOperations, private readonly journal: CheckoutJournal,
@@ -90,7 +90,8 @@ export class CheckoutOperations {
     // embed wrapper again after admission or during asynchronous cleanup.
     this.requests = requests ? Object.freeze({ retain: requests.retain.bind(requests), read: requests.read.bind(requests), remove: requests.remove.bind(requests),
       ...(requests.checkpointWindow ? { checkpointWindow: requests.checkpointWindow.bind(requests) } : {}),
-      ...(requests.supportsReplyHistory && requests.appendReply ? { appendReply: requests.appendReply.bind(requests) } : {}) }) : undefined;
+      ...(requests.supportsReplyHistory && requests.appendReply ? { appendReply: requests.appendReply.bind(requests) } : {}),
+      ...(requests.supportsReplyReceiveCoverage && requests.recordReceiveCoverage ? { recordReceiveCoverage: requests.recordReceiveCoverage.bind(requests) } : {}) }) : undefined;
     this.history = this.requests?.appendReply && replies ? Object.freeze({ retainReplyHistory: replies.retainReplyHistory.bind(replies) }) : undefined;
   }
 
@@ -101,8 +102,11 @@ export class CheckoutOperations {
       writer.assertCurrent();
     };
     const binding = paymentReplyHistoryBinding(checkpoint);
+    const recordCoverage = this.requests?.recordReceiveCoverage;
     return this.history.retainReplyHistory(writer.purchaseId, checkpoint, (entry, receivedCurrent) => this.work.run(() =>
-      append(writer.purchaseId, writer.read().operationId, binding, entry, () => { current(); receivedCurrent(); })), current);
+      append(writer.purchaseId, writer.read().operationId, binding, entry, () => { current(); receivedCurrent(); })), current,
+      recordCoverage ? (coverage, receivedCurrent) => this.work.run(() => recordCoverage(writer.purchaseId, writer.read().operationId,
+        binding, coverage, () => { current(); receivedCurrent(); })) : undefined);
   }
 
   /** Take actual execution leases before the conservative journal sweep.
@@ -379,6 +383,7 @@ export class CheckoutOperations {
       ? 'decision-unavailable' : error instanceof DecisionModelsDisabledError ? 'decision-disabled'
         : error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable' ? 'reply-source-unavailable'
           : error instanceof PaymentReplyWindowError && error.kind === 'receive-uncovered' ? 'refused:receive-uncovered'
+          : error instanceof PaymentReplyWindowError && error.kind === 'coverage-unrecorded' ? 'refused:receive-unrecorded'
           : error instanceof PaymentReplyWindowError && error.kind === 'history-unavailable' ? 'refused:reply-history-unavailable' : null);
     try {
       const entries = await this.journal.list(), retained = entries.find(row => row.purchaseId === writer.purchaseId);

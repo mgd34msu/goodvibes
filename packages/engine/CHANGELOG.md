@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- Persist a completed native payment receive span and its silence result before
+  resolving the window. Restore that original expiry without another notice
+  after independently restoring its authority and page. Keep new notices and
+  recipients separate, declare the required reader format before publication,
+  and drain the original write on cancellation. Coverage for an outage that
+  overlaps an unfinished window remains incomplete.
+
 - Require the original native Telegram poller to process through a payment
   deadline before treating it as silence. Reject skipped or unconfirmed receive
   spans, keep queued on-time replies answerable, preserve decision-model outage

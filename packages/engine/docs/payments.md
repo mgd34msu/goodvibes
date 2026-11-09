@@ -832,7 +832,15 @@ exhaustion remains a decision-model failure. Switching to Classic does not turn
 an uninterpreted owner reply into silence: potential replies remain archived,
 ordinary chat stays available, and the semantic purchase wait fails.
 
-The live progress record is not durable cross-restart proof. Native webhook
+The live poller's progress alone is not durable cross-restart proof. Before a
+native quiet window resolves, its original encrypted request writer now retains
+the completed receive span, exact notice receipt, deadline and actual silence
+result. A failed write fails the wait. This write is owned and drained with the
+original operation. It declares `payment-reply-coverage-v1` before publication;
+an older or same-version build lacking that reader capability cannot be selected
+for rollback over it. A newly delivered notice does not inherit the old proof.
+
+Native webhook
 identity alone does not supply this polling barrier; explicit owner answers can
 still settle a webhook window before expiry, but unattended expiry requires
 confirmed receive coverage. Durable downtime and webhook coverage remain work
@@ -1179,6 +1187,15 @@ while the selected policy is Classic.
 Recovery can honor a saved objection after restoring the original native
 authority and verifying its reply account. A saved positive answer or a list
 with no objection does not establish that receive history is complete.
+
+When the original live window completed receiving and durably recorded its
+silence result before interruption, native restoration preserves that original
+deadline and result without another notice. Every delivered recipient must be
+covered by its own matching original receipt. The ordinary window rules still
+decide the consequence: approval silence denies, veto silence proceeds through
+the remaining current quote and payment checks. A new model interpretation of
+old text cannot promote a recorded silence result into an approval. Missing,
+partial, foreign-notice or future-clock markers do not establish coverage.
 
 **Account receive/downtime coverage and complete provider-backlog recovery are
 unfinished.** The complete backfill and expiry behavior described below remains

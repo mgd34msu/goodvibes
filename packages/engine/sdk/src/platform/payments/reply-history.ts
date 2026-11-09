@@ -34,6 +34,17 @@ export interface PaymentReplyHistoryWindow {
   readonly startedAtMs: number;
   readonly binding: PaymentReplyHistoryBinding;
   readonly entries: readonly PaymentReplyHistoryEntry[];
+  /** Written only after the original native receiver has drained this exact
+   * delivered window. Saved facts alone never acquire receiving authority. */
+  readonly receiveCoverage?: readonly PaymentReplyReceiveCoverage[];
+}
+export interface PaymentReplyReceiveCoverage {
+  /** The live window finished with no interpreted answer. Re-reading its
+   * text after restart cannot turn that recorded silence into an approval. */
+  readonly resolution: 'silence';
+  readonly receipt: ChannelDeliveryReceipt;
+  readonly throughMs: number;
+  readonly checkedAtMs: number;
 }
 export interface PaymentReplyHistory {
   readonly version: 1;
@@ -66,13 +77,25 @@ export function capturePaymentReplyHistoryEntry(value: unknown): PaymentReplyHis
 export function historyEntryIdentity(entry: PaymentReplyHistoryEntry): string {
   return JSON.stringify([entry.accountId, entry.updateId]);
 }
+export function capturePaymentReplyReceiveCoverage(value: unknown, binding: PaymentReplyHistoryBinding): PaymentReplyReceiveCoverage {
+  const row = captureOwnedJson(value);
+  if (!object(row) || !keys(row, ['resolution', 'receipt', 'throughMs', 'checkedAtMs']) || row['resolution'] !== 'silence' || row['throughMs'] !== binding.deadlineMs
+    || !stamp(row['checkedAtMs']) || row['checkedAtMs'] < binding.deadlineMs) throw new PaymentReplyHistoryError();
+  const receipt = capturePaymentNoticeReceipt(row['receipt'], 'telegram');
+  if (!receipt || !binding.receipts.some(original => isDeepStrictEqual(original, receipt))) throw new PaymentReplyHistoryError();
+  return Object.freeze({ resolution: 'silence', receipt, throughMs: binding.deadlineMs, checkedAtMs: row['checkedAtMs'] });
+}
+export function paymentReplyWindowReceiveCovered(window: PaymentReplyHistoryWindow): boolean {
+  return window.binding.receipts.length > 0 && window.binding.receipts.every(receipt => window.receiveCoverage?.some(
+    coverage => coverage.throughMs === window.binding.deadlineMs && isDeepStrictEqual(coverage.receipt, receipt)));
+}
 export function capturePaymentReplyHistory(value: unknown, checkpoint: CheckoutWindowCheckpoint): PaymentReplyHistory {
   const row = captureOwnedJson(value), current = paymentReplyHistoryBinding(checkpoint);
   if (!object(row) || !keys(row, ['version', 'windows']) || row['version'] !== 1 || !Array.isArray(row['windows'])
     || row['windows'].length < 1 || row['windows'].length > 16) throw new PaymentReplyHistoryError();
   let count = 0; const bindings = new Set<string>(), eventIds = new Set<string>();
   const windows = row['windows'].map((value): PaymentReplyHistoryWindow => {
-    if (!object(value) || !keys(value, ['startedAtMs', 'binding', 'entries']) || !stamp(value['startedAtMs'])
+    if (!object(value) || !keys(value, ['startedAtMs', 'binding', 'entries', ...(Object.hasOwn(value, 'receiveCoverage') ? ['receiveCoverage'] : [])]) || !stamp(value['startedAtMs'])
       || !object(value['binding']) || !Array.isArray(value['entries'])) throw new PaymentReplyHistoryError();
     const raw = value['binding'];
     if (!keys(raw, ['kind', 'notice', 'deadlineMs', 'receipts']) || (raw['kind'] !== 'approval' && raw['kind'] !== 'veto')
@@ -82,6 +105,13 @@ export function capturePaymentReplyHistory(value: unknown, checkpoint: CheckoutW
       const captured = capturePaymentNoticeReceipt(receipt, 'telegram'); if (!captured?.accountId) throw new PaymentReplyHistoryError(); return captured;
     });
     const binding = Object.freeze({ kind: raw['kind'], notice: raw['notice'], deadlineMs: raw['deadlineMs'], receipts: Object.freeze(receipts) });
+    let receiveCoverage: readonly PaymentReplyReceiveCoverage[] | undefined;
+    if (Object.hasOwn(value, 'receiveCoverage')) {
+      if (!Array.isArray(value['receiveCoverage']) || value['receiveCoverage'].length > receipts.length) throw new PaymentReplyHistoryError();
+      const covered = value['receiveCoverage'].map(coverage => capturePaymentReplyReceiveCoverage(coverage, binding));
+      if (covered.some((coverage, index) => covered.slice(0, index).some(previous => isDeepStrictEqual(previous.receipt, coverage.receipt)))) throw new PaymentReplyHistoryError();
+      receiveCoverage = Object.freeze(covered);
+    }
     const key = JSON.stringify([binding.kind, binding.notice, binding.deadlineMs,
       binding.receipts.map(receipt => [receipt.surfaceKind, receipt.accountId, receipt.conversationId, receipt.threadId ?? null, receipt.messageId])]);
     if (bindings.has(key)) throw new PaymentReplyHistoryError(); bindings.add(key);
@@ -94,7 +124,7 @@ export function capturePaymentReplyHistory(value: unknown, checkpoint: CheckoutW
         && /^[1-9]\d{0,15}$/.test(entry.messageId) && Number.isSafeInteger(Number(entry.messageId)) && Number(entry.messageId) > Number(receipt.messageId))) throw new PaymentReplyHistoryError();
       eventIds.add(id);
     }
-    return Object.freeze({ startedAtMs: value['startedAtMs'], binding, entries: Object.freeze(entries) });
+    return Object.freeze({ startedAtMs: value['startedAtMs'], binding, entries: Object.freeze(entries), ...(receiveCoverage ? { receiveCoverage } : {}) });
   });
   if (!isDeepStrictEqual(windows.at(-1)?.binding, current)) throw new PaymentReplyHistoryError();
   return Object.freeze({ version: 1, windows: Object.freeze(windows) });

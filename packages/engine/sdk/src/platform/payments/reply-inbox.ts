@@ -29,7 +29,7 @@ import type { ChannelDeliveryReceipt } from '../channels/delivery/types.js';
 import { capturePaymentNoticeReceipt, matchesPaymentNoticeReceipt as matchesReceipt } from './notice-receipt.js';
 import { PaymentReplyHistoryOwner, type RetainedPaymentReplyHistory } from './reply-history-owner.js';
 import type { CheckoutWindowCheckpoint } from './checkout-window-checkpoint.js';
-import { PaymentReplyHistoryError, type PaymentReplyHistoryEntry } from './reply-history.js';
+import { PaymentReplyHistoryError, type PaymentReplyHistoryEntry, type PaymentReplyReceiveCoverage } from './reply-history.js';
 import type { ChannelDelivery } from './windows.js';
 import type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
 import type { TelegramSourceAccountReader } from '../channels/telegram/source-account.js';
@@ -59,7 +59,7 @@ interface Waiter {
 /** Value-free window failures; failure/cancellation can never mean silence. */
 export class PaymentReplyWindowError extends Error {
   readonly code = 'PAYMENT_REPLY_WINDOW_UNAVAILABLE';
-  constructor(readonly kind: 'invalid' | 'duplicate' | 'cancelled' | 'settled' | 'unsettled-reply' | 'reading-failed' | 'source-unavailable' | 'receive-uncovered' | 'history-unavailable' | 'clock-unavailable' | 'stale') {
+  constructor(readonly kind: 'invalid' | 'duplicate' | 'cancelled' | 'settled' | 'unsettled-reply' | 'reading-failed' | 'source-unavailable' | 'receive-uncovered' | 'coverage-unrecorded' | 'history-unavailable' | 'clock-unavailable' | 'stale') {
     super(`The payment reply window is unavailable: ${kind}.`);
     this.name = 'PaymentReplyWindowError';
   }
@@ -116,9 +116,10 @@ export class PaymentReplyInbox implements PaymentReplySource {
   }
 
   retainReplyHistory(purchaseId: string, checkpoint: CheckoutWindowCheckpoint,
-    append: (entry: PaymentReplyHistoryEntry, assertCurrent: () => void) => Promise<void>, assertCurrent: () => void): RetainedPaymentReplyHistory {
+    append: (entry: PaymentReplyHistoryEntry, assertCurrent: () => void) => Promise<void>, assertCurrent: () => void,
+    recordCoverage?: (coverage: PaymentReplyReceiveCoverage, assertCurrent: () => void) => Promise<void>): RetainedPaymentReplyHistory {
     if (this.#closed) throw new PaymentReplyInboxClosedError();
-    return this.#history.retain(purchaseId, checkpoint, append, assertCurrent);
+    return this.#history.retain(purchaseId, checkpoint, append, assertCurrent, recordCoverage);
   }
 
   /** Construction-only recovery preflight. A stored receipt identifies the
@@ -215,14 +216,25 @@ export class PaymentReplyInbox implements PaymentReplySource {
           if (!waiter.coverage) {
             const receipt = waiter.receipts.get('telegram');
             waiter.coverage = source.waitForCoverage(receipt, deadlineMs);
-            void waiter.coverage.then(covered => {
+            void waiter.coverage.then(async covered => {
               if (!this.current(waiter)) return;
               const now = this.currentTime();
               if (now === undefined || now < deadlineMs) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return; }
               if (waiter.readings > 0) { waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
-              try { if (waiter.source !== source) throw new Error(); source.assertReceiptCurrent(receipt); covered(); }
+              const current = () => {
+                if (!this.current(waiter) || waiter.source !== source) throw new Error();
+                source.assertReceiptCurrent(receipt); covered();
+                if (waiter.readings > 0) throw new PaymentReplyWindowError('unsettled-reply');
+              };
+              try { current(); }
               catch { waiter.cancel(new PaymentReplyWindowError('source-unavailable')); return; }
-              waiter.settle(null);
+              try {
+                if (!receipt) throw new PaymentReplyWindowError('source-unavailable');
+                await this.#history.recordReceiveCoverage(waiter.purchaseId, { resolution: 'silence', receipt, throughMs: deadlineMs, checkedAtMs: now }, current);
+                current(); waiter.settle(null);
+              } catch (error) {
+                if (this.current(waiter)) waiter.cancel(new PaymentReplyWindowError(error instanceof PaymentReplyHistoryError ? 'coverage-unrecorded' : 'source-unavailable'));
+              }
             }, () => {
               if (!this.current(waiter)) return;
               try { if (waiter.source !== source) throw new Error(); source.assertReceiptCurrent(receipt); }

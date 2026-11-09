@@ -6,8 +6,8 @@ import { captureCheckoutOwnership } from './checkout-ownership.js';
 import type { CheckoutWindowCheckpoint } from './checkout-window-checkpoint.js';
 import type { PaymentReplyCorrelation } from './reply-inbox.js';
 import { matchesPaymentNoticeReceipt } from './notice-receipt.js';
-import { PaymentReplyHistoryError, capturePaymentReplyHistoryEntry, paymentReplyHistoryBinding,
-  type PaymentReplyHistoryBinding, type PaymentReplyHistoryEntry } from './reply-history.js';
+import { PaymentReplyHistoryError, capturePaymentReplyHistoryEntry, capturePaymentReplyReceiveCoverage, paymentReplyHistoryBinding,
+  type PaymentReplyHistoryBinding, type PaymentReplyHistoryEntry, type PaymentReplyReceiveCoverage } from './reply-history.js';
 
 export interface RetainedPaymentReplyHistory {
   readonly binding: PaymentReplyHistoryBinding;
@@ -20,6 +20,7 @@ interface Watch {
   readonly append: (entry: PaymentReplyHistoryEntry, assertCurrent: () => void) => Promise<void>;
   readonly current: () => void;
   readonly work: OwnedWork;
+  readonly recordCoverage?: ((coverage: PaymentReplyReceiveCoverage, assertCurrent: () => void) => Promise<void>) | undefined;
 }
 export class PaymentReplyHistoryOwner {
   private readonly watches = new Map<string, Watch>();
@@ -29,10 +30,10 @@ export class PaymentReplyHistoryOwner {
   has(purchaseId: string): boolean { return this.watches.has(purchaseId); }
 
   retain(purchaseId: string, checkpoint: CheckoutWindowCheckpoint,
-    append: Watch['append'], assertCurrent: () => void): RetainedPaymentReplyHistory {
+    append: Watch['append'], assertCurrent: () => void, recordCoverage?: Watch['recordCoverage']): RetainedPaymentReplyHistory {
     if (this.closed || this.watches.has(purchaseId) || checkpoint.record.purchaseId !== purchaseId) throw new PaymentReplyHistoryError();
     const binding = paymentReplyHistoryBinding(checkpoint), current = captureCheckoutOwnership({ assertCurrent }).assertCurrent;
-    const watch = { binding, append, current, work: new OwnedWork() };
+    const watch = { binding, append, current, work: new OwnedWork(), recordCoverage };
     watch.current();
     if (this.closed || this.watches.has(purchaseId)) throw new PaymentReplyHistoryError();
     this.watches.set(purchaseId, watch); let retired: Promise<void> | undefined;
@@ -43,6 +44,21 @@ export class PaymentReplyHistoryOwner {
       void pending.then(() => this.retiring.delete(pending), () => this.retiring.delete(pending));
       return pending;
     } });
+  }
+
+  recordReceiveCoverage(purchaseId: string, value: PaymentReplyReceiveCoverage, assertCurrent: () => void): Promise<boolean> {
+    const watch = this.watches.get(purchaseId);
+    if (this.closed) return Promise.reject(new PaymentReplyHistoryError());
+    const write = watch?.recordCoverage;
+    if (!watch || !write) return Promise.resolve(false);
+    return watch.work.run(async () => {
+      try {
+        const coverage = capturePaymentReplyReceiveCoverage(value, watch.binding);
+        const source = captureCheckoutOwnership({ assertCurrent }).assertCurrent;
+        const current = () => { source(); watch.current(); };
+        current(); await write(coverage, current); current(); return true;
+      } catch { throw new PaymentReplyHistoryError(); }
+    });
   }
 
   record(text: string, correlation: PaymentReplyCorrelation | undefined, receivedAtMs: number): Promise<boolean> {

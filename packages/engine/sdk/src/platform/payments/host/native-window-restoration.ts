@@ -14,8 +14,8 @@ import { captureBrowserCheckoutRecovery } from '../../browser/browser-checkout-r
 import type { RestoredCheckoutPage } from '../../browser/browser-engine.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
 import { readPaymentsEnabled, readPaymentsServiceConfig, type PaymentsConfigReader } from '../payments-config.js';
-import { createChannelPaymentNotifier, readPaymentReply, type PaymentNoticeTarget } from '../notice-delivery.js';
-import { capturePaymentReplyHistory, type PaymentReplyHistory } from '../reply-history.js';
+import { createChannelPaymentNotifier, readPaymentReply, type PaymentNoticeTarget, type PaymentAnswer } from '../notice-delivery.js';
+import { capturePaymentReplyHistory, paymentReplyWindowReceiveCovered, type PaymentReplyHistory } from '../reply-history.js';
 import { capturePaymentNoticeReceipt } from '../notice-receipt.js';
 import { PaymentReplyWindowError, type PaymentReplyInbox } from '../reply-inbox.js';
 import { daemonNoticeRouter } from './notifier.js';
@@ -93,11 +93,10 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           const retiredWindow = new AbortController(), signal = AbortSignal.any([windowOwner.signal, retiredWindow.signal]);
           const windowCurrent = () => { signal.throwIfAborted(); current(); windowOwner.assertCurrent?.(); };
           const delivered = checkpoint.record.windowDeliveries?.filter(delivery => delivery.delivered) ?? [];
-          // The current native router has no durable history capability.
           // Reopen uncovered delivered channels only, at the exact acknowledged
           // recipient/account/topic. Never replace them with configured defaults
           // or treat a backfillable flag as proof that history was recovered.
-          if (!delivered.length || delivered.some(delivery => delivery.backfillable || delivery.channel !== 'telegram')) throw new PaymentReplyWindowError('source-unavailable');
+          if (!delivered.length || delivered.some(delivery => delivery.channel !== 'telegram')) throw new PaymentReplyWindowError('source-unavailable');
           const targets: PaymentNoticeTarget[] = [];
           const receipts = delivered.map(delivery => {
             const receipt = capturePaymentNoticeReceipt(delivery.receipt, 'telegram');
@@ -111,7 +110,9 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           });
           const notifier = createChannelPaymentNotifier({ requireDeliveryReceipt: true, router, targets, replies });
           let reception: import('../payment-ports.js').PaymentNoticeWindow | undefined, retired = false;
-          let historicalRefusal: 'deny' | 'object' | undefined;
+          // Undefined requires a fresh window. Null is covered silence, and
+          // an answer is an original-window reply under the restored owner.
+          let historicalAnswer: PaymentAnswer | null | undefined;
           const ready = (async () => {
             const pending = await Promise.allSettled(receipts.map(receipt => replies.retainTelegramReceipt(receipt, { signal, assertCurrent: windowCurrent })));
             const accounts: { assertCurrent(): void }[] = [];
@@ -131,14 +132,24 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
               catch { throw new PaymentReplyWindowError('history-unavailable'); }
               const originalWindow = history.windows.at(-1); if (!originalWindow) throw new PaymentReplyWindowError('source-unavailable');
               for (const entry of [...originalWindow.entries].sort((a, b) => a.sentAtMs - b.sentAtMs || Number(a.messageId) - Number(b.messageId) || Number(a.updateId) - Number(b.updateId))) {
-                if (entry.sentAtMs >= originalWindow.binding.deadlineMs) continue;
+                if (entry.receivedAtMs >= originalWindow.binding.deadlineMs && entry.sentAtMs >= originalWindow.binding.deadlineMs) continue;
                 const answer = await readPaymentReply(entry.text, kind, notice, signal, originalSources); originalSources();
                 // A saved objection is enough to stop a purchase. Positive
                 // answers and silence still need complete receive coverage;
                 // a stored list alone cannot prove an earlier reply is absent.
                 if (answer === 'deny' || answer === 'object') {
-                  historicalRefusal = answer; return checkpoint.record.windowDeliveries ?? [];
+                  historicalAnswer = answer; return checkpoint.record.windowDeliveries ?? [];
                 }
+              }
+              if (paymentReplyWindowReceiveCovered(originalWindow)) {
+                const now = Date.now();
+                if (!Number.isSafeInteger(now) || now < originalWindow.binding.deadlineMs
+                  || originalWindow.receiveCoverage?.some(coverage => coverage.checkedAtMs > now)) throw new PaymentReplyWindowError('clock-unavailable');
+                // This marker records the live window's silence resolution.
+                // A later model interpreting an old unclear message positively
+                // cannot promote that original result into an approval.
+                originalSources(); historicalAnswer = null;
+                return checkpoint.record.windowDeliveries ?? [];
               }
             }
             reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind, notice,
@@ -156,12 +167,12 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           const deliveries = ready.catch(error => { reception?.cancel(); throw error; }); void deliveries.catch(() => {});
           const deadlineMs = deliveries.then(() => {
             windowCurrent();
-            if (historicalRefusal) return checkpoint.record.windowDeadlineMs ?? Number.NaN;
+            if (historicalAnswer !== undefined) return checkpoint.record.windowDeadlineMs ?? Number.NaN;
             return Date.now() + (kind === 'approval' ? request.host.configuration.approvalMinutes : request.host.configuration.vetoMinutes) * 60_000;
           }); void deadlineMs.catch(() => {});
           return Object.freeze({ deliveries, deadlineMs, cancel: () => { retired = true; retiredWindow.abort(); reception?.cancel(); },
             awaitAnswer: (deadline: number) => { windowCurrent(); if (retired) throw new CheckoutOwnershipError();
-              if (historicalRefusal) return Promise.resolve({ answer: historicalRefusal, channel: 'telegram' as const });
+              if (historicalAnswer !== undefined) return Promise.resolve(historicalAnswer === null ? null : { answer: historicalAnswer, channel: 'telegram' as const });
               if (!reception) throw new CheckoutOwnershipError(); return reception.awaitAnswer(deadline); } });
         } }),
       });

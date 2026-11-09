@@ -183,6 +183,43 @@ test.each(['positive', 'after-deadline'] as const)('an archived %s reply cannot 
   });
 });
 
+test.each(['approval', 'veto'] as const)('an original %s window with persisted completed reception keeps its original expiry without another notice', async kind => {
+  const f = await fixture(); completeGatewayScopePolicyBootstrap(f.catalog);
+  const request = { ...f.request, window: { ...f.request.window, record: { ...f.request.window.record, windowKind: kind } } };
+  const binding = paymentReplyHistoryBinding(request.window), receipt = binding.receipts[0]; if (!receipt) throw new Error('Missing original receipt');
+  const history: PaymentReplyHistory = { version: 1, windows: [{ startedAtMs: 2, binding, entries: [],
+    receiveCoverage: [{ resolution: 'silence', receipt, throughMs: binding.deadlineMs, checkedAtMs: binding.deadlineMs + 1 }] }] };
+  const restored = await f.restore(request, { ...f.owner, readReplyHistory: async () => history }), window = restored.resumption.prepare(f.owner);
+  expect(await window.deliveries).toEqual(request.window.record.windowDeliveries ?? []);
+  expect(await window.deadlineMs).toBe(binding.deadlineMs); expect(await window.awaitAnswer(binding.deadlineMs)).toBeNull();
+  expect(f.sent).toEqual([]); expect(f.replies.inspect()).toEqual([]); window.cancel(); await restored.release();
+});
+
+test('a new positive interpretation cannot promote the original persisted silence into approval', async () => {
+  const f = await fixture(); completeGatewayScopePolicyBootstrap(f.catalog);
+  const binding = paymentReplyHistoryBinding(f.request.window), receipt = binding.receipts[0]; if (!receipt) throw new Error('Missing original receipt');
+  const history: PaymentReplyHistory = { version: 1, windows: [{ startedAtMs: 2, binding,
+    entries: [{ accountId: '123', userId: '42', conversationId: '-100123', threadId: null, messageId: '52', updateId: '91',
+      replyToMessageId: '51', sentAtMs: 3000, receivedAtMs: 4000, text: 'Previously unclear owner reply' }],
+    receiveCoverage: [{ resolution: 'silence', receipt, throughMs: binding.deadlineMs, checkedAtMs: binding.deadlineMs + 1 }] }] };
+  await withPaymentsReadings({ approvalReply: () => 'approve' }, async () => {
+    const restored = await f.restore(f.request, { ...f.owner, readReplyHistory: async () => history }), window = restored.resumption.prepare(f.owner);
+    await window.deliveries; expect(await window.awaitAnswer(await window.deadlineMs)).toBeNull();
+    expect(f.sent).toEqual([]); window.cancel(); await restored.release();
+  });
+});
+
+test.each(['other-notice', 'partial', 'future-clock'] as const)('a parsed %s marker cannot establish original completed coverage', async reason => {
+  const f = await fixture(); completeGatewayScopePolicyBootstrap(f.catalog);
+  const binding = paymentReplyHistoryBinding(f.request.window), receipt = binding.receipts[0]; if (!receipt) throw new Error('Missing original receipt');
+  const history: PaymentReplyHistory = { version: 1, windows: [{ startedAtMs: 2, binding, entries: [],
+    receiveCoverage: [{ resolution: 'silence', receipt: reason === 'other-notice' ? { ...receipt, messageId: '52' } : receipt,
+      throughMs: binding.deadlineMs - (reason === 'partial' ? 1 : 0), checkedAtMs: reason === 'future-clock' ? Date.now() + 60_000 : binding.deadlineMs + 1 }] }] };
+  const restored = await f.restore(f.request, { ...f.owner, readReplyHistory: async () => history }), window = restored.resumption.prepare(f.owner);
+  await expect(window.deliveries).rejects.toMatchObject({ kind: reason === 'future-clock' ? 'clock-unavailable' : 'history-unavailable' });
+  expect(f.sent).toEqual([]); window.cancel(); await restored.release();
+});
+
 test('the real staged executor hands its original lease to native restoration and remains stoppable after handoff', async () => {
   const f = await fixture(), store = new DurablePaymentOperations(join(f.root, 'operations'));
   const requests = new ProtectedPaymentRequests(join(f.root, 'requests')), journal = new MemoryCheckoutJournal();

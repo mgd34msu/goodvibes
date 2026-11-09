@@ -1,4 +1,5 @@
 import { HomeGraphQualityHeldError } from './home-graph/quality/types.js';
+import { KnowledgeExtractionJudgmentHoldError } from './extraction-policy.js';
 import { KnowledgeUriCanonicalizationHeldError } from './uri-canonicalization/types.js';
 import { KnowledgeExtractionValueHeldError } from './semantic/extraction-value/types.js';
 import { KnowledgeRepairFactScoringHeldError } from './semantic/repair-fact-scoring/types.js';
@@ -44,7 +45,7 @@ export class KnowledgeSourceQualityHeldError extends Error {
 
 /** These failures must not be swallowed before downstream knowledge writes. */
 export function isKnowledgeSourceQualityFailure(error: unknown): error is Error {
-  return error instanceof DecisionModelsDisabledError || error instanceof HomeGraphQualityHeldError || error instanceof KnowledgeUriCanonicalizationHeldError || error instanceof KnowledgeExtractionValueHeldError || error instanceof KnowledgeRepairFactScoringHeldError || error instanceof KnowledgeSelfImprovementAssessmentHeldError || error instanceof KnowledgeScopeSelectionHeldError || error instanceof KnowledgeWebGapRepairHeldError || error instanceof KnowledgeRepairSubjectSelectionHeldError || error instanceof KnowledgeRepairSourceAuthorityHeldError || error instanceof KnowledgeRepairFactUsefulnessHeldError || error instanceof KnowledgeRepairProfileHeldError || error instanceof KnowledgeNodeMutationHeldError || error instanceof KnowledgeNodeActivationHeldError || error instanceof KnowledgeGeneratedFactSupportHeldError || error instanceof KnowledgeSourceQualityHeldError || error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof JudgmentInputError;
+  return error instanceof DecisionModelsDisabledError || error instanceof KnowledgeExtractionJudgmentHoldError || error instanceof HomeGraphQualityHeldError || error instanceof KnowledgeUriCanonicalizationHeldError || error instanceof KnowledgeExtractionValueHeldError || error instanceof KnowledgeRepairFactScoringHeldError || error instanceof KnowledgeSelfImprovementAssessmentHeldError || error instanceof KnowledgeScopeSelectionHeldError || error instanceof KnowledgeWebGapRepairHeldError || error instanceof KnowledgeRepairSubjectSelectionHeldError || error instanceof KnowledgeRepairSourceAuthorityHeldError || error instanceof KnowledgeRepairFactUsefulnessHeldError || error instanceof KnowledgeRepairProfileHeldError || error instanceof KnowledgeNodeMutationHeldError || error instanceof KnowledgeNodeActivationHeldError || error instanceof KnowledgeGeneratedFactSupportHeldError || error instanceof KnowledgeSourceQualityHeldError || error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof JudgmentInputError;
 }
 export interface KnowledgePageSourceCandidate {
   readonly source: KnowledgeSourceRecord;

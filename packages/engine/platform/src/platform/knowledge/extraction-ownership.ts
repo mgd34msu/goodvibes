@@ -11,6 +11,8 @@ import { HomeGraphPagePriorityHeldError } from './home-graph/page-priority.js';
 import { HomeGraphQualityHeldError } from './home-graph/quality/types.js';
 import { KnowledgeUriCanonicalizationHeldError } from './uri-canonicalization/types.js';
 import { KnowledgeGeneratedFactSupportHeldError } from './semantic/verification/types.js';
+import { KnowledgeFactReadSetStaleError } from './semantic/fact-quality-types.js';
+import { KnowledgeRepairFactUsefulnessHeldError } from './semantic/repair-usefulness/types.js';
 
 /** Keep only the existing local refusal's finite reason. Borrowed messages,
  * stacks, extra properties and reason accessors never cross this boundary. */
@@ -19,9 +21,18 @@ function restrictionFailure(error: unknown): Error {
     if (error instanceof KnowledgeEntityAliasHoldError) return new KnowledgeEntityAliasHoldError();
     if (!(error instanceof KnowledgeSourceQualityHeldError || error instanceof HomeGraphPagePriorityHeldError
       || error instanceof HomeGraphQualityHeldError || error instanceof KnowledgeUriCanonicalizationHeldError
-      || error instanceof KnowledgeGeneratedFactSupportHeldError)) return new KnowledgeExtractionJudgmentHoldError();
+      || error instanceof KnowledgeGeneratedFactSupportHeldError || error instanceof KnowledgeRepairFactUsefulnessHeldError)) return new KnowledgeExtractionJudgmentHoldError();
     const descriptor = Object.getOwnPropertyDescriptor(error, 'reason');
     const reason: unknown = descriptor && 'value' in descriptor ? descriptor.value : undefined;
+    if (error instanceof KnowledgeFactReadSetStaleError) {
+      const fact = Object.getOwnPropertyDescriptor(error, 'factId');
+      const factId: unknown = fact && 'value' in fact ? fact.value : undefined;
+      return reason === 'stale' && typeof factId === 'string' && factId.length > 0
+        ? new KnowledgeFactReadSetStaleError(factId) : new KnowledgeExtractionJudgmentHoldError();
+    }
+    if (error instanceof KnowledgeRepairFactUsefulnessHeldError
+      && (reason === 'unconfigured' || reason === 'unavailable' || reason === 'uncertain' || reason === 'not-useful'
+        || reason === 'malformed' || reason === 'aborted' || reason === 'budget' || reason === 'stale')) return new KnowledgeRepairFactUsefulnessHeldError(reason);
     if (error instanceof KnowledgeSourceQualityHeldError
       && (reason === 'unsettled' || reason === 'unavailable' || reason === 'no-match' || reason === 'stale' || reason === 'aborted')) return new KnowledgeSourceQualityHeldError(reason);
     if (error instanceof HomeGraphPagePriorityHeldError

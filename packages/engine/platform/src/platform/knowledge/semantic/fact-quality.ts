@@ -12,6 +12,8 @@ import { createSemanticWriteGuard, type SemanticWriteGuard } from './primary-sou
 import { createRepairFactUsefulnessReader, createKnowledgePageFactUsefulnessReader,
   KnowledgeRepairFactUsefulnessHeldError as Held, type RepairFactUsefulnessInput } from './repair-usefulness/reader.js';
 import { readString, readStringArray } from './utils.js';
+import { KnowledgeFactReadSetStaleError } from './fact-quality-types.js';
+export { KnowledgeFactReadSetStaleError } from './fact-quality-types.js';
 
 const USEFUL_PAGE_FACT_KINDS = new Set([
   'feature',
@@ -86,11 +88,6 @@ export interface KnowledgeFactQualityPlan {
   /** Advance only a successfully persisted, semantically identical prepared proposal. */
   acknowledgeWritten(fact: KnowledgeNodeRecord): void;
   acknowledgeEdgeWritten(edge: KnowledgeEdgeRecord): void;
-}
-
-/** Only a changed candidate fact or its support edges can issue this recovery signal. */
-export class KnowledgeFactReadSetStaleError extends Held {
-  constructor(readonly factId: string) { super('stale'); }
 }
 
 function claimFor(fact: KnowledgeNodeRecord): RepairFactUsefulnessInput['fact'] {

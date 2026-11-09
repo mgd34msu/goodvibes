@@ -32,7 +32,7 @@ import {
 } from './_helpers/knowledge-semantic-fixtures.js';
 
 describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
-  test('semantic reindex excludes generated page sources from enrichment input', async () => {
+  test.each(['fresh', 'saved-protected'] as const)('semantic reindex excludes generated sources and preserves %s wiki identity', async identity => {
     answerReadings.set({ extractedKinds: [['LG 86NANO90UNA has webOS smart TV features and a 4K NanoCell display.', 'feature']], repairUseful: [['LG 86NANO90UNA has webOS smart TV features and a 4K NanoCell display.', 'LG 86NANO90UNA has webOS smart TV features and a 4K NanoCell display.', 'LG 86NANO90UNA has webOS smart TV features and a 4K NanoCell display.']] });
     const { store } = createStores();
     const spaceId = homeAssistantKnowledgeSpaceId('house');
@@ -59,8 +59,6 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
       metadata: { knowledgeSpaceId: spaceId },
     });
     const source = await store.upsertSource({
-      // Its real wiki-page digest has a card-shaped digit run. Reindex must
-      // retain the native identity rather than depend on random fixture IDs.
       id: 'owned-page-source-689',
       connectorId: 'manual',
       sourceType: 'manual',
@@ -79,6 +77,11 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
       metadata: { knowledgeSpaceId: spaceId },
     });
 
+    const historicalPageId = 'sem-page-4111111111111111';
+    if (identity === 'saved-protected') await store.upsertNode({ id: historicalPageId, kind: 'wiki_page',
+      slug: 'historical-source-wiki', title: 'LG source knowledge page', status: 'draft', sourceId: source.id,
+      metadata: { knowledgeSpaceId: spaceId, semanticKind: 'wiki_page' } });
+
     answerReadings.addExtractionValue(...extractionValueFixtureFor(source, store.getExtractionBySourceId(source.id), 0.99));
     const result = await semantic.reindex({ knowledgeSpaceId: spaceId, limit: 10 });
 
@@ -91,18 +94,26 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
     expect(store.getSource(source.id)?.metadata.semanticEnrichment).toBeUndefined();
     const page = store.listNodes(20).find(node => node.kind === 'wiki_page' && node.sourceId === source.id)!;
     expect(page).toBeDefined();
-    expect(judgmentInputProblem(page.id)).toBe('card-material');
+    if (identity === 'saved-protected') {
+      expect(page.id).toBe(historicalPageId);
+      expect(judgmentInputProblem(page.id)).toBe('card-material');
+    } else {
+      expect(page.id).toMatch(/^sem-page-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+      expect(judgmentInputProblem(page.id)).toBeUndefined();
+    }
     const admission = prepareKnowledgeRecordAdmission(store, 'node', page);
     admission.assertCurrent();
-    expect(() => prepareKnowledgeRecordAdmission(store, 'node', structuredClone(page))).toThrow(JudgmentInputError);
+    if (identity === 'saved-protected') expect(() => prepareKnowledgeRecordAdmission(store, 'node', structuredClone(page))).toThrow(JudgmentInputError);
+    else expect(() => prepareKnowledgeRecordAdmission(store, 'node', structuredClone(page))).toThrow();
     const reopened = new KnowledgeStore({ dbPath: store.storagePath });
     try {
       await reopened.init();
-      expect(() => prepareKnowledgeRecordAdmission(reopened, 'node', reopened.getNode(page.id)!)).toThrow(JudgmentInputError);
+      expect(reopened.getNode(page.id)?.id).toBe(page.id);
+      if (identity === 'saved-protected') expect(() => prepareKnowledgeRecordAdmission(reopened, 'node', reopened.getNode(page.id)!)).toThrow(JudgmentInputError);
     } finally { await reopened.close(); }
     await store.replaceNodeRecord({ ...page, summary: 'Replaced publication' });
     expect(() => admission.assertCurrent()).toThrow();
-    expect(() => prepareKnowledgeRecordAdmission(store, 'node', store.getNode(page.id)!)).toThrow(JudgmentInputError);
+    if (identity === 'saved-protected') expect(() => prepareKnowledgeRecordAdmission(store, 'node', store.getNode(page.id)!)).toThrow(JudgmentInputError);
   });
 
   test('scheduled self-improvement repairs intrinsic device gaps without waiting for Ask', async () => {
@@ -538,14 +549,17 @@ describe('semantic knowledge/wiki enrichment: runtime bounds', () => {
       });
     }
 
-    await new KnowledgeSemanticService(store).selfImprove({ knowledgeSpaceId: spaceId, limit: 2 });
+    // These intentionally retained duplicate intrinsic-role rows are separate
+    // selected recovery tasks, not authority for a unique subject-role lookup.
+    const gapIds = gaps.map(gap => gap.id);
+    await new KnowledgeSemanticService(store).selfImprove({ knowledgeSpaceId: spaceId, gapIds, limit: 2 });
     expect(store.listRefinementTasks(10, { spaceId })
       .filter((task) => /No semantic gap repairer is configured/i.test(task.blockedReason ?? ''))).toHaveLength(2);
 
     const semantic = new KnowledgeSemanticService(store, {
       gapRepairer: async () => ({ searched: true, ingestedSourceIds: [], skippedUrls: [] }),
     });
-    await semantic.selfImprove({ knowledgeSpaceId: spaceId, limit: 1 });
+    await semantic.selfImprove({ knowledgeSpaceId: spaceId, gapIds, limit: 1 });
 
     expect(store.listRefinementTasks(10, { spaceId })
       .filter((task) => /No semantic gap repairer is configured/i.test(task.blockedReason ?? ''))).toHaveLength(0);

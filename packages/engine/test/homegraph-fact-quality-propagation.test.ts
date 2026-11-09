@@ -8,6 +8,7 @@ import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/test
 import { createWorkLedger } from '../platform/src/platform/workflow/work-ledger/service.js';
 import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
 import { KnowledgeStore } from '../platform/src/platform/knowledge/store.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
 import { buildHomeGraphMetadata } from '../platform/src/platform/knowledge/home-graph/helpers.js';
 import { renderDevicePassportPage } from '../platform/src/platform/knowledge/home-graph/rendering.js';
 import { refreshDevicePagesForHomeGraphAsk } from '../platform/src/platform/knowledge/home-graph/ask-page-refresh.js';
@@ -17,10 +18,10 @@ import { withTestTimeout } from './_helpers/test-timeout.js';
 
 const spaceId = 'homeassistant:fact-quality-propagation';
 const installationId = 'fact-quality-propagation';
-const roots: string[] = [];
+const roots: string[] = [], stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => { installJudgmentPort(previous); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+afterEach(async () => { installJudgmentPort(previous); await Promise.all(stores.splice(0).map(store => store.close())); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 function readings(probability = 0.99) {
   const fake = fakePort((name, question) => {
@@ -37,8 +38,9 @@ function readings(probability = 0.99) {
 async function fixture() {
   readings();
   const root = mkdtempSync(join(tmpdir(), 'homegraph-fact-quality-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); await store.init();
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-home-graph.sqlite') }); stores.push(store); await store.init();
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
   const metadata = (extra = {}) => buildHomeGraphMetadata(spaceId, installationId, extra);
   const device = await seedHomeAssistantObservation(store, { id: 'subject-device', kind: 'ha_device', slug: 'subject-device', title: 'Reference appliance', status: 'active', metadata: metadata({ homeAssistant: { objectId: 'appliance', objectKind: 'device' } }) });
   const source = await store.upsertSource({ id: 'device-manual', connectorId: 'homeassistant', sourceType: 'manual', title: 'Reference appliance manual', status: 'indexed', canonicalUri: 'https://reference.example.test/manual', summary: 'Replace the appliance filter every six months.', metadata: metadata() });

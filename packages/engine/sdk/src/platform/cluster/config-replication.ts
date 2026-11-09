@@ -91,6 +91,10 @@ export interface ConfigReplicationHost {
   /** True when this machine is the one that issues revisions. */
   isMaster(): boolean;
   groupState(): GroupStateDocument | null;
+  /** Original live membership/key/store owner, checked before every later effect.
+   * Already-entered storage effects remain owned and are never blindly undone.
+   */
+  captureAuthority(envelope?: ClusterEnvelope): () => void;
   nodeKeys(): NodeKeyMaterial | null;
   config(): ReplicatedConfigStore | null;
   secrets(): ReplicatedSecretStore | null;
@@ -153,6 +157,11 @@ export class ConfigReplicationService {
    * all, including one made while this process was not running.
    */
   async reconcileLocalConfig(): Promise<void> {
+    await this.reconcileLocal(this.host.captureAuthority());
+  }
+
+  private async reconcileLocal(assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     if (!this.host.isMaster()) return;
     const config = this.host.config();
     if (!config) return;
@@ -182,8 +191,10 @@ export class ConfigReplicationService {
     }
     if (changed.length === 0) return;
     this.document = document;
+    assertCurrent();
     this.host.persist(document);
-    await this.broadcastDelta(changed);
+    await this.broadcastDelta(changed, assertCurrent);
+    assertCurrent();
   }
 
   /**
@@ -196,6 +207,7 @@ export class ConfigReplicationService {
    */
   async announceLocalChange(path: string): Promise<void> {
     if (!isReplicatedConfigPath(path)) return;
+    const assertCurrent = this.host.captureAuthority(); assertCurrent();
     const config = this.host.config();
     if (this.host.isMaster()) {
       const current = config?.get(path);
@@ -206,8 +218,11 @@ export class ConfigReplicationService {
         origin: this.host.nodeId,
         at: this.host.now(),
       });
+      assertCurrent();
       this.host.persist(this.document);
-      await this.broadcastDelta([path]);
+      assertCurrent();
+      await this.broadcastDelta([path], assertCurrent);
+      assertCurrent();
       return;
     }
     const value = config?.get(path);
@@ -216,28 +231,36 @@ export class ConfigReplicationService {
     // issues the revision and broadcasts it back; that is what keeps a single
     // writer in the normal case.
     this.pendingProposals += 1;
-    await this.host.send(CONFIG_MESSAGE_TYPES.propose, { path, value, secret: false });
+    assertCurrent();
+    await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.propose, { path, value, secret: false });
+    assertCurrent();
   }
 
   /** Replicate a secret the operator set on this machine. */
   async announceLocalSecret(configPath: string): Promise<void> {
     if (!isReplicatedConfigPath(configPath)) return;
+    const assertCurrent = this.host.captureAuthority(); assertCurrent();
     const secrets = this.host.secrets();
     if (!secrets) return;
     const secretKey = replicatedSecretKeyFor(configPath);
     const value = await secrets.get(secretKey);
+    assertCurrent();
     if (value === null) return;
     if (!this.host.isMaster()) {
       this.pendingProposals += 1;
-      await this.sendSealed(CONFIG_MESSAGE_TYPES.propose, configPath, value);
+      await this.sendSealed(CONFIG_MESSAGE_TYPES.propose, configPath, value, assertCurrent);
+      assertCurrent();
       return;
     }
-    await this.publishSecret(configPath, value);
+    await this.publishSecret(configPath, value, assertCurrent);
+    assertCurrent();
   }
 
   /** Delete a setting across the group. */
   async announceLocalDelete(path: string, secret = false): Promise<void> {
     if (!isReplicatedConfigPath(path) || !this.host.isMaster()) return;
+    const assertCurrent = this.host.captureAuthority(); assertCurrent();
+    const secrets = this.host.secrets();
     this.document = deleteReplicaEntry(this.document, {
       path,
       origin: this.host.nodeId,
@@ -246,20 +269,30 @@ export class ConfigReplicationService {
     });
     // Clear it here too, where the store can. A deletion the operator made on
     // the group should not leave this machine still running the old value.
-    this.host.config()?.reset?.(path);
-    if (secret) await this.host.secrets()?.delete(replicatedSecretKeyFor(path));
+    assertCurrent(); this.host.config()?.reset?.(path);
+    assertCurrent();
+    if (secret) { await secrets?.delete(replicatedSecretKeyFor(path)); assertCurrent(); }
+    assertCurrent();
     this.host.persist(this.document);
-    await this.host.send(CONFIG_MESSAGE_TYPES.delta, {
+    assertCurrent();
+    await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, {
       deletes: [{ path, revision: this.document.revision, origin: this.host.nodeId, at: this.host.now(), secret }],
     });
   }
 
   // ── sending ───────────────────────────────────────────────────────────────
 
-  private async broadcastDelta(paths: readonly string[]): Promise<void> {
+  private async send(assertCurrent: () => void, type: string, body: Record<string, unknown>): Promise<void> {
+    assertCurrent();
+    await this.host.send(type, body);
+    assertCurrent();
+  }
+
+  private async broadcastDelta(paths: readonly string[], assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     const entries = this.document.entries.filter((entry) => paths.includes(entry.path) && !entry.secret);
     if (entries.length === 0) return;
-    await this.host.send(CONFIG_MESSAGE_TYPES.delta, { entries });
+    await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, { entries });
   }
 
   /**
@@ -270,7 +303,8 @@ export class ConfigReplicationService {
    * replica file and never appears in a snapshot that is not individually
    * sealed.
    */
-  private async publishSecret(configPath: string, value: string): Promise<void> {
+  private async publishSecret(configPath: string, value: string, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     this.document = putReplicaEntry(this.document, {
       path: configPath,
       value: { secretRevision: this.document.revision + 1 },
@@ -278,12 +312,16 @@ export class ConfigReplicationService {
       at: this.host.now(),
       secret: true,
     });
+    assertCurrent();
     this.host.persist(this.document);
-    await this.sendSealed(CONFIG_MESSAGE_TYPES.delta, configPath, value);
+    assertCurrent();
+    await this.sendSealed(CONFIG_MESSAGE_TYPES.delta, configPath, value, assertCurrent);
+    assertCurrent();
   }
 
   /** Seal `value` to every current member and send it. */
-  private async sendSealed(type: string, configPath: string, value: string): Promise<void> {
+  private async sendSealed(type: string, configPath: string, value: string, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     const members = this.host.groupState()?.members ?? [];
     const sealed: Record<string, unknown> = {};
     for (const member of members) {
@@ -291,7 +329,7 @@ export class ConfigReplicationService {
       sealed[member.nodeId] = sealForMember(member.agreementKey, value, SECRET_SEAL_CONTEXT);
     }
     if (Object.keys(sealed).length === 0) return;
-    await this.host.send(type, {
+    await this.send(assertCurrent, type, {
       secretPath: configPath,
       revision: this.document.revision,
       sealed,
@@ -300,49 +338,63 @@ export class ConfigReplicationService {
 
   /** Ask the group for everything. Sent by a machine that has just joined. */
   async requestSnapshot(): Promise<void> {
-    await this.host.send(CONFIG_MESSAGE_TYPES.request, {});
+    const assertCurrent = this.host.captureAuthority(); assertCurrent();
+    await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.request, {});
+    assertCurrent();
   }
 
   // ── receiving ─────────────────────────────────────────────────────────────
 
   /** Route a config-replication datagram that already verified under the group key. */
   async handle(envelope: ClusterEnvelope): Promise<void> {
+    const assertCurrent = this.host.captureAuthority(envelope); assertCurrent();
     switch (envelope.type) {
       case CONFIG_MESSAGE_TYPES.request:
-        await this.onRequest(envelope);
+        await this.onRequest(envelope, assertCurrent);
+        assertCurrent();
         return;
       case CONFIG_MESSAGE_TYPES.snapshot:
-        await this.onSnapshot(envelope);
+        await this.onSnapshot(envelope, assertCurrent);
+        assertCurrent();
         return;
       case CONFIG_MESSAGE_TYPES.delta:
-        await this.onDelta(envelope);
+        await this.onDelta(envelope, assertCurrent);
+        assertCurrent();
         return;
       case CONFIG_MESSAGE_TYPES.propose:
-        await this.onPropose(envelope);
+        await this.onPropose(envelope, assertCurrent);
+        assertCurrent();
         return;
       default:
     }
   }
 
-  private async onRequest(envelope: ClusterEnvelope): Promise<void> {
+  private async onRequest(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     if (!this.host.isMaster() || envelope.nodeId === this.host.nodeId) return;
-    await this.host.send(CONFIG_MESSAGE_TYPES.snapshot, { document: this.document });
+    await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.snapshot, { document: this.document });
+    assertCurrent();
     // Secrets are not in the document, so each one is sent sealed to the asker.
     const secrets = this.host.secrets();
     const member = this.host.groupState()?.members.find((entry) => entry.nodeId === envelope.nodeId);
     if (!secrets || !member) return;
     for (const entry of this.document.entries.filter((candidate) => candidate.secret)) {
+      assertCurrent();
       const value = await secrets.get(replicatedSecretKeyFor(entry.path));
+      assertCurrent();
+      if (findReplicaEntry(this.document, entry.path) !== entry) throw new Error('Original replicated secret entry changed');
       if (value === null) continue;
-      await this.host.send(CONFIG_MESSAGE_TYPES.delta, {
+      await this.send(assertCurrent, CONFIG_MESSAGE_TYPES.delta, {
         secretPath: entry.path,
         revision: entry.revision,
         sealed: { [member.nodeId]: sealForMember(member.agreementKey, value, SECRET_SEAL_CONTEXT) },
       });
+      assertCurrent();
     }
   }
 
-  private async onSnapshot(envelope: ClusterEnvelope): Promise<void> {
+  private async onSnapshot(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     if (envelope.nodeId === this.host.nodeId) return;
     const incoming = readConfigReplicaDocument(envelope.body['document'], isReplicatedConfigPath);
     if (!incoming) {
@@ -352,13 +404,16 @@ export class ConfigReplicationService {
       return;
     }
     const merged = mergeConfigReplica(this.document, incoming);
-    await this.applyDocument(merged, envelope.nodeId);
+    await this.applyDocument(merged, envelope.nodeId, assertCurrent);
+    assertCurrent();
   }
 
-  private async onDelta(envelope: ClusterEnvelope): Promise<void> {
+  private async onDelta(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     if (envelope.nodeId === this.host.nodeId) return;
     if (typeof envelope.body['secretPath'] === 'string') {
-      await this.applySealedSecret(envelope);
+      await this.applySealedSecret(envelope, assertCurrent);
+      assertCurrent();
       return;
     }
     const incoming = readConfigReplicaDocument(
@@ -372,7 +427,8 @@ export class ConfigReplicationService {
       isReplicatedConfigPath,
     );
     if (!incoming) return;
-    await this.applyDocument(mergeConfigReplica(this.document, incoming), envelope.nodeId);
+    await this.applyDocument(mergeConfigReplica(this.document, incoming), envelope.nodeId, assertCurrent);
+    assertCurrent();
   }
 
   /**
@@ -382,7 +438,8 @@ export class ConfigReplicationService {
    * policy check before issuing a revision, a peer does not get to name a path
    * this machine would not have replicated itself.
    */
-  private async onPropose(envelope: ClusterEnvelope): Promise<void> {
+  private async onPropose(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     if (!this.host.isMaster() || envelope.nodeId === this.host.nodeId) return;
     if (typeof envelope.body['secretPath'] === 'string') {
       const opened = this.openSealed(envelope);
@@ -390,9 +447,12 @@ export class ConfigReplicationService {
       if (opened === null || !isReplicatedConfigPath(path)) return;
       const secrets = this.host.secrets();
       if (!secrets) return;
-      await secrets.set(replicatedSecretKeyFor(path), opened);
+      assertCurrent(); await secrets.set(replicatedSecretKeyFor(path), opened);
+      assertCurrent();
       this.logApplied(path, envelope.nodeId, true);
-      await this.publishSecret(path, opened);
+      assertCurrent();
+      await this.publishSecret(path, opened, assertCurrent);
+      assertCurrent();
       return;
     }
     const path = envelope.body['path'];
@@ -400,9 +460,12 @@ export class ConfigReplicationService {
     if (typeof path !== 'string' || !isReplicatedConfigPath(path) || !isReplicableValue(value)) return;
     const config = this.host.config();
     if (!config) return;
-    config.set(path, value);
+    assertCurrent(); config.set(path, value);
+    assertCurrent();
     this.logApplied(path, envelope.nodeId, false);
-    await this.reconcileLocalConfig();
+    assertCurrent();
+    await this.reconcileLocal(assertCurrent);
+    assertCurrent();
   }
 
   private openSealed(envelope: ClusterEnvelope): string | null {
@@ -427,7 +490,8 @@ export class ConfigReplicationService {
    * it would quietly make the group's secrets undecryptable after a keyfile
    * rotation on one machine.
    */
-  private async applySealedSecret(envelope: ClusterEnvelope): Promise<void> {
+  private async applySealedSecret(envelope: ClusterEnvelope, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
     const path = envelope.body['secretPath'];
     if (typeof path !== 'string' || !isReplicatedConfigPath(path)) return;
     const secrets = this.host.secrets();
@@ -435,7 +499,8 @@ export class ConfigReplicationService {
     if (!secrets || opened === null) return;
     const secretKey = replicatedSecretKeyFor(path);
     if (!isReplicatedSecretKey(secretKey)) return;
-    await secrets.set(secretKey, opened);
+    assertCurrent(); await secrets.set(secretKey, opened);
+    assertCurrent();
     const revision = envelope.body['revision'];
     this.document = putReplicaEntry(this.document, {
       path,
@@ -444,23 +509,29 @@ export class ConfigReplicationService {
       at: this.host.now(),
       secret: true,
     });
+    assertCurrent();
     this.host.persist(this.document);
-    this.logApplied(path, envelope.nodeId, true);
+    assertCurrent(); this.logApplied(path, envelope.nodeId, true);
   }
 
   /** Apply a merged document to this machine's config, then persist it. */
-  private async applyDocument(merged: ConfigReplicaDocument, from: string): Promise<void> {
+  private async applyDocument(merged: ConfigReplicaDocument, from: string, assertCurrent: () => void): Promise<void> {
+    assertCurrent();
+    const secrets = this.host.secrets();
     const config = this.host.config();
     if (!config) return;
     const before = this.document;
     this.document = merged;
+    assertCurrent();
     this.host.persist(merged);
 
     for (const entry of merged.entries) {
+      assertCurrent();
       if (entry.secret) continue;
       const existing = findReplicaEntry(before, entry.path);
       if (existing && existing.revision === entry.revision) continue;
       if (JSON.stringify(config.get(entry.path)) === JSON.stringify(entry.value)) continue;
+      assertCurrent();
       try {
         config.set(entry.path, entry.value);
         this.logApplied(entry.path, entry.origin, false);
@@ -475,6 +546,7 @@ export class ConfigReplicationService {
       }
     }
     for (const tombstone of merged.tombstones) {
+      assertCurrent();
       if (!before.tombstones.some((entry) => entry.path === tombstone.path
         && entry.revision === tombstone.revision)) {
         this.host.logger.info('cluster: a setting was deleted by another machine in the group', {
@@ -482,9 +554,11 @@ export class ConfigReplicationService {
           origin: tombstone.origin,
         });
       }
-      if (tombstone.secret) await this.host.secrets()?.delete(replicatedSecretKeyFor(tombstone.path));
+      assertCurrent();
+      if (tombstone.secret) { await secrets?.delete(replicatedSecretKeyFor(tombstone.path)); assertCurrent(); }
       else config.reset?.(tombstone.path);
     }
+    assertCurrent();
     this.lastAppliedFrom = from;
     this.lastAppliedAt = this.host.now();
     this.pendingProposals = 0;
@@ -508,10 +582,12 @@ export class ConfigReplicationService {
 
   /** Bound the document. Called from the group runtime's housekeeping pass. */
   sweep(now: number): void {
+    const assertCurrent = this.host.captureAuthority(); assertCurrent();
     const swept = sweepConfigReplica(this.document, now);
     if (swept.droppedTombstones === 0) return;
-    this.document = swept.document;
+    assertCurrent(); this.document = swept.document;
     this.host.persist(swept.document);
+    assertCurrent();
     this.host.logger.debug('cluster: expired old replicated-setting deletions', {
       dropped: swept.droppedTombstones,
     });

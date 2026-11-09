@@ -33,6 +33,7 @@ import {
 import {
   DEFAULT_GROUP_DISPLAY_NAME,
   mergeGroupState,
+  isCurrentMember,
   readGroupStateDocument,
   sweepGroupState,
   touchMember,
@@ -187,6 +188,7 @@ export class ClusterGroupRuntime {
       now: () => options.clock.now(),
       isMaster: () => options.isMaster?.() ?? false,
       groupState: () => this.state,
+      captureAuthority: envelope => this.captureConfigAuthority(envelope),
       nodeKeys: () => this.material?.node ?? null,
       config: () => options.config ?? null,
       secrets: () => this.replicatedSecrets(),
@@ -545,6 +547,45 @@ export class ClusterGroupRuntime {
   /** Tell the group about a credential an operator just set on this machine. */
   async announceSecretChange(configPath: string): Promise<void> {
     await this.runGroupWork(() => this.replication?.announceLocalSecret(configPath));
+  }
+
+  /** Bind one replication operation to its original live membership. A shared
+   * group-key envelope authenticates the group, not an independent per-node
+   * signature; roster identity checks restrict the claimed sender accordingly.
+   * Heartbeats/names are not membership generations and never invalidate it.
+   */
+  private captureConfigAuthority(envelope?: ClusterEnvelope): () => void {
+    const material = this.material, state = this.state, revision = this.membershipRevision;
+    if (!material || !state || state.groupId !== material.groupId) throw new ClusterMembershipOperationError('abandoned');
+    const groupId = material.groupId, node = material.node;
+    const secrets = this.options.secrets, config = this.options.config;
+    const master = this.options.isMaster?.() ?? false;
+    const sender = envelope?.nodeId ?? this.options.nodeId, generation = envelope?.keyGen;
+    const selectedKey = generation === undefined ? null : this.keyring().keyForGeneration(generation);
+    const originalMembers = [...new Set([this.options.nodeId, sender])].map(nodeId => {
+      const member = state.members.find(candidate => candidate.nodeId === nodeId);
+      if (!member || !isCurrentMember(state, nodeId)) throw new ClusterMembershipOperationError('abandoned');
+      return { nodeId, gen: member.gen, admittedAt: member.admittedAt,
+        identityKey: member.identityKey, agreementKey: member.agreementKey };
+    });
+    const assertCurrent = () => {
+      if (this.runtimeStopping || this.membershipTransition || !this.membershipOperations.available
+        || this.membershipRevision !== revision || this.material?.groupId !== groupId || this.material.node !== node
+        || this.options.secrets !== secrets || this.options.config !== config || (this.options.isMaster?.() ?? false) !== master
+        || this.state?.groupId !== groupId || (envelope && envelope.groupId !== groupId)) throw new ClusterMembershipOperationError('abandoned');
+      if (generation !== undefined && (selectedKey === null || !this.keyring().acceptedGenerations().includes(generation)
+        || this.keyring().keyForGeneration(generation) !== selectedKey)) throw new ClusterMembershipOperationError('abandoned');
+      const current = this.state;
+      for (const original of originalMembers) {
+        const member = current.members.find(candidate => candidate.nodeId === original.nodeId);
+        if (!member || !isCurrentMember(current, original.nodeId) || member.gen !== original.gen
+          || member.admittedAt !== original.admittedAt || member.identityKey !== original.identityKey
+          || member.agreementKey !== original.agreementKey
+          || current.tombstones.some(tombstone => tombstone.nodeId === original.nodeId && tombstone.gen >= original.gen)) throw new ClusterMembershipOperationError('abandoned');
+      }
+      this.stateOwner.assertCurrent();
+    };
+    assertCurrent(); return assertCurrent;
   }
 
   /**

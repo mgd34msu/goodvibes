@@ -56,6 +56,11 @@ export class TelegramApiError extends Error {
 /** One Telegram Update, kept as an opaque record, the adapter parses it. */
 export type TelegramUpdate = Record<string, unknown>;
 
+/** A malformed batch must never look like an empty receive queue. */
+export class TelegramUpdateResponseError extends Error {
+  constructor() { super('Telegram returned an invalid update batch. Receiving stopped before advancing its cursor.'); this.name = 'TelegramUpdateResponseError'; }
+}
+
 export interface TelegramWebhookInfo {
   readonly url: string;
   readonly pendingUpdateCount: number;
@@ -160,7 +165,16 @@ export class TelegramBotApi {
       // type cannot consume the offset without producing anything.
       allowed_updates: ['message', 'edited_message', 'channel_post', 'edited_channel_post'],
     }, options.signal);
-    return Array.isArray(result) ? result.filter((entry): entry is TelegramUpdate => readRecord(entry) !== null) : [];
+    const limit = options.limit ?? 100;
+    if (!Array.isArray(result) || !Number.isSafeInteger(limit) || limit < 1 || limit > 100 || result.length > limit) throw new TelegramUpdateResponseError();
+    const ids = new Set<number>();
+    for (const value of result) {
+      const entry = readRecord(value), id = entry?.['update_id'];
+      if (!entry || Array.isArray(value) || typeof id !== 'number' || !Number.isSafeInteger(id) || id < 0 || ids.has(id)
+        || options.offset !== undefined && id < options.offset) throw new TelegramUpdateResponseError();
+      ids.add(id);
+    }
+    return result as TelegramUpdate[];
   }
 
   /** Point Telegram at a public delivery URL, with the shared secret header. */

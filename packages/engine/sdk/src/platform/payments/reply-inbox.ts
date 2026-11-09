@@ -15,14 +15,16 @@
  * could settle either, so it settles neither; each window then falls to its
  * own silence rule, which is the owner's rule for no answer.
  *
- * The wait resolves null at the deadline, and only then. Null means silence
- * and nothing else (payment-ports.ts). A failed reading, or an owner reply
- * still unresolved at the deadline, fails the wait; neither is silence.
+ * The wait can resolve null only after the deadline. Native Telegram waits
+ * also require the original poller to finish receiving through that deadline.
+ * Null means silence and nothing else (payment-ports.ts). A failed reading or
+ * unconfirmed receive span fails the wait; neither is silence.
  */
 import type { PaymentReplySource, PaymentAnswer, PreparedPaymentReply } from './notice-delivery.js';
 import { readPaymentReply } from './notice-delivery.js';
 import { parseCommandAuthorityChannel, type CommandAuthorityChannel, type PaymentAnswerChannel } from './types.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import type { ChannelDeliveryReceipt } from '../channels/delivery/types.js';
 import { capturePaymentNoticeReceipt, matchesPaymentNoticeReceipt as matchesReceipt } from './notice-receipt.js';
 import { PaymentReplyHistoryOwner, type RetainedPaymentReplyHistory } from './reply-history-owner.js';
@@ -48,6 +50,7 @@ interface Waiter {
   readonly abort: AbortController;
   readings: number;
   source: PaymentReplySourceGuard | undefined;
+  coverage?: Promise<() => void>;
   expire(): void;
   settle(answer: { readonly answer: PaymentAnswer; readonly channel: PaymentAnswerChannel } | null): void;
   cancel(error: Error): void;
@@ -56,7 +59,7 @@ interface Waiter {
 /** Value-free window failures; failure/cancellation can never mean silence. */
 export class PaymentReplyWindowError extends Error {
   readonly code = 'PAYMENT_REPLY_WINDOW_UNAVAILABLE';
-  constructor(readonly kind: 'invalid' | 'duplicate' | 'cancelled' | 'settled' | 'unsettled-reply' | 'reading-failed' | 'source-unavailable' | 'history-unavailable' | 'clock-unavailable' | 'stale') {
+  constructor(readonly kind: 'invalid' | 'duplicate' | 'cancelled' | 'settled' | 'unsettled-reply' | 'reading-failed' | 'source-unavailable' | 'receive-uncovered' | 'history-unavailable' | 'clock-unavailable' | 'stale') {
     super(`The payment reply window is unavailable: ${kind}.`);
     this.name = 'PaymentReplyWindowError';
   }
@@ -202,13 +205,34 @@ export class PaymentReplyInbox implements PaymentReplySource {
         if (now === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return; }
         if (now < deadlineMs) { armTimer(); return; }
         if (waiter.requireDeliveryReceipt && waiter.armedChannels?.some(channel => !waiter.receipts.get(channel)?.accountId)) { waiter.cancel(new PaymentReplyWindowError('source-unavailable')); return; }
-        if (waiter.readings > 0) { waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
         if (waiter.requireDeliveryReceipt && waiter.armedChannels?.includes('telegram')) {
+          const source = waiter.source;
           try {
-            if (!waiter.source) throw new Error();
-            waiter.source.assertReceiptCurrent(waiter.receipts.get('telegram'));
+            if (!source) throw new Error();
+            source.assertReceiptCurrent(waiter.receipts.get('telegram'));
           } catch { waiter.cancel(new PaymentReplyWindowError('source-unavailable')); return; }
+          if (!source) { waiter.cancel(new PaymentReplyWindowError('source-unavailable')); return; }
+          if (!waiter.coverage) {
+            const receipt = waiter.receipts.get('telegram');
+            waiter.coverage = source.waitForCoverage(receipt, deadlineMs);
+            void waiter.coverage.then(covered => {
+              if (!this.current(waiter)) return;
+              const now = this.currentTime();
+              if (now === undefined || now < deadlineMs) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return; }
+              if (waiter.readings > 0) { waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
+              try { if (waiter.source !== source) throw new Error(); source.assertReceiptCurrent(receipt); covered(); }
+              catch { waiter.cancel(new PaymentReplyWindowError('source-unavailable')); return; }
+              waiter.settle(null);
+            }, () => {
+              if (!this.current(waiter)) return;
+              try { if (waiter.source !== source) throw new Error(); source.assertReceiptCurrent(receipt); }
+              catch { waiter.cancel(new PaymentReplyWindowError('source-unavailable')); return; }
+              waiter.cancel(new PaymentReplyWindowError('receive-uncovered'));
+            });
+          }
+          return;
         }
+        if (waiter.readings > 0) { waiter.cancel(new PaymentReplyWindowError('unsettled-reply')); return; }
         waiter.settle(null);
       },
       settle: (answer) => {
@@ -227,7 +251,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) onAbort();
     if (requireDeliveryReceipt && channels.includes('telegram') && this.current(waiter)) {
-      waiter.source = this.#sources.reserveTelegram(waiter.abort.signal);
+      waiter.source = this.#sources.reserveTelegram(waiter.abort.signal, this.currentTime() ?? Number.NaN);
     }
     return Object.freeze({
       waitForAnswer: (armed: { readonly deadlineMs: number; readonly channels: readonly CommandAuthorityChannel[]; readonly deliveries?: readonly ChannelDelivery[] | undefined }) => {
@@ -291,7 +315,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
     this.expireWindows();
     return Object.freeze([...this.#waiting.values()]
       .filter(waiter => purchaseId === undefined || waiter.purchaseId === purchaseId)
-      .flatMap(waiter => waiter.deadlineMs === undefined ? [] : [Object.freeze({ purchaseId: waiter.purchaseId, windowId: waiter.windowId,
+      .flatMap(waiter => waiter.deadlineMs === undefined || waiter.coverage !== undefined ? [] : [Object.freeze({ purchaseId: waiter.purchaseId, windowId: waiter.windowId,
         kind: waiter.kind, notice: waiter.notice, deadlineMs: waiter.deadlineMs })]));
   }
 
@@ -302,6 +326,9 @@ export class PaymentReplyInbox implements PaymentReplySource {
     if (this.#closed) throw new PaymentReplyInboxClosedError();
     const waiter = this.#waiting.get(input.purchaseId);
     if (!waiter || waiter.deadlineMs === undefined || waiter.windowId !== input.windowId) throw new PaymentReplyWindowError('stale');
+    const now = this.currentTime();
+    if (now === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); throw new PaymentReplyWindowError('stale'); }
+    if (now >= waiter.deadlineMs) { waiter.expire(); throw new PaymentReplyWindowError('stale'); }
     this.expireWindows();
     if (!this.current(waiter)) throw new PaymentReplyWindowError('stale');
     if (input.action !== 'approve' && input.action !== 'deny' && input.action !== 'cancel') throw new PaymentReplyWindowError('invalid');
@@ -318,6 +345,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
    */
   offer(channel: CommandAuthorityChannel, text: string, correlation?: PaymentReplyCorrelation, options: { readonly archiveOnly?: boolean } = {}): Promise<PaymentReplyOffer> {
     if (this.#closed) return Promise.resolve({ consumed: false, reason: 'no-window' });
+    const receivedAtMs = this.currentTime();
     this.expireWindows();
     if (this.#closed) return Promise.resolve({ consumed: false, reason: 'no-window' });
     const context = correlation === undefined ? undefined : Object.freeze({ ...correlation });
@@ -327,9 +355,17 @@ export class PaymentReplyInbox implements PaymentReplySource {
       return !context || !receipt || matchesReceipt(receipt, context);
     });
     if (waiting.length === 0 || options.archiveOnly) {
-      const receivedAtMs = this.currentTime();
       const work = Promise.resolve().then(async (): Promise<PaymentReplyOffer> => {
-        if (channel === 'telegram' && await this.#history.record(text, context, receivedAtMs ?? Number.NaN)) return { consumed: false, reason: 'recorded' };
+        const recorded = channel === 'telegram' && await this.#history.record(text, context, receivedAtMs ?? Number.NaN);
+        if (options.archiveOnly) {
+          // Retain potential owner objections even while Classic is selected.
+          // Ordinary chat still reaches its conversation; only an explicit
+          // notice reply gets a storage-only acknowledgement. An uninterpreted
+          // owner message cannot later become quiet expiry of a live purchase.
+          for (const waiter of waiting) waiter.cancel(new DecisionModelsDisabledError('interpreting a purchase approval or veto reply'));
+          if (context?.replyToMessageId === undefined) return { consumed: false, reason: 'decision-model-required' };
+        }
+        if (recorded) return { consumed: false, reason: 'recorded' };
         return { consumed: false, reason: options.archiveOnly ? 'decision-model-required' : 'no-window' };
       });
       this.#offers.add(work); void work.then(() => this.#offers.delete(work), () => this.#offers.delete(work)); return work;
@@ -342,13 +378,14 @@ export class PaymentReplyInbox implements PaymentReplySource {
     // Count admission now too: a reentrant expiry cannot call this silence.
     waiter.readings++;
     // Track admission before the judgment port can synchronously request close.
-    const work = Promise.resolve().then(() => this.readOffer(waiter, channel, text, context));
+    const work = Promise.resolve().then(() => this.readOffer(waiter, channel, text, receivedAtMs, context));
     this.#offers.add(work);
     void work.then(() => this.#offers.delete(work), () => this.#offers.delete(work));
     return work;
   }
 
-  private async readOffer(waiter: Waiter, channel: CommandAuthorityChannel, text: string, context?: PaymentReplyCorrelation): Promise<PaymentReplyOffer> {
+  private async readOffer(waiter: Waiter, channel: CommandAuthorityChannel, text: string, receivedAtMs: number | undefined, context?: PaymentReplyCorrelation): Promise<PaymentReplyOffer> {
+    let recorded = false;
     try {
       this.expireWindows();
       if (!this.current(waiter)) return { consumed: false, reason: 'no-window' };
@@ -367,31 +404,48 @@ export class PaymentReplyInbox implements PaymentReplySource {
       if (receipt && context && !matchesReceipt(receipt, context)) return { consumed: false, reason: 'no-window' };
       context?.assertCurrent?.();
       if (channel === 'telegram' && context) {
-        const receivedAtMs = this.currentTime();
         if (receivedAtMs === undefined) throw new PaymentReplyWindowError('clock-unavailable');
-        await this.#history.record(text, context, receivedAtMs);
-        context.assertCurrent?.(); if (!this.current(waiter)) return { consumed: false, reason: 'recorded' };
+        recorded = await this.#history.record(text, context, receivedAtMs);
+        context.assertCurrent?.(); if (!this.current(waiter)) return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
       }
       if (waiter.deadlineMs === undefined) throw new PaymentReplyWindowError('invalid');
-      const arrivedAt = this.currentTime();
-      if (arrivedAt === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return { consumed: false, reason: 'no-window' }; }
-      if (arrivedAt >= waiter.deadlineMs) { waiter.expire(); return { consumed: false, reason: 'no-window' }; }
+      if (receivedAtMs === undefined) throw new PaymentReplyWindowError('clock-unavailable');
+      // Polling may deliver a queued, on-time provider reply while expiry is
+      // awaiting receive progress. Provider dates have whole-second precision;
+      // late processing can grant only when the entire timestamp bucket fits.
+      const providerTime = context?.sentAtMs;
+      const validProviderTime = providerTime !== undefined && Number.isSafeInteger(providerTime) && providerTime >= 0;
+      const providerOnTime = waiter.requireDeliveryReceipt && validProviderTime && providerTime + 1000 <= waiter.deadlineMs;
+      if (receivedAtMs >= waiter.deadlineMs && !providerOnTime) {
+        // A queued reply with missing time or a timestamp bucket overlapping
+        // expiry might be an on-time objection. It cannot authorize spending
+        // or be discarded as silence. A wholly later reply stays outside the
+        // original window. Actual local arrival before expiry needs no date.
+        if (waiter.requireDeliveryReceipt && (!validProviderTime || providerTime < waiter.deadlineMs))
+          waiter.cancel(new PaymentReplyWindowError('unsettled-reply'));
+        else waiter.expire();
+        return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
+      }
       const answer = await readPaymentReply(text, waiter.kind, waiter.notice, waiter.abort.signal, context?.assertCurrent?.bind(context));
       context?.assertCurrent?.();
       // A late result cannot revive this window, nor a later wait reusing its ID.
-      if (!this.current(waiter)) return { consumed: false, reason: 'no-window' };
+      if (!this.current(waiter)) return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
       const answeredAt = this.currentTime();
       if (answeredAt === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return { consumed: false, reason: 'no-window' }; }
-      if (answeredAt >= waiter.deadlineMs) { waiter.expire(); return { consumed: false, reason: 'no-window' }; }
+      if (answeredAt >= waiter.deadlineMs) {
+        waiter.expire();
+        if (!this.current(waiter) || waiter.coverage === undefined) return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
+      }
       if (answer === null) return { consumed: false, reason: 'not-an-answer' };
       waiter.settle({ answer, channel });
       return { consumed: true, answer };
     } catch (error) {
       if (!this.current(waiter) && (error === waiter.abort.signal.reason || (error instanceof JudgmentError && error.kind === 'aborted')))
-        return { consumed: false, reason: 'no-window' };
+        return { consumed: false, reason: recorded ? 'recorded' : 'no-window' };
       // A reply arrived but could not be interpreted. Allowing the veto timer
       // to call this silence would spend while the decision layer is unavailable.
       if (this.current(waiter)) waiter.cancel(error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable'
+        || error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError
         ? error : new PaymentReplyWindowError(error instanceof PaymentReplyHistoryError ? 'history-unavailable' : 'reading-failed'));
       throw error;
     } finally { waiter.readings--; }

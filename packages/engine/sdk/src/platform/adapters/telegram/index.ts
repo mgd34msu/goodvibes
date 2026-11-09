@@ -4,6 +4,7 @@ import { constantTimeEquals, parseJsonRecord, readTextBodyWithinLimit } from '..
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { logger } from '../../utils/logger.js';
 import { parseTelegramBotCommand, telegramBotCommandReply } from './commands.js';
+import type { TelegramReceiveScope } from '../../channels/telegram/receive-progress.js';
 
 /**
  * Capabilities an ingress mode lends to update handling.
@@ -28,6 +29,18 @@ export interface TelegramUpdateDeps {
 
 function readRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null;
+}
+
+export function readTelegramUpdateMessage(payload: Record<string, unknown>): Record<string, unknown> | null {
+  return readRecord(payload.message) ?? readRecord(payload.edited_message) ?? readRecord(payload.channel_post) ?? readRecord(payload.edited_channel_post);
+}
+/** The same message selection used by processing. Unknown recipient/topic
+ * cannot be treated as an irrelevant failure in another conversation. */
+export function telegramUpdateReceiveScope(payload: Record<string, unknown>): TelegramReceiveScope | undefined {
+  const message = readTelegramUpdateMessage(payload), chat = readRecord(message?.chat), id = chat?.id, thread = message?.message_thread_id;
+  if (typeof id !== 'number' || !Number.isSafeInteger(id) || id === 0
+    || thread !== undefined && (typeof thread !== 'number' || !Number.isSafeInteger(thread) || thread <= 0)) return undefined;
+  return Object.freeze({ conversationId: String(id), ...(thread === undefined ? {} : { threadId: String(thread) }) });
 }
 
 function readString(value: unknown): string | undefined {
@@ -133,10 +146,7 @@ export async function processTelegramUpdate(
   context: SurfaceAdapterContext,
   deps: TelegramUpdateDeps = {},
 ): Promise<Response> {
-  const message = readRecord(payload.message)
-    ?? readRecord(payload.edited_message)
-    ?? readRecord(payload.channel_post)
-    ?? readRecord(payload.edited_channel_post);
+  const message = readTelegramUpdateMessage(payload);
   if (!message) {
     logger.info('handleTelegramSurfaceWebhook: update ignored', {
       reason: 'unsupported-update-type',

@@ -1,4 +1,10 @@
 import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
+import type { TelegramReceiveProgressOwner, TelegramReceiveScope } from './receive-progress.js';
+
+export interface TelegramReceiveCoverageReservation {
+  waitFor(handle: TelegramSourceAccountHandle, sinceMs: number, throughMs: number, signal: AbortSignal, scope: TelegramReceiveScope): Promise<() => void>;
+}
 
 /** Public provider identity only. No token, token hash, or source text belongs here. */
 export interface TelegramSourceAccountSnapshot {
@@ -25,6 +31,9 @@ export interface TelegramSourceAccountReader {
   assertCurrent(handle: TelegramSourceAccountHandle): TelegramSourceAccountSnapshot;
   /** Last verified live-session identity for display. Not an admission check. */
   current(): TelegramSourceAccountSnapshot | null;
+  /** Synchronous pre-notice reservation of this exact receiving session.
+   * A later attachment, including the same bot, cannot fill a prior gap. */
+  retainReceiveCoverage?(): TelegramReceiveCoverageReservation | null;
 }
 
 export interface TelegramSourceAccountLease {
@@ -44,6 +53,7 @@ export interface TelegramSourceAccountSession {
   /** Required local-owner fence for the gap after an awaited credential read. */
   readonly isCurrentSync: () => boolean;
   readonly lifetime: AbortSignal;
+  readonly receiveProgress?: TelegramReceiveProgressOwner;
 }
 
 export interface TelegramSourceAccountOwner {
@@ -188,6 +198,28 @@ export function createTelegramSourceAccountOwner(): TelegramSourceAccountOwner {
         return record.snapshot;
       },
       current: () => active && live(active) ? active.snapshot : null,
+      retainReceiveCoverage(): TelegramReceiveCoverageReservation | null {
+        const session = active;
+        if (!session || !live(session) || !session.options.receiveProgress) return null;
+        const span = session.options.receiveProgress.retain();
+        if (!span || typeof span.waitFor !== 'function') { drainOwned(span); return null; }
+        const wait = span.waitFor.bind(span);
+        if (!live(session)) return null;
+        return Object.freeze({ waitFor: async (handle: TelegramSourceAccountHandle, sinceMs: number, throughMs: number, signal: AbortSignal, scope: TelegramReceiveScope) => {
+          const originalScope = Object.freeze({ conversationId: scope.conversationId, threadId: scope.threadId });
+          const record = handles.get(handle);
+          if (!record || record.session !== session || !await check(session) || !live(session)) throw new Error('Telegram receive source is unavailable');
+          const covered = await wait(sinceMs, throughMs, AbortSignal.any([signal, session.controller.signal]), originalScope);
+          if (typeof covered !== 'function') { drainOwned(covered); throw new Error('Telegram receive assertion is unavailable'); }
+          if (!await check(session) || !live(session)) throw new Error('Telegram receive source is unavailable');
+          const assertCovered = () => {
+            if (signal.aborted || !live(session)) throw new Error('Telegram receive source is unavailable');
+            const result: unknown = covered();
+            if (result !== undefined) { drainOwned(result); throw new Error('Telegram receive assertions must be synchronous'); }
+          };
+          assertCovered(); return assertCovered;
+        } });
+      },
     }),
     attach(options: TelegramSourceAccountSession): TelegramSourceAccountLease {
       const session = attachSession(options);

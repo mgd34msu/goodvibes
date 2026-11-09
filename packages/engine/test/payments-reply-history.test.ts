@@ -141,3 +141,19 @@ test('retiring a window drains its admitted native identity read and archive wri
   expect(await offering).toEqual({ consumed: false, reason: 'recorded' }); await retiring;
   expect((await f.read()).replyHistory?.windows[0]?.entries).toEqual([f.entry]);
 });
+
+test('Classic preserves an unaddressed owner message for the original notice without suppressing its chat turn', async () => {
+  const f = await fixture(), inbox = new PaymentReplyInbox({ now: () => 4000 });
+  const lifetime = new AbortController(), accounts = createTelegramSourceAccountOwner();
+  cleanup.push(async () => { await inbox.close(); lifetime.abort(); }); cleanup.push(configureDecisionModelPolicy(() => 'Classic - Off'));
+  const lease = accounts.attach({ lifetime: lifetime.signal, isCurrent: async () => true, isCurrentSync: () => true,
+    readIdentity: async () => ({ id: '123', username: 'fixture_bot' }) });
+  const retained = inbox.retainReplyHistory(f.original.purchaseId, f.window, (entry, current) =>
+    f.store.appendReply(f.original.purchaseId, f.original.operationId, f.binding, entry, current), () => {});
+  const policy = { allowed: true, reason: 'owner', policy: { allowlistUserIds: ['42'] } } as unknown as ChannelPolicyDecision;
+  const result = await tryResolvePaymentReplyFromChannel({ surface: 'telegram', userId: '42', channelId: '-100123', text: 'stop',
+    acquireTelegramAccount: lease.acquire, metadata: { updateId: '91', messageId: '52', messageSentAtMs: 3000 } }, policy, inbox, accounts.reader);
+  expect(result).toEqual({ consumed: false, reason: 'decision-model-required' });
+  expect((await f.read()).replyHistory?.windows[0]?.entries).toEqual([{ ...f.entry, replyToMessageId: null, text: 'stop' }]);
+  await retained.retire();
+});

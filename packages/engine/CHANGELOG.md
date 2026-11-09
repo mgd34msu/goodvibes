@@ -4,6 +4,14 @@
 
 ### Fixed
 
+- Require the original native Telegram poller to process through a payment
+  deadline before treating it as silence. Reject skipped or unconfirmed receive
+  spans, keep queued on-time replies answerable, preserve decision-model outage
+  errors, and reject ambiguous provider timestamps. Expired operator views
+  cannot answer while the receive drain is pending. Classic retains potential
+  replies without swallowing ordinary chat or treating unread replies as silence.
+  Durable restart/backlog and webhook coverage remain unfinished.
+
 - Retain authorized Telegram owner replies in the original encrypted checkout
   request before confirming provider delivery. Keep prior-window replies separate,
   preserve first receipt time on redelivery and stop receiving if archival fails.

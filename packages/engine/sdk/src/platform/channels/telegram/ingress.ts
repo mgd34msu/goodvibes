@@ -28,13 +28,14 @@ import type { ConfigManager } from '../../config/manager.js';
 import type { SecretsManager } from '../../config/secrets.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
 import type { SurfaceAdapterContext } from '../../adapters/types.js';
-import { processTelegramUpdate } from '../../adapters/telegram/index.js';
+import { processTelegramUpdate, telegramUpdateReceiveScope } from '../../adapters/telegram/index.js';
 import { isSecretRefInput, normalizeSecretRef, resolveSecretInput } from '../../config/secret-refs.js';
 import { looksLikeSecretRef } from '../../config/secret-ref-refusal.js';
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { IngressProcessingHealth, type ChannelIngressAlarm } from '../ingress-alarm.js';
-import { TelegramApiError, TelegramBotApi, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
+import { TelegramApiError, TelegramBotApi, TelegramUpdateResponseError, type TelegramBotIdentity, type TelegramUpdate } from './api.js';
+import { TelegramPollingReceiveProgress, TelegramReceiveCoverageError } from './receive-progress.js';
 import { TelegramOffsetStore, TelegramOffsetStoreError, type TelegramOffsetStart } from './offset-store.js';
 import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './conflict-policy.js';
 import { TelegramCursorMigration } from './cursor-migration.js';
@@ -72,6 +73,8 @@ export interface TelegramIngressStatus {
 }
 
 export interface TelegramIngressDeps {
+  /** Construction-only receive clock; native composition uses Date.now. */
+  readonly now?: (() => number) | undefined;
   readonly configManager: ConfigManager;
   readonly secretsManager: SecretsManager;
   readonly serviceRegistry: ServiceRegistry;
@@ -427,11 +430,13 @@ export class TelegramIngressSupervisor {
     this.stopped = false;
     const lifetime = new AbortController();
     this.abort = lifetime;
+    const receiveProgress = new TelegramPollingReceiveProgress(lifetime.signal, this.deps.now ?? Date.now);
     const live = (): boolean => generation === this.generation && !this.stopped
       && this.abort === lifetime && !lifetime.signal.aborted
       && Boolean(this.deps.configManager.get('surfaces.telegram.enabled'))
       && this.deps.configManager.get('surfaces.telegram.mode') === 'polling';
     const sourceAccount = this.deps.telegramSourceAccounts?.attach({
+      receiveProgress,
       lifetime: lifetime.signal,
       readIdentity: (signal) => api.getVerifiedIdentity(signal),
       isCurrentSync: () => live() && this.credentialUnsubscribe !== null
@@ -458,7 +463,7 @@ export class TelegramIngressSupervisor {
       logger.error('Telegram polling stopped because its saved cursor needs inspection', { kind: start.kind });
       return this.settle('inactive', start.reason);
     }
-    this.loop = this.runPollLoop(api, store, lifetime.signal, start, sourceAccount)
+    this.loop = this.runPollLoop(api, store, lifetime.signal, start, sourceAccount, receiveProgress)
       .finally(() => { lifetime.abort(); });
     return this.settle('polling',
       `long-polling Telegram getUpdates for bot ${api.botId} (no public URL required)`, true);
@@ -472,6 +477,7 @@ export class TelegramIngressSupervisor {
     lifetime: AbortSignal,
     start: Exclude<TelegramOffsetStart, { readonly mode: 'blocked' }>,
     sourceAccount?: TelegramSourceAccountLease,
+    receiveProgress?: TelegramPollingReceiveProgress,
   ): Promise<void> {
     let offset: number | undefined = start.mode === 'resume' ? start.offset : undefined;
     let backoffMs = BACKOFF_MIN_MS;
@@ -479,9 +485,10 @@ export class TelegramIngressSupervisor {
 
     while (!this.stopped && !lifetime.aborted) {
       try {
+        const startedAtMs = receiveProgress?.beginRequest();
         const updates = await api.getUpdates({
           offset,
-          timeoutSeconds: POLL_TIMEOUT_SECONDS,
+          timeoutSeconds: receiveProgress?.timeoutSeconds(POLL_TIMEOUT_SECONDS) ?? POLL_TIMEOUT_SECONDS,
           signal: lifetime,
         });
         backoffMs = BACKOFF_MIN_MS;
@@ -502,12 +509,13 @@ export class TelegramIngressSupervisor {
           };
         }
         if (updates.length > 0) {
-          offset = await this.dispatchBatch(updates, api, offset, sourceAccount);
+          offset = await this.dispatchBatch(updates, api, offset, sourceAccount, receiveProgress);
           if (offset !== undefined) offset = store.save(offset, () => {
             lifetime.throwIfAborted();
             if (this.stopped || this.abort?.signal !== lifetime) throw new Error('Telegram polling owner retired');
           });
         }
+        if (startedAtMs !== undefined) receiveProgress?.completeRequest(startedAtMs, updates.length === 0);
       } catch (error) {
         if (this.stopped || lifetime.aborted || (error instanceof Error && error.name === 'AbortError')) return;
         if (error instanceof TelegramOffsetStoreError) {
@@ -519,6 +527,11 @@ export class TelegramIngressSupervisor {
           this.currentStatus = { mode: 'inactive', reason: error.message, running: false };
           logger.error('Telegram polling stopped before confirming an unsaved payment reply'); return;
         }
+        if (error instanceof TelegramUpdateResponseError || error instanceof TelegramReceiveCoverageError) {
+          this.currentStatus = { mode: 'inactive', reason: error.message, running: false };
+          logger.error('Telegram receive progress became unavailable'); return;
+        }
+        if (error instanceof TelegramApiError && error.errorCode === 409) receiveProgress?.gap();
 
         const terminal = await this.handlePollError(error, api, () => {
           conflictRecoveries += 1;
@@ -727,20 +740,26 @@ export class TelegramIngressSupervisor {
     api: TelegramBotApi,
     current: number | undefined,
     sourceAccount?: TelegramSourceAccountLease,
+    receiveProgress?: TelegramPollingReceiveProgress,
   ): Promise<number | undefined> {
     let offset = current;
     const context = this.deps.buildSurfaceAdapterContext();
     for (const update of updates) {
       if (this.stopped) break;
       const updateId = typeof update.update_id === 'number' ? update.update_id : null;
+      const scope = telegramUpdateReceiveScope(update);
+      const messageUpdate = ['message', 'edited_message', 'channel_post', 'edited_channel_post'].some(key => Object.hasOwn(update, key));
+      if (messageUpdate && !scope) receiveProgress?.gap();
       try {
-        await processTelegramUpdate(update, context, {
+        const response = await processTelegramUpdate(update, context, {
           sendMessage: (input) => api.sendMessage(input),
           ...(sourceAccount ? { acquireSourceAccount: sourceAccount.acquire } : {}),
         });
+        if (!response.ok) receiveProgress?.gap(scope);
         this.processing.recordSuccess();
       } catch (error) {
         if (error instanceof PaymentReplyHistoryError) throw error;
+        receiveProgress?.gap(scope);
         // Still advance past it, a cursor wedged on one poison update
         // redelivers it forever. What is no longer true is that skipping is
         // quiet: IngressProcessingHealth degrades the surface and reaches the

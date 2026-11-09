@@ -69,6 +69,8 @@ export function paymentOperationDescription(operation: PaymentOperationView): st
       ? 'No decision models are currently available. Check provider keys, endpoints, model access and any local model service, then review this checkout before starting a new one.'
       : operation.outcome === 'refused:reply-history-unavailable'
         ? 'The purchase reply could not be saved. Receiving stopped before confirming its cursor. Inspect payment and channel status before starting another checkout.'
+      : operation.outcome === 'refused:receive-uncovered'
+        ? 'The purchase stopped because its original reply receive span could not be confirmed. Check skipped updates, competing bot consumers and the system clock. Unattended expiry requires the native polling receiver; explicit owner replies remain separate.'
       : operation.outcome === 'reply-source-unavailable'
         ? 'The purchase reply channel could not be verified. Check Telegram polling or webhook registration and bot account settings, or use the paired host’s Payments controls for a new checkout.'
       : operation.outcome === 'decision-disabled'

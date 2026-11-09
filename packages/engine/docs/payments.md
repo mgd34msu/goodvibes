@@ -3,9 +3,10 @@
 **Status:** partially implemented. This document is the design of record.
 Current checkout checks the live quote before card entry and submission. A verified
 replacement price for the same purchase re-enters the budget decision and opens a
-new window (§8.4). Browser continuation after restart and notification backfill
-remain unfinished; current-source integration and release qualification remain
-pending. The retained requirements below are not completion claims.
+new window (§8.4). Native startup can restore an eligible original payment window
+and retain its replies. Complete downtime/backlog coverage remains unfinished;
+current-source integration and release qualification remain pending. The retained
+requirements below are not completion claims.
 **The behaviors recorded here are contractual. Do not revise them silently.**
 Choices made under zero-deferrals where no owner ruling existed are listed in
 §12.1 as rulings taken, with their reasoning, so they can be overturned
@@ -774,7 +775,7 @@ write stays with that purchase. After the report and deadline are durable, the
 window accepts channel replies only from channels where that notice was
 delivered. Operator controls become available when the window is armed. A
 cancelled send or failed journal write retires its queued replies; an unresolved
-reply at the deadline fails the window instead of counting as silence.
+reply that cannot be resolved fails the window instead of counting as silence.
 
 The journal retains the exact rendered window notice. When Telegram supplies a
 complete native acknowledgement, its actual numeric chat, message and optional
@@ -782,7 +783,8 @@ thread IDs are retained with that channel's delivery report. A configured chat
 alias is not substituted for the acknowledged recipient after sending. Earlier
 journals and adapters without receipts leave this metadata absent. A receipt
 does not establish that history can be backfilled and cannot authorize a resumed
-checkout; native restart continuation and missed-reply recovery remain unfinished.
+checkout. Native restoration and encrypted reply archival are wired as described
+in §8.6.1; complete receive coverage across downtime remains unfinished.
 
 Telegram receipts also retain the public sending-bot ID when the provider
 acknowledges it. A channel answer must match that account, recipient and topic.
@@ -807,11 +809,34 @@ ingress reader and starts verifying that original account. At the deadline it
 checks the same private session handle against the sending-bot receipt. Missing
 or pending verification, a stopped/replaced ingress, revoked credentials, or a
 retired facade fails the wait; another live session with the same bot ID cannot
-retroactively establish silence. This check performs no provider request at
-expiry. The paired Payments controls remain usable before expiry even when
-the channel source is unavailable. Shutdown drains admitted account reads.
-Live source custody does not establish missed-message coverage; durable reply
-history, downtime coverage and restart continuation remain unfinished.
+retroactively establish silence. This check does not repeat the provider identity
+request. The paired Payments controls remain usable before expiry even when the
+channel source is unavailable. Shutdown drains admitted account reads.
+
+For live native polling, silence also requires the original receiving loop to
+finish processing through the deadline. Reception retains that exact loop before
+sending the notice. After dispatch and durable cursor persistence, a subsequent
+empty request started at or after the deadline can settle the wait. A response
+to a request started earlier is insufficient. This uses the serving poller,
+without starting another consumer. Skipped processing in the same chat/topic,
+another polling consumer, clock regression, source retirement or a receive gap
+past Telegram's retention invalidates the original span. The purchase reports
+unconfirmed reception instead of spending through that failure.
+
+A queued owner reply sent before expiry can still answer while that drain is
+pending. When processing starts after expiry, its entire one-second provider
+timestamp bucket must fit before the deadline. Missing time or an overlapping
+bucket fails the wait rather than counting as silence. Original local arrival
+before expiry stays on time across account or storage awaits. Decision-model
+exhaustion remains a decision-model failure. Switching to Classic does not turn
+an uninterpreted owner reply into silence: potential replies remain archived,
+ordinary chat stays available, and the semantic purchase wait fails.
+
+The live progress record is not durable cross-restart proof. Native webhook
+identity alone does not supply this polling barrier; explicit owner answers can
+still settle a webhook window before expiry, but unattended expiry requires
+confirmed receive coverage. Durable downtime and webhook coverage remain work
+in progress; see §8.6.1.
 
 Telegram's retained update queue is bounded and is not a complete chat-history
 service; restart recovery must establish which replies were actually received
@@ -920,11 +945,9 @@ left the cart in. It never silently abandons a cart.
 
 ### 8.6 What each window is built on, and what happens across a restart
 
-**Correction (2026-08-21, v2.0.19): neither window is built on `ApprovalBroker`
-or on a persisted automation job today, and neither survives a daemon
-restart yet.** This section originally described a restart-safe design; what
-follows is what the current code actually does, and where the gap between the
-two still is.
+**Neither window is built on `ApprovalBroker` or a persisted automation job.**
+Eligible native windows can be restored under their original authority as
+described in §8.6.1. Complete downtime/backlog coverage remains unfinished.
 
 Both windows run through the same port, `PaymentNotifier.awaitAnswer()`
 (`platform/payments/notice-delivery.ts`), called inline from `runCheckout()`
@@ -935,8 +958,8 @@ by exact purchase and window reference, even after the initiating socket closes.
 (`platform/control-plane/approval-broker.ts`) anywhere in the payments module,
 and no use of `AutomationManager.createJob()` or `AutomationAtSchedule` either.
 The wait itself is in memory, owned and drained by the payment registration.
-Operation status and checkout phases are durable; restart does not reconstruct
-the browser execution or automatically submit the order.
+Operation status and checkout phases are durable. Native startup can attempt
+original browser restoration; it never infers permission to submit from status.
 
 Before the native daemon acknowledges admission, it also durably saves the
 original checkout input, source evidence, paired identity and payment settings
@@ -948,8 +971,8 @@ Cancellation during this save prevents execution and waits for storage cleanup.
 Confirmed purchases and known pre-submit refusals/cancellations remove their
 protected request. Unknown and unverified submissions retain it for reconciliation.
 The saved facts do not authorize execution: restart continuation still needs
-the original paired authority and a valid browser/page continuation, and remains
-unfinished.
+the original paired authority and a valid browser/page continuation. Native
+startup supplies those checks for eligible awaiting-window records (§8.6.1).
 
 Native admission now retains an operation-bound continuation actually issued by
 the original pairing owner. Its reference is encrypted with the request; its
@@ -974,8 +997,8 @@ It cannot adopt another snapshot just because that snapshot also has `e1`.
 Entered values are not reconstructed. Fresh identity, quote, payment and owner
 checks still run. A successful submit clears controls as usual while retaining
 page ownership for accounting. Parsing stored identities alone does not create
-native snapshot provenance. This browser path is not yet wired into automatic
-startup payment-window continuation; that integration remains unfinished.
+native snapshot provenance. The native startup path uses this browser seam for
+eligible payment-window continuation (§8.6.1).
 
 For a delivered native approval or veto window, checkout now updates the
 encrypted request after its window journal record is durable and before
@@ -1009,9 +1032,9 @@ Resumption accepts a host-owned channel recovery callback and its deadline,
 never a serialized receipt as permission to invent a fresh window. It preserves
 the original notice only when the exact selected terms and required window type
 still match. Changed terms or an older checkpoint without the exact selection
-void that window before a fresh decision and notification. Native automatic
-startup integration, original issued-grant restoration and verified reply-history
-coverage remain unfinished; the engine entry is not a complete restart feature.
+void that window before a fresh decision and notification. Native startup is
+wired to this entry under the original issued grant. Complete receive-history
+coverage across downtime remains unfinished (§8.6.1).
 
 Each wait now carries its exact `purchaseId`, rendered notice, deadline and
 owning cancellation signal. The notifier does not keep a shared last notice;
@@ -1019,10 +1042,10 @@ concurrent purchases cannot overwrite the text used to interpret another
 purchase's answer. A second live wait for the same purchase is refused. A late
 reading from a closed window cannot settle a replacement window.
 
-Only a deadline with no unresolved reply reading and a current original native
-channel source can mean silence. Cancellation,
-a failed decision-model reply reading, or a reply still being read at the
-deadline fails the wait instead. This matters especially for veto windows:
+Only a deadline with completed reply processing and confirmed original native
+receive coverage can mean silence. Cancellation, a failed decision-model reply
+reading or an unconfirmed receive span fails the wait instead. This matters
+especially for veto windows:
 an unavailable reader must not be treated as the owner choosing not to object.
 Known cancellation or reply failure before submission releases the reservation
 and closes that checkout record. The separate `submit-pending` recovery rule
@@ -1057,12 +1080,11 @@ used to describe), so a *tool-permission* approval built on the broker is
 restart-safe. That fix does not reach payments, because payments never routes
 through the broker in the first place.
 
-**What this means for a restart today:** the in-flight `runCheckout()` call
-is still abandoned when the process dies, but the interruption no longer
-lingers. Registering the payment verbs runs `recoverInterruptedCheckouts()`
-through the actual daemon registration before any handler attaches, even
-before a browser seam exists. The same registry is handed to the lazy browser
-service, so no new checkout can start
+**Other interrupted records follow the conservative recovery sweep:** the
+in-flight `runCheckout()` call is abandoned when the process dies. Native
+registration retains eligible awaiting-window leases before running
+`recoverInterruptedCheckouts()` for the remaining records. The same registry
+is handed to the browser service, so no new checkout can start
 while the sweep reads the journal, and a record live in the current process
 is never treated as interrupted. Recovery settles every remaining record by
 its phase verdict. A checkout that had not submitted releases its budget
@@ -1086,23 +1108,20 @@ SDK embedders should await `PaymentsGatewayServiceImpl.close()`; daemon
 registrations expose an awaited `close()` as well as the compatibility void
 `unregister()`. A caller must await close before registering replacement handlers.
 Detached acknowledgement survives a request disconnect. Restart reconciles the
-stored operation against the actual journal and purchase ledger; it does not
-resume an interrupted browser purchase. Recovery takes the original operation
+stored operation against the actual journal and purchase ledger. Eligible native
+awaiting-window records use the original-authority restoration path (§8.6.1).
+Other recovery takes the original operation
 execution lease, skipping another host’s live checkout, and retains that lease
 until timed-out dependency work has actually drained.
 
-When a window opens, its per-channel delivery report, its deadline, and its
-kind are persisted with the journal record. A restart therefore applies
-`recoverInterruptedWindow`'s real delivery-keyed rules (§8.6.1): a delivered
-notice whose window elapsed settles under expiry-stands with its backfillable
-channels named; a delivered notice on a channel that cannot be re-read
-reports the re-open rule for that channel; a report where nothing was
-delivered, or a legacy record with no report at all, settles conservatively
-by refusal. The interrupted purchase itself can never resume after a restart,
-so every branch releases the hold and charges nothing; what the rules decide
-is what the owner is told and which channels still owe a read. A record
-recovery keeps notifies the owner once, ever; the notice is stamped back
-through the journal.
+When a window opens, its per-channel delivery report, deadline and kind are
+persisted with the journal record. The conservative sweep uses
+`recoverInterruptedWindow`'s delivery-keyed classification (§8.6.1) to report
+expiry or channels needing another read. It does not acquire receive coverage
+from the report's backfillable flag or resume a purchase. Those sweep branches
+release pre-submit holds and charge nothing; eligible native restorations are
+retained separately before the sweep. A record recovery keeps notifies the
+owner once; the notice is stamped back through the journal.
 
 The daemon's actual purchase ledger implements the recovery lookup. Only a
 missing, previously unused ledger means no recorded purchases. Invalid JSON,

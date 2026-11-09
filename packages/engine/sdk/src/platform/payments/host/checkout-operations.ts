@@ -378,6 +378,7 @@ export class CheckoutOperations {
     let outcome: string | null = previous.outcome ?? (error instanceof JudgmentPortMissingError || error instanceof JudgmentError && error.kind === 'unavailable'
       ? 'decision-unavailable' : error instanceof DecisionModelsDisabledError ? 'decision-disabled'
         : error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable' ? 'reply-source-unavailable'
+          : error instanceof PaymentReplyWindowError && error.kind === 'receive-uncovered' ? 'refused:receive-uncovered'
           : error instanceof PaymentReplyWindowError && error.kind === 'history-unavailable' ? 'refused:reply-history-unavailable' : null);
     try {
       const entries = await this.journal.list(), retained = entries.find(row => row.purchaseId === writer.purchaseId);

@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
@@ -34,4 +34,22 @@ test('all-scope staging treats names literally, commits deletion, excludes ignor
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('scoped staging treats a real pathspec-shaped filename as data and preserves other work', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'scoped-literal-stage-'));
+  try {
+    git(root, 'init', '-q'); git(root, 'config', 'user.name', 'Fixture');
+    git(root, 'config', 'user.email', 'fixture@example.invalid');
+    writeFileSync(join(root, 'owner.txt'), 'Original owner content');
+    git(root, 'add', '.'); git(root, 'commit', '-qm', 'Original');
+    const name = ':(glob)*';
+    writeFileSync(join(root, name), 'Exact selected result');
+    writeFileSync(join(root, 'owner.txt'), 'Unrelated owner edit');
+    const result = await new AgentWorktree(root).commitWorkingTree('Only the named result', [name]);
+    expect(result.hash).toBeTruthy();
+    expect(git(root, 'show', 'HEAD:owner.txt')).toBe('Original owner content');
+    expect(git(root, 'show', `HEAD:${name}`)).toBe('Exact selected result');
+    expect(readFileSync(join(root, 'owner.txt'), 'utf8')).toBe('Unrelated owner edit');
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

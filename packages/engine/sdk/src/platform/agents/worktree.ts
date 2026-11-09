@@ -1,5 +1,7 @@
-import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs';
-import { join, resolve } from 'path';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, openSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'fs';
+import { basename, dirname, join, resolve } from 'path';
+import { captureExistingDirectory } from '../utils/atomic-json-store.js';
+import { fileObservationIdentity, readFileObservation, type FileObservation } from '../utils/file-observation.js';
 // `simple-git` is an optionalDependency and is built through
 // git/optional-simple-git.ts at the call that needs it, never imported at
 // module init. See utils/optional-dependency.ts.
@@ -22,12 +24,24 @@ export interface CommitWorkingTreeResult {
   readonly skippedIgnored: readonly string[];
 }
 
-function readIndex(path: string): Buffer | null {
-  try { return readFileSync(path); }
+function readIndex(path: string): FileObservation | null {
+  try { return readFileObservation(path); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
 }
 
-const sameIndex = (left: Buffer | null, right: Buffer | null) => left === null ? right === null : right !== null && left.equals(right);
+function assertIndex(path: string, original: FileObservation | null): void {
+  try {
+    if (original === null || fileObservationIdentity(path) !== original.physical) throw new Error('Original Git index changed');
+  } catch (error) {
+    if (original === null && (error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+}
+
+const ownsIndexLock = (current: BigIntStats | undefined, original: BigIntStats): boolean => !!current
+  && current.isFile() && !current.isSymbolicLink() && current.nlink === 1n
+  && current.dev === original.dev && current.ino === original.ino && current.uid === original.uid
+  && current.gid === original.gid && current.birthtimeNs === original.birthtimeNs;
 
 /**
  * AgentWorktree, Manages git worktree lifecycle for spawned agents.
@@ -119,26 +133,31 @@ export class AgentWorktree {
    * `git add --all` sweep for back-compat.
    */
   async commitWorkingTree(message: string, paths?: string[], beforeCommit?: () => void): Promise<CommitWorkingTreeResult> {
-    const git = await createSimpleGit({ baseDir: this.git.getCwd() });
-    const scoped = paths && paths.length > 0 ? paths : null;
+    const scoped = paths && paths.length > 0 ? [...paths] : null;
+    const root = captureExistingDirectory(this.git.getCwd());
+    const cwd = root.canonical;
+    const git = await createSimpleGit({ baseDir: cwd });
+    const sourceGit = new GitService(cwd);
+    root.assertCurrent();
     let stagedPathspecs: string[];
     let addFlag: '-A' | '--all';
     const skippedIgnored: string[] = [];
 
     if (scoped) {
-      const cwd = this.git.getCwd();
       const onDisk = scoped.filter((p) => existsSync(join(cwd, p)));
       const maybeDeleted = scoped.filter((p) => !onDisk.includes(p));
       let trackedDeleted: string[] = [];
       if (maybeDeleted.length > 0) {
-        const tracked: string = await git.raw(['ls-files', '--', ...maybeDeleted]);
-        const trackedSet = new Set(tracked.split('\n').map((line: string) => line.trim()).filter(Boolean));
+        const tracked: string = await git.raw(['ls-files', '-z', '--', ...maybeDeleted.map(path => `:(literal)${path}`)]);
+        root.assertCurrent();
+        const trackedSet = new Set(tracked.split('\0').filter(Boolean));
         trackedDeleted = maybeDeleted.filter((p) => trackedSet.has(p));
       }
       const existingPaths = [...onDisk, ...trackedDeleted];
       // checkIgnore returns the subset git ignores; it returns [] (does NOT throw) when nothing
       // is ignored, so it is safe to call unconditionally on the whole candidate set.
       const ignored = existingPaths.length > 0 ? await git.checkIgnore(existingPaths) : [];
+      root.assertCurrent();
       const ignoredSet = new Set(ignored);
       const stageable = existingPaths.filter((p) => !ignoredSet.has(p));
       skippedIgnored.push(...existingPaths.filter((p) => ignoredSet.has(p)));
@@ -156,7 +175,7 @@ export class AgentWorktree {
       }
       // -A (not plain add) scoped to just these pathspecs so confirmed deletions are staged
       // too (plain `git add <path>` silently no-ops on a path that no longer exists on disk).
-      stagedPathspecs = stageable;
+      stagedPathspecs = stageable.map(path => `:(literal)${path}`);
       addFlag = '-A';
     } else {
       const status = await git.raw([
@@ -168,6 +187,7 @@ export class AgentWorktree {
         ':(exclude).goodvibes',
         ':(exclude).goodvibes/**',
       ]);
+      root.assertCurrent();
       if (status.trim().length === 0) {
         logger.debug('AgentWorktree.commitWorkingTree: no direct working tree changes');
         return { hash: null, skippedIgnored };
@@ -177,24 +197,36 @@ export class AgentWorktree {
       // cached paths include deletions, and --exclude-standard omits ignored
       // untracked data without forcing it into the index.
       const eligible: string = await git.raw(['ls-files', '--cached', '--others', '--exclude-standard', '-z']);
+      root.assertCurrent();
       stagedPathspecs = [...new Set(eligible.split('\0').filter((path) => path.length > 0 && path !== '.goodvibes' && !path.startsWith('.goodvibes/')))]
         .map((path) => `:(literal)${path}`);
       if (stagedPathspecs.length === 0) return { hash: null, skippedIgnored };
       addFlag = '--all';
     }
 
-    const indexPath = resolve(this.git.getCwd(), (await git.raw(['rev-parse', '--git-path', 'index'])).trim());
-    const originalIndex = readIndex(indexPath), originalHead = await this.currentHead();
-    let stagedIndex: Buffer | undefined;
+    const reportedIndex = (await git.raw(['rev-parse', '--git-path', 'index'])).trim();
+    root.assertCurrent();
+    const indexDirectory = captureExistingDirectory(dirname(resolve(cwd, reportedIndex)));
+    const indexPath = join(indexDirectory.canonical, basename(reportedIndex));
+    const originalIndex = readIndex(indexPath), originalHead = await new AgentWorktree(cwd).currentHead();
+    root.assertCurrent(); indexDirectory.assertCurrent(); assertIndex(indexPath, originalIndex);
+    let stagedIndex: FileObservation | undefined;
     try {
+      root.assertCurrent(); indexDirectory.assertCurrent();
       await git.raw(['add', addFlag, '--', ...stagedPathspecs]);
+      root.assertCurrent(); indexDirectory.assertCurrent();
       const observedIndex = readIndex(indexPath);
       if (observedIndex === null) throw new Error('Index disappeared after staging');
       stagedIndex = observedIndex;
-      const result = await this.git.commit(message, {
+      const result = await sourceGit.commit(message, {
         fallbackIdentity: { name: 'GoodVibes', email: 'goodvibes@local' },
         paths: stagedPathspecs,
-      }, beforeCommit);
+      }, () => {
+        root.assertCurrent(); indexDirectory.assertCurrent();
+        beforeCommit?.();
+        root.assertCurrent(); indexDirectory.assertCurrent();
+      });
+      root.assertCurrent(); indexDirectory.assertCurrent();
       if (result.hash) {
         logger.debug('AgentWorktree.commitWorkingTree: committed direct working tree changes', {
           hash: result.hash,
@@ -207,6 +239,7 @@ export class AgentWorktree {
       // a hook/verification step rejected the commit, throw so the catch below restores the index
       // and the caller can report an honest warning. If nothing is staged, it was a true no-op.
       const stagedAfter = (await git.raw(['diff', '--cached', '--name-only', '--', ...stagedPathspecs])).trim();
+      root.assertCurrent(); indexDirectory.assertCurrent();
       if (stagedAfter.length > 0) {
         throw new Error('git created no commit despite staged changes (a pre-commit hook or verification step likely rejected the commit)');
       }
@@ -220,7 +253,8 @@ export class AgentWorktree {
       }
       // Any other failure (rejected add, rejected commit, hook/identity/disk error) must not leave
       // the caller's staging area mutated by a commit we could not complete, restore what we staged.
-      if (stagedIndex !== undefined) await this._restoreIndex(indexPath, originalIndex, stagedIndex, originalHead);
+      if (stagedIndex !== undefined) await this._restoreIndex(indexPath, originalIndex, stagedIndex, originalHead, cwd,
+        () => { root.assertPhysicalCurrent(); indexDirectory.assertPhysicalCurrent(); });
       else logger.warn('AgentWorktree.commitWorkingTree: staging did not establish an owned index; preserving its current contents');
       throw error;
     }
@@ -232,20 +266,30 @@ export class AgentWorktree {
    * never overwrite its newer index. Use Git's native lock before replacing it.
    * Rollback failure must not mask the original commit error.
    */
-  private async _restoreIndex(path: string, original: Buffer | null, staged: Buffer | null, head: string | null): Promise<void> {
+  private async _restoreIndex(path: string, original: FileObservation | null, staged: FileObservation, head: string | null,
+    cwd: string, assertPhysicalCurrent: () => void): Promise<void> {
     let lock: number | undefined;
-    let ownsLock = false;
+    let originalLock: BigIntStats | undefined;
+    let published = false;
     try {
-      if (await this.currentHead() !== head) throw new Error('HEAD changed during the commit attempt');
-      lock = openSync(`${path}.lock`, 'wx', 0o600);
-      ownsLock = true;
-      if (!sameIndex(readIndex(path), staged)) throw new Error('Index changed after this staging attempt');
-      if (original === null) rmSync(path, { force: true });
+      assertPhysicalCurrent();
+      if (await new AgentWorktree(cwd).currentHead() !== head) throw new Error('HEAD changed during the commit attempt');
+      assertPhysicalCurrent(); assertIndex(path, staged);
+      lock = openSync(`${path}.lock`, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      const lockDescriptor = lock;
+      originalLock = fstatSync(lock, { bigint: true });
+      const current = () => {
+        assertPhysicalCurrent(); assertIndex(path, staged);
+        if (!originalLock || !ownsIndexLock(fstatSync(lockDescriptor, { bigint: true }), originalLock)
+          || !ownsIndexLock(lstatSync(`${path}.lock`, { bigint: true }), originalLock)) throw new Error('Original Git index lock changed');
+      };
+      current();
+      if (original === null) unlinkSync(path);
       else {
-        writeFileSync(lock, original);
-        closeSync(lock); lock = undefined;
+        writeFileSync(lock, original.bytes);
+        current();
         renameSync(`${path}.lock`, path);
-        ownsLock = false;
+        published = true;
       }
       logger.debug('AgentWorktree.commitWorkingTree: restored original index after failed commit');
     } catch (err) {
@@ -253,8 +297,15 @@ export class AgentWorktree {
         error: summarizeError(err),
       });
     } finally {
-      if (lock !== undefined) closeSync(lock);
-      if (ownsLock) rmSync(`${path}.lock`, { force: true });
+      if (lock !== undefined) {
+        try { closeSync(lock); } catch { /* Descriptor cleanup must not replace the original commit failure. */ }
+      }
+      if (originalLock && !published) {
+        try {
+          assertPhysicalCurrent();
+          if (ownsIndexLock(lstatSync(`${path}.lock`, { bigint: true, throwIfNoEntry: false }), originalLock)) unlinkSync(`${path}.lock`);
+        } catch { /* Preserve a foreign lock or a lock under a replaced parent. */ }
+      }
     }
   }
 

@@ -334,6 +334,16 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
   };
 }
 
+/** Read-only custody of an existing directory and its actual alias lookup.
+ * No directories are created and no file bodies are read. Normal operations
+ * check the selected alias; compensation may use the retained canonical tree
+ * only while its original physical parents still exist unchanged.
+ */
+export function captureExistingDirectory(directory: string): AtomicDirectoryOwner {
+  const absolute = isAbsolute(directory) ? directory : `${process.cwd()}${sep}${directory}`;
+  return Object.freeze(prepareAtomicDirectory(absolute, () => {}, undefined, false));
+}
+
 function ownsAtomicFile(stat: BigIntStats | undefined, original: BigIntStats | undefined): boolean {
   return !!stat && !!original && stat.isFile() && !stat.isSymbolicLink() && stat.nlink === 1n
     && stat.dev === original.dev && stat.ino === original.ino && stat.uid === original.uid && stat.gid === original.gid && stat.birthtimeNs === original.birthtimeNs;

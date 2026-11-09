@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { BrowserSessionError, BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
+import { JudgmentError } from '@goodvibes-jev/judgment';
 import { DRIVER_VERSION } from '../sdk/src/platform/browser/browser-provision-io.js';
 import type { BrowserProvisionIo } from '../sdk/src/platform/browser/browser-types.js';
 
@@ -65,7 +66,13 @@ test.each(['probe', 'connect', 'launch', 'provision'] as const)(
       await expect(f.manager.attach({ cdpEndpoint: '9222' })).rejects.toBeInstanceOf(BrowserSessionError);
       await expect(f.manager.provision()).rejects.toBeInstanceOf(BrowserSessionError);
       f.gate.release();
-      expect(await handled).toBeInstanceOf(BrowserSessionError);
+      const rejected = await handled;
+      if (phase === 'launch' || phase === 'provision') {
+        // Provision lifetimes carry the native retirement signal through their
+        // permission-cancellation boundary; they retain its typed aborted result.
+        expect(rejected).toBeInstanceOf(JudgmentError);
+        expect((rejected as JudgmentError).kind).toBe('aborted');
+      } else expect(rejected).toBeInstanceOf(BrowserSessionError);
       await closing;
       expect(f.effects).toEqual(phase === 'connect' ? ['transport-close'] : phase === 'launch' ? ['context-close'] : []);
       expect(f.manager.list()).toEqual([]); expect(f.manager.hasSessions()).toBe(false);

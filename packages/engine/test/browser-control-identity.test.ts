@@ -7,8 +7,9 @@ import { BrowserEngine } from '../sdk/src/platform/browser/browser-engine.js';
 import { browserCredentialPage, BrowserControlIdentityWork } from '../sdk/src/platform/browser/browser-control-identity.js';
 import { resolveRef } from '../sdk/src/platform/browser/browser-snapshot.js';
 import type { BrowserSnapshot, CardFieldGuard } from '../sdk/src/platform/browser/browser-types.js';
-import type { BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
+import { BrowserSessionError, type BrowserSessionManager } from '../sdk/src/platform/browser/browser-sessions.js';
 import { createBrowserCheckoutDriverFactory } from '../sdk/src/platform/payments/browser-checkout-driver.js';
+import { parseCurrencyCode } from '../sdk/src/platform/payments/types.js';
 import { CheckoutSubmitRefused } from '../sdk/src/platform/payments/checkout-page.js';
 
 type Page = Parameters<typeof resolveRef>[0];
@@ -49,20 +50,41 @@ function fixture(recordedName = 'Send message') {
     pressSequentially: async () => { effects.push('type'); }, press: async () => { effects.push('press'); },
     selectOption: async () => { effects.push('select'); return []; }, scrollIntoViewIfNeeded: async () => { effects.push('scroll'); },
   };
-  const raw = () => [{ tag: 'button', role: 'button', name: recordedName, selector: '#send', value: null, disabled: false, checked: null, depth: 1, submits: false }];
+  const raw = () => [{ tag: 'button', role: 'button', name: recordedName, selector: '#send', value: null, disabled: false, checked: null, depth: 1, submits: actual.submits }];
   const attributes = { type: '', autocomplete: '', name: '', id: '', placeholder: '', ariaLabel: '', label: '' };
   const currentRows = () => raw().map(row => ({ ...row, tag: actual.tag, name: actual.name, submits: actual.submits, value: null, documentUrl: url, control: attributes }));
   const expectedPage = () => ({ url, documents: [{ frameChain: [], url, title: 'Test', controls: currentRows().map(row => ({ documentUrl: row.documentUrl, tag: row.tag, role: row.role, name: row.name, selector: row.selector, disabled: row.disabled, checked: row.checked, depth: row.depth, submits: row.submits, control: row.control })) }] });
-  const remember = () => { expectedPages.add(JSON.stringify(expectedPage())); };
+  const checkout = { text: 'Cable x1 USD 1.00. Standard shipping free. Tax and fees USD 0.00. One-off total USD 1.00.', selections: [], quantities: [] };
+  const remember = () => {
+    const current = expectedPage(); expectedPages.add(JSON.stringify(current));
+    expectedPages.add(JSON.stringify({ ...current, documents: current.documents.map(document => ({ ...document, checkout })) }));
+  };
   remember();
   const frame = { parentFrame: () => null, evaluate: async (_fn: unknown, arg?: unknown) =>
     arg && typeof arg === 'object' && 'identityOnly' in arg && arg.identityOnly === true
-      ? { url, title: 'Test', elements: currentRows() } : raw() };
+      ? { url, title: 'Test', elements: currentRows(), ...('checkout' in arg && arg.checkout === true ? { checkout } : {}) } : raw() };
   const page = { url: () => url, locator: () => locator, title: async () => 'Test', frames: () => [frame], mainFrame: () => frame,
     waitForLoadState: async () => {}, frameLocator: () => page } as unknown as Page;
   const snapshot: BrowserSnapshot = { sessionId: 'b1', pageId: 'p1', url, title: 'Test', snapshotId: 's1', truncated: false,
     elements: [{ ...raw()[0]!, value: undefined, checked: undefined, ref: 'e1', frameChain: [] }] };
-  const sessions = { defaultSessionId: () => 'b1', page: async () => ({ pageId: 'p1', page }), pageList: async () => [] } as unknown as BrowserSessionManager;
+  // This suite isolates BrowserEngine identity/effect behavior. The real native
+  // manager's page/operation drainage is covered by browser-session-operations-lifecycle.
+  const pageLifetime = new AbortController(); let closed = false;
+  const current = (): void => { if (closed) throw new BrowserSessionError('Fixture page closed'); pageLifetime.signal.throwIfAborted(); };
+  const sessionSurface = {
+    defaultSessionId: () => 'b1',
+    page: async () => { current(); return { pageId: 'p1', page }; },
+    pageList: async () => [],
+    provisionReport: () => null,
+    async withPage<T>(sessionId: string, pageId: string, read: (selected: Page, assertCurrent: () => void, signal: AbortSignal) => Promise<T>): Promise<T> {
+      expect([sessionId, pageId]).toEqual(['b1', 'p1']); current();
+      const result = await read(page, current, pageLifetime.signal); current(); return result;
+    },
+    async closePage(sessionId: string, pageId: string): Promise<void> {
+      expect([sessionId, pageId]).toEqual(['b1', 'p1']); pageLifetime.abort(); await page.close(); closed = true;
+    },
+  } satisfies Pick<BrowserSessionManager, 'defaultSessionId' | 'page' | 'pageList' | 'withPage' | 'closePage' | 'provisionReport'>;
+  const sessions = sessionSurface as unknown as BrowserSessionManager;
   let approve = async () => {};
   let liveMaterial = false;
   const guard: CardFieldGuard = { disarm: () => { liveMaterial = false; }, hasLiveMaterial: () => liveMaterial, redact: (_s: string, _p: string, text: string) => liveMaterial ? text.replaceAll('private-cvv-fixture', '[withheld]') : text };
@@ -221,23 +243,55 @@ describe('BrowserEngine identity effect boundaries', () => {
     const f = fixture(); await f.engine.snapshot({}); f.setName('Submit message'); reading();
     await f.engine.click({}, { ref: 'e1' }); expect(f.effects).toEqual(['click']);
   });
-  test('source retirement after a native click is an uncertain outcome, not a pre-click payment refusal', async () => {
+  test('the payment adapter refuses an identity-only page without an actual verified checkout quote', async () => {
+    const f = fixture(); await f.engine.snapshot({}); const model = reading();
+    const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => f.engine, cardFieldGuard: f.guard })('b1', 'p1');
+    await expect(driver.submitOrder('e1')).rejects.toBeInstanceOf(CheckoutSubmitRefused);
+    expect(f.effects).toEqual([]); expect(model.requests).toEqual([]);
+  });
+  test('BrowserEngine reports source retirement after a native click as an unknown click outcome', async () => {
     const f = fixture(); await f.engine.snapshot({}); reading();
     let active = true;
     f.locator.click = async () => { f.effects.push('click'); active = false; };
-    const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => f.engine, cardFieldGuard: f.guard })('b1', 'p1');
-    const result = await driver.submitOrder('e1', { assertCurrent() { if (!active) throw new Error('Private owner diagnostic'); } }).catch(error => error);
+    const result = await f.engine.click({}, { ref: 'e1' }, { assertCurrent() { if (!active) throw new Error('Private owner diagnostic'); } }).catch(error => error);
     expect(f.effects).toEqual(['click']); expect(result).toBeInstanceOf(Error);
     expect(result).not.toBeInstanceOf(CheckoutSubmitRefused);
     expect(result.name).toBe('BrowserClickOutcomeUnknownError'); expect(result.message).not.toContain('Private owner diagnostic');
   });
-  test('a typed-looking failure after entering the actuator cannot free a possibly submitted payment', async () => {
+  test('BrowserEngine reports a typed-looking actuator failure as an unknown click outcome', async () => {
     const f = fixture(); await f.engine.snapshot({}); reading();
     f.locator.click = async () => { f.effects.push('click'); const error = new Error('Private page diagnostic'); error.name = 'StaleElementError'; throw error; };
-    const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => f.engine, cardFieldGuard: f.guard })('b1', 'p1');
-    const result = await driver.submitOrder('e1').catch(error => error);
+    const result = await f.engine.click({}, { ref: 'e1' }).catch(error => error);
     expect(f.effects).toEqual(['click']); expect(result).not.toBeInstanceOf(CheckoutSubmitRefused);
     expect(result.name).toBe('BrowserClickOutcomeUnknownError'); expect(result.message).not.toContain('Private page diagnostic');
+  });
+  test.each(['owner-retirement', 'typed-actuator-error'] as const)('the actual payment adapter preserves unknown submit after a verified quote: %s', async failure => {
+    const f = fixture('Place order'); f.setSubmit(); await f.engine.snapshot({}); const model = reading();
+    let active = true;
+    const owner = { assertCurrent() { if (!active) throw new Error('Private purchase owner diagnostic'); } };
+    const currency = parseCurrencyCode('USD'); if (!currency) throw new Error('Invalid fixture currency');
+    const driver = createBrowserCheckoutDriverFactory({ engineFor: async () => f.engine, cardFieldGuard: f.guard })('b1', 'p1');
+    if (!driver.verifyTerms) throw new Error('The actual adapter has no current quote reader');
+    expect(await driver.verifyTerms({ submitTarget: 'e1', merchantDomain: 'example.test', currency,
+      lines: [{ label: 'Cable', quantity: 1, unitMinorUnits: 100 }], taxMinorUnits: 0, feesMinorUnits: 0,
+      feeLabels: [], shippingLabel: 'Standard', shippingMinorUnits: 0, totalMinorUnits: 100 }, owner)).toBe(true);
+    expect(model.requests.some(request => request.context?.battery === 'engine.payments.current-checkout-terms')).toBe(true);
+    f.arm();
+    f.locator.click = async () => {
+      f.effects.push('click');
+      if (failure === 'owner-retirement') active = false;
+      else { const error = new Error('Private actuator diagnostic'); error.name = 'StaleElementError'; throw error; }
+    };
+    const result = await driver.submitOrder('e1', owner).catch((error: unknown) => error);
+    expect(f.effects).toEqual(['click']); expect(result).toBeInstanceOf(Error);
+    expect(result).not.toBeInstanceOf(CheckoutSubmitRefused);
+    if (!(result instanceof Error)) throw new Error('Expected an unknown submitted outcome');
+    expect(result.name).toBe('BrowserClickOutcomeUnknownError'); expect(result.message).not.toContain('Private');
+    expect(f.guard.hasLiveMaterial('b1', 'p1')).toBe(true);
+    expect(f.guard.redact('b1', 'p1', 'private-cvv-fixture')).toBe('[withheld]');
+    // Unknown submission consumed the original quote and cannot click again.
+    await expect(driver.submitOrder('e1')).rejects.toBeInstanceOf(CheckoutSubmitRefused);
+    expect(f.effects).toEqual(['click']);
   });
   test('changed DOM after outward approval never submits', async () => {
     const f = fixture(); await f.engine.snapshot({}); reading(); f.onApproval(async () => { f.setName('Delete account'); });

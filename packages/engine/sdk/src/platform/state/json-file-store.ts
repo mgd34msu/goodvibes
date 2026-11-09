@@ -1,8 +1,5 @@
+import { writeJsonFileAtomicAsync } from '../utils/atomic-json-write-async.js';
 import { captureQuarantineSource, readCapturedQuarantineSourceAsync, QuarantineEncodingError, type QuarantineSource } from '../utils/atomic-json-store.js';
-import { randomUUID } from 'node:crypto';
-import { promises as fs, mkdirSync } from 'node:fs';
-import type { FileHandle } from 'node:fs/promises';
-import { dirname } from 'node:path';
 
 export class JsonFileStoreParseError extends Error { override readonly name = 'JsonFileStoreParseError'; constructor() { super('JsonFileStore original source is not valid JSON.'); } }
 const parseSavedJson = JSON.parse;
@@ -42,42 +39,6 @@ export class JsonFileStore<T> {
    * next `load()` sees as unparseable JSON.
    */
   async save(data: T): Promise<void> {
-    const dir = dirname(this.filePath);
-    mkdirSync(dir, { recursive: true });
-    const tmpPath = `${this.filePath}.tmp.${process.pid}.${randomUUID()}`;
-    const content = JSON.stringify(data, null, 2) + '\n';
-    try {
-      const handle = await fs.open(tmpPath, 'w');
-      try {
-        await handle.writeFile(content, 'utf-8');
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await fs.rename(tmpPath, this.filePath);
-      await syncDirectory(dir);
-    } catch (error) {
-      await fs.rm(tmpPath, { force: true }).catch(() => undefined);
-      throw error;
-    }
-  }
-}
-
-/**
- * fsync a directory so a rename into it is durable.
- *
- * Opening a directory for reading is POSIX; Windows rejects it, and there is no
- * directory-fsync equivalent there, so a failure to open is not an error the
- * caller should see.
- */
-async function syncDirectory(dir: string): Promise<void> {
-  let handle: FileHandle | undefined;
-  try {
-    handle = await fs.open(dir, 'r');
-    await handle.sync();
-  } catch {
-    // Best effort: the file contents are already fsynced above.
-  } finally {
-    await handle?.close().catch(() => undefined);
+    await writeJsonFileAtomicAsync(this.filePath, data);
   }
 }

@@ -261,7 +261,7 @@ export function confirmFileDurable(filePath: string): void {
   }
 }
 
-interface AtomicDirectoryOwner { readonly canonical: string; assertCurrent(): void; assertPhysicalCurrent(): void }
+interface AtomicDirectoryOwner { readonly canonical: string; readonly durabilityDirectories: readonly string[]; assertCurrent(): void; assertPhysicalCurrent(): void }
 const atomicDirectoryStamp = (stat: BigIntStats): string => {
   if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Atomic file parent is not a physical directory');
   return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
@@ -275,7 +275,7 @@ function atomicMissing(error: unknown): boolean { return error !== null && typeo
  * target. Original directories and links stay pinned through publication. */
 function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effect: (() => void) | undefined, mkdirp: boolean): AtomicDirectoryOwner {
   const directories = new Map<string, string>(), links: Array<{ path: string; identity: string; target: string }> = [];
-  const absent = new Set<string>();
+  const absent = new Set<string>(), createdDirectories = new Set<string>();
   let cursor = parse(absolute).root, pending = absolute.slice(cursor.length).split(sep);
   directories.set(cursor, atomicDirectoryStamp(lstatSync(cursor, { bigint: true })));
   const observe = (path: string) => {
@@ -314,7 +314,7 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
   if (!mkdirp && absent.size) throw Object.assign(new Error('Atomic publication parent does not exist'), { code: 'ENOENT' });
   for (const path of [...absent]) {
     assertOwner(); current(); mkdirSync(path);
-    const created = lstatSync(path, { bigint: true });
+    const created = lstatSync(path, { bigint: true }); createdDirectories.add(path);
     directories.set(path, atomicDirectoryStamp(created)); absent.delete(path); current(false);
     // Retain inherited group/special bits while ensuring the creator can finish
     // a nested write even under a restrictive umask.
@@ -332,7 +332,9 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
     const identity = directories.get(path); if (identity === undefined) throw new Error('Atomic physical parent proof is unavailable');
     physical.push({ path, identity }); if (dirname(path) === path) break;
   }
-  return { canonical,
+  const durability = new Set([canonical]);
+  for (const created of createdDirectories) { durability.add(created); durability.add(dirname(created)); }
+  return { canonical, durabilityDirectories: Object.freeze([...durability].sort((left, right) => right.length - left.length)),
     assertCurrent() { current(); if (realpathSync(absolute) !== canonical) throw new Error('Atomic file parent lookup changed'); },
     assertPhysicalCurrent() { for (const parent of physical) if (atomicDirectoryStamp(lstatSync(parent.path, { bigint: true })) !== parent.identity) throw new Error('Atomic physical parent changed'); },
   };
@@ -346,6 +348,15 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
 export function captureExistingDirectory(directory: string): AtomicDirectoryOwner {
   const absolute = isAbsolute(directory) ? directory : `${process.cwd()}${sep}${directory}`;
   return Object.freeze(prepareAtomicDirectory(absolute, () => {}, undefined, false));
+}
+
+/** The shared native parent plan for actual asynchronous publishers. No second
+ * alias walker or directory-creation protocol is maintained by each store. */
+export function prepareAtomicPublicationDirectory(directory: string, options: Pick<AtomicWriteOptions, 'mkdirp' | 'assertCurrent' | 'onEffect'> = {}): ReturnType<typeof captureExistingDirectory> {
+  const guard = options.assertCurrent?.bind(options), notify = options.onEffect?.bind(options);
+  const check = (value: unknown) => { if (value !== undefined) { if (nodeTypes.isPromise(value)) Reflect.apply(Promise.prototype.then, value, [undefined, () => {}]); throw new Error('Atomic publication callbacks must complete synchronously.'); } };
+  const absolute = isAbsolute(directory) ? directory : `${process.cwd()}${sep}${directory}`;
+  return Object.freeze(prepareAtomicDirectory(absolute, () => check(guard?.()), notify ? () => check(notify(false)) : undefined, options.mkdirp !== false));
 }
 
 function ownsAtomicFile(stat: BigIntStats | undefined, original: BigIntStats | undefined): boolean {
@@ -439,7 +450,7 @@ export function writeFileAtomic(filePath: string, contents: string | Uint8Array,
       }
     }
     assertPublished();
-    closeSync(fd); fd = undefined;
+    const completedFd = fd; fd = undefined; closeSync(completedFd);
   } catch (error) {
     if (!published && attempted) {
       // A thrown rename is only pre-publication when the exact original stage

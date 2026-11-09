@@ -477,6 +477,20 @@ test('host timestamp projection preserves fractional and out-of-Date-range numbe
   }
 });
 
+test('actual opaque row revisions are presented losslessly rather than truncated and mislabeled as SHA256', async () => {
+  const f = await fixture(), original = f.command.manifest.sources[0]!;
+  expect(original.generation).toMatch(/^kr-[0-9a-f]{32}$/);
+  const projected = legacyImportSemanticManifest(f.command.manifest).sources[0]!.generation;
+  if (typeof projected === 'string') throw new Error('Opaque revision needs its actual semantic encoding');
+  expect(projected.encoding).toBe('grouped-opaque-source-revision'); expect(projected.value.replaceAll('.', '')).toBe(original.generation);
+  expect(JSON.stringify(projected)).not.toContain('sha256');
+  const historical = legacyImportSemanticManifest({ ...f.command.manifest, sources: [{ ...original, generation: 'a'.repeat(64) }] }).sources[0]!.generation;
+  expect(historical).toBe('sha256:' + Array(16).fill('aaaa').join('.'));
+  const unknown = 'password=synthetic-private-generation';
+  const unscreened = legacyImportSemanticManifest({ ...f.command.manifest, sources: [{ ...original, generation: unknown }] }).sources[0]!.generation;
+  expect(unscreened).toBe(unknown); // Ordinary privacy screening must still see it.
+});
+
 test('protocol projection does not hide sensitive source payloads or metadata fields named like timestamps', async () => {
   const f = await fixture({ sourceMetadata: { original: { createdAt: 4111111111111111 } } });
   const bytes = readFileSync(f.file);

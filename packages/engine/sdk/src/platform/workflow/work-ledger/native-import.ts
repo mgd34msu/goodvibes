@@ -30,10 +30,20 @@ export function legacyImportSemanticManifest(manifest: LegacyMigrationManifest) 
     // Group digits without rounding, Date range limits or fractional-ms loss.
     return { encoding: 'epoch-milliseconds-decimal', decimal: String(value).replace(/(\d{3})(?=\d)/g, '$1_') };
   };
-  const digest = (value: string) => `sha256:${value.match(/.{4}/g)!.join('.')}`;
+  const digest = (value: string) => {
+    if (!/^[0-9a-f]{64}$/.test(value)) throw new JudgmentError('invalid-request', 'Invalid source commitment');
+    return `sha256:${value.match(/.{4}/g)!.join('.')}`;
+  };
+  const generation = (value: string) => {
+    if (/^[0-9a-f]{64}$/.test(value)) return digest(value); // Actual historical complete-row commitment.
+    if (/^kr-[0-9a-f]{32}$/.test(value)) return { encoding: 'grouped-opaque-source-revision', value: value.match(/.{1,4}/g)!.join('.') };
+    // Unknown producer strings remain ordinary privacy-screened input, not a
+    // guessed checksum or an exemption for arbitrary source data.
+    return value;
+  };
   return { ...manifest, hostId: /^[a-f0-9-]{36}$/i.test(manifest.hostId) ? manifest.hostId.replaceAll('-', '.') : manifest.hostId,
     digest: digest(manifest.digest), sources: manifest.sources.map(capture => ({
-      ...capture, digest: digest(capture.digest), generation: digest(capture.generation), source: { ...capture.source,
+      ...capture, digest: digest(capture.digest), generation: generation(capture.generation), source: { ...capture.source,
         createdAt: timestamp(capture.source['createdAt']),
         updatedAt: timestamp(capture.source['updatedAt']),
       },

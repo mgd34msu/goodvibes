@@ -3,8 +3,8 @@
  * Retained standalone release:prepare flow. The private workspace is refused
  * before any command or write; pure helpers remain useful for legacy fixtures.
  *
- * Every file that is generated from source, or that carries a version or a
- * pinned SHA, is rewritten here, at the bump, instead of being policed by a red
+ * Generated product files and version stamps are rewritten here at the bump,
+ * instead of being policed by a red
  * CI run on every push. A stale generated file is fixed by regenerating it; it
  * is not a regression.
  *
@@ -18,7 +18,7 @@
  *                                               bump the manifest and write the
  *                                               changelog section themselves)
  *   --no-install   skip the relock (offline, or the lockfile is already current)
- *   --no-pins      skip the workflow pin rewrite (offline)
+ *   --no-pins      accepted for old invocations; workflow pins are no longer rewritten
  *   --no-live      skip the live-verification report refresh (no connected
  *                  host running on this machine)
  *
@@ -29,29 +29,26 @@
  *   3. project surfaces, in a fresh process (scripts/prebuild.ts): the
  *      src/version.ts fallback, the README badge, the docs/README release line
  *   4. docs/google-setup-runbook.md from the pinned engine's step plan
- *   5. workflow pins: every `mgd34msu/goodvibes/.github/workflows/*.yml@<sha>`
- *      reference moves to the commit the pinned engine version's tag points at,
- *      and every `@goodvibes-jev/engine@<version>` moves to the
- *      devDependencies pin
- *   6. a `## X.Y.Z - YYYY-MM-DD` CHANGELOG section and a release/release-notes.md
+ *   5. a `## X.Y.Z - YYYY-MM-DD` CHANGELOG section and a release/release-notes.md
  *      scaffold ending in `GoodVibes Agent X.Y.Z - YYYY-MM-DD`, when the version
  *      has none yet (unless --no-changelog)
- *   7. release/live-verification/: build the binary and run the live verifier
+ *   6. release/live-verification/: build the binary and run the live verifier
  *      in strict mode against it and the connected host (unless --no-live)
- *   8. the package-facing text rule (README, CHANGELOG and shipped docs name no
+ *   7. the package-facing text rule (README, CHANGELOG and shipped docs name no
  *      GoodVibes package but this one) and the version-stamp agreement; a
  *      failure here is printed and exits non-zero
  *
+ * Suite workflows are owned by the monorepo release; this command never
+ * rewrites workflow pins or looks up remote release tags.
  * It never commits, tags or pushes. Review `git diff` afterwards and write the
  * release notes into the scaffolded sections.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { assertStandaloneReleaseAllowed } from './standalone-release-policy.ts';
 
 const ROOT = join(import.meta.dir, '..');
-const WORKSPACE_REPO_URL = 'https://github.com/mgd34msu/goodvibes';
 const RELEASE_NOTES_PATH = join('release', 'release-notes.md');
 
 export type BumpKind = 'patch' | 'minor' | 'major';
@@ -102,46 +99,10 @@ export function scaffoldReleaseNotesText(current: string, version: string, date:
   return `- \n\nGoodVibes Agent ${version} - ${date}\n`;
 }
 
-/**
- * A workflow file with every engine reusable-workflow reference pointed at
- * `engineSha` (the commit the engine's `v<engineVersion>` tag points at, with its
- * trailing `# engine <version> release` note kept in step), and every pinned
- * toolchain spec set to `toolchainVersion`.
- */
-export function rewriteWorkflowPins(
-  text: string,
-  pins: { readonly engineVersion: string; readonly engineSha: string | null; readonly toolchainVersion: string },
-): string {
-  let next = text.replace(
-    /(@goodvibes-jev\/engine@)\d+\.\d+\.\d+/g,
-    `$1${pins.toolchainVersion}`,
-  );
-  if (pins.engineSha !== null) {
-    next = next.replace(
-      /(mgd34msu\/goodvibes\/\.github\/workflows\/[\w.-]+\.ya?ml@)[0-9a-f]{40}( # engine )\d+\.\d+\.\d+( release)?/g,
-      `$1${pins.engineSha}$2${pins.engineVersion} release`,
-    );
-  }
-  return next;
-}
-
-/** The commit a tag points at, from `git ls-remote` output (the peeled `^{}` line wins). */
-export function peeledTagSha(lsRemoteOutput: string, tag: string): string | null {
-  let direct: string | null = null;
-  for (const line of lsRemoteOutput.split('\n')) {
-    const [sha, ref] = line.trim().split(/\s+/);
-    if (!sha || !ref || !/^[0-9a-f]{40}$/.test(sha)) continue;
-    if (ref === `refs/tags/${tag}^{}`) return sha;
-    if (ref === `refs/tags/${tag}`) direct = sha;
-  }
-  return direct;
-}
-
 interface PrepareArgs {
   readonly bump: BumpKind | { readonly exact: string } | null;
   readonly changelog: boolean;
   readonly install: boolean;
-  readonly pins: boolean;
   readonly live: boolean;
 }
 
@@ -158,7 +119,6 @@ export function parsePrepareArgs(argv: readonly string[]): PrepareArgs {
     bump: noBump ? null : exact !== undefined ? { exact } : kinds[0]!,
     changelog: !argv.includes('--no-changelog'),
     install: !argv.includes('--no-install'),
-    pins: !argv.includes('--no-pins'),
     live: !argv.includes('--no-live'),
   };
 }
@@ -189,20 +149,6 @@ function run(root: string, execute: PrepareCommandRunner, label: string, command
   console.log(`[release:prepare] ${label}: ${command} ${args.join(' ')}`);
   const result = execute(command, args, { cwd: root, captureOutput: false });
   if (result.status !== 0) throw new Error(`${label} failed (exit ${result.status ?? 'signal'})`);
-}
-
-function resolveEngineTagSha(root: string, execute: PrepareCommandRunner, engineVersion: string): string {
-  const tag = `v${engineVersion}`;
-  const result = execute('git', ['ls-remote', WORKSPACE_REPO_URL, `refs/tags/${tag}`, `refs/tags/${tag}^{}`], {
-    cwd: root,
-    captureOutput: true,
-    timeout: 60_000,
-  });
-  const sha = result.status === 0 ? peeledTagSha(result.stdout, tag) : null;
-  if (!sha) {
-    throw new Error(`could not resolve ${WORKSPACE_REPO_URL} tag ${tag}; rerun with network, or pass --no-pins and update the SHAs by hand`);
-  }
-  return sha;
 }
 
 function rewriteFile(root: string, relativePath: string, rewrite: (text: string) => string): boolean {
@@ -237,20 +183,6 @@ export async function prepareRelease(
   if (args.install) run(root, execute, 'relock', 'bun', ['install']);
   run(root, execute, 'project surfaces', 'bun', ['run', 'scripts/prebuild.ts']);
   run(root, execute, 'google setup runbook', 'bun', ['run', 'scripts/generate-google-runbook.ts']);
-
-  if (args.pins) {
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-    const engineVersion = pkg.dependencies?.['@goodvibes-jev/engine'] ?? pkg.devDependencies?.['@goodvibes-jev/engine'];
-    const toolchainVersion = engineVersion;
-    if (!engineVersion || !/^\d+\.\d+\.\d+$/.test(engineVersion)) throw new Error(`@goodvibes-jev/engine is not pinned to an exact version: ${String(engineVersion)}`);
-    const engineSha = resolveEngineTagSha(root, execute, engineVersion);
-    const workflowsDir = join(root, '.github', 'workflows');
-    for (const name of readdirSync(workflowsDir).filter((f) => /\.ya?ml$/.test(f))) {
-      if (rewriteFile(root, join('.github', 'workflows', name), (text) => rewriteWorkflowPins(text, { engineVersion, engineSha, toolchainVersion }))) {
-        console.log(`[release:prepare] .github/workflows/${name}: engine ${engineVersion} (${engineSha.slice(0, 12)}), toolchain ${toolchainVersion}`);
-      }
-    }
-  }
 
   if (args.changelog) {
     const date = new Date().toISOString().slice(0, 10);

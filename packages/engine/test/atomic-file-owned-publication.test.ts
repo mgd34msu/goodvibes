@@ -4,7 +4,7 @@ import * as fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
-import { AtomicWriteDurabilityError, STALE_TEMP_FILE_MIN_AGE_MS, writeFileAtomic, writeJsonFileAtomic } from '../platform/src/platform/utils/atomic-json-store.js';
+import { AtomicWriteDurabilityError, captureExistingDirectory, STALE_TEMP_FILE_MIN_AGE_MS, writeFileAtomic, writeJsonFileAtomic } from '../platform/src/platform/utils/atomic-json-store.js';
 const restore: Array<() => void> = [];
 afterEach(() => { for (const close of restore.splice(0).reverse()) close(); });
 function fixture() { const root = makeProjectTempDir('atomic-owned-file'); return { root, file: join(root, 'state.json') }; }
@@ -75,6 +75,19 @@ test('stable configured alias chains and symlink-aware parent traversal keep the
   writeJsonFileAtomic(file, { originalPhysicalParent: true }, { durable: true });
   expect(JSON.parse(fs.readFileSync(join(outside, 'new', 'state.json'), 'utf8'))).toEqual({ originalPhysicalParent: true });
   expect(fs.existsSync(join(aliases, 'new'))).toBe(false);
+});
+
+test('read-only alias dot-dot capture keeps the actual parent and rejects replacement even with the same target', () => {
+  const f = fixture(), physical = join(f.root, 'physical'), alias = join(f.root, 'alias');
+  fs.mkdirSync(join(physical, 'child'), { recursive: true }); fs.symlinkSync(join(physical, 'child'), alias);
+  const selected = captureExistingDirectory(`${alias}/..`);
+  expect(selected.canonical).toBe(physical); selected.assertCurrent();
+  fs.unlinkSync(alias); fs.symlinkSync(join(physical, 'child'), alias);
+  expect(() => selected.assertCurrent()).toThrow('alias changed');
+  // Retiring configured lookup does not transfer or destroy the original tree;
+  // physical-only compensation still refers to that unchanged physical parent.
+  expect(() => selected.assertPhysicalCurrent()).not.toThrow();
+  expect(fs.readdirSync(physical)).toEqual(['child']);
 });
 
 test('a dangling parent alias never grants creation of its outside target', () => {

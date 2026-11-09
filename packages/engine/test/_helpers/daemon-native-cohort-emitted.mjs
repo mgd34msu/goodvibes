@@ -49,7 +49,7 @@ function assertNoTransient(targets) {
 
 test('ordinary Node selects the emitted platform and observes the actual stable inode owner', () => {
   assert.equal(typeof globalThis.Bun, 'undefined');
-  assert.match(import.meta.resolve('@goodvibes-jev/engine/platform/platform/runtime/self-update'), /\/sdk\/dist\/platform\/runtime\/self-update\.js$/);
+  assert.match(import.meta.resolve('@goodvibes-jev/engine/platform/platform/runtime/self-update'), /\/platform\/dist\/platform\/runtime\/self-update\.js$/);
   const f = fixture(); const observed = realUpdateFileIo.observe(f.execPath), stat = lstatSync(f.execPath, { bigint: true });
   assert.ok(observed); assert.equal(observed.ownerIdentity, `${stat.dev}:${stat.ino}`);
   assert.ok(observed.identity.includes(observed.ownerIdentity));

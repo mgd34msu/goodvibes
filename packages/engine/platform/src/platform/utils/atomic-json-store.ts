@@ -293,7 +293,7 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
     if (stat.isSymbolicLink()) {
       if (links.length >= 40) throw new Error('Atomic file parent has too many aliases');
       const target = readlinkSync(path), identity = atomicFileStamp(stat);
-      if (atomicFileStamp(lstatSync(path, { bigint: true })) !== identity || !statSync(realpathSync(path)).isDirectory()) throw new Error('Atomic file parent alias is unavailable');
+      if (atomicFileStamp(lstatSync(path, { bigint: true })) !== identity || !statSync(path).isDirectory()) throw new Error('Atomic file parent alias is unavailable');
       links.push({ path, identity, target });
       if (isAbsolute(target)) { cursor = parse(target).root; observe(cursor); }
       pending = [...target.slice(isAbsolute(target) ? parse(target).root.length : 0).split(sep), ...pending];
@@ -326,7 +326,15 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
     }
     current(); if (effect) { effect(); current(); }
   }
-  current(); if (realpathSync(absolute) !== canonical) throw new Error('Atomic file parent lookup changed');
+  const assertLookupCurrent = () => {
+    current();
+    // realpathSync (including .native under Bun) may normalize '..' before
+    // resolving aliases. Compare the kernel's actual selected directory with
+    // the original physical target instead, retaining every traversed alias.
+    if (atomicDirectoryStamp(statSync(absolute, { bigint: true })) !== directories.get(canonical)) throw new Error('Atomic file parent lookup changed');
+    current();
+  };
+  assertLookupCurrent();
   const physical: Array<{ path: string; identity: string }> = [];
   for (let path = canonical;; path = dirname(path)) {
     const identity = directories.get(path); if (identity === undefined) throw new Error('Atomic physical parent proof is unavailable');
@@ -335,7 +343,7 @@ function prepareAtomicDirectory(absolute: string, assertOwner: () => void, effec
   const durability = new Set([canonical]);
   for (const created of createdDirectories) { durability.add(created); durability.add(dirname(created)); }
   return { canonical, durabilityDirectories: Object.freeze([...durability].sort((left, right) => right.length - left.length)),
-    assertCurrent() { current(); if (realpathSync(absolute) !== canonical) throw new Error('Atomic file parent lookup changed'); },
+    assertCurrent: assertLookupCurrent,
     assertPhysicalCurrent() { for (const parent of physical) if (atomicDirectoryStamp(lstatSync(parent.path, { bigint: true })) !== parent.identity) throw new Error('Atomic physical parent changed'); },
   };
 }

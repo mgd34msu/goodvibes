@@ -124,7 +124,7 @@ describe('models.list reasoningOptions', () => {
     const thinkEntry = models.find((model) => model['id'] === 'mercury-think')!;
     expect(thinkEntry['reasoningOptions']).toMatchObject({ levels: ['low', 'medium', 'high'], source: 'declared', effectiveByRequested: { low: 'low', medium: 'medium', high: 'high', xhigh: 'high', max: 'high' } });
 
-    expect(ModelReasoningOptionsSchema.parse(thinkEntry['reasoningOptions'])).toEqual(thinkEntry['reasoningOptions']);
+    expect(thinkEntry['reasoningOptions']).toEqual(ModelReasoningOptionsSchema.parse(thinkEntry['reasoningOptions']));
     expect(ModelReasoningOptionsSchema.parse({ levels: ['high'], source: 'declared' })).toEqual({ levels: ['high'], source: 'declared' });
     const plainEntry = models.find((model) => model['id'] === 'mercury-2')!;
     expect(plainEntry['reasoningOptions']).toBeUndefined();

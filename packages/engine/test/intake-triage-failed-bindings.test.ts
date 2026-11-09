@@ -51,8 +51,9 @@ test('missing, cancelled, invalid, failed and held triage perform no input hashi
     expect((await scoreInboxTriage([item()], malformed))[0]?.status).toBe('unavailable');
     const held = fakePort(() => noulAnswer(.5));
     const [receipt] = await scoreInboxTriage([item()], held.port);
+    if (!receipt) throw new Error('The actual held fixture must return a receipt.');
     expect(receipt).toMatchObject({ receiptVersion: 3, status: 'held' });
-    expect(Object.hasOwn(receipt!, 'inputHash')).toBe(false);
+    expect(Object.hasOwn(receipt, 'inputHash')).toBe(false);
     expect(checkTriageReceipt(receipt)).toEqual(receipt);
     const late = new AbortController(), lateAnswer = answered();
     const cancelDuring: JudgmentPort = { model: 'jev-latest', async ask(request) { late.abort(); return lateAnswer.port.ask(request); } };

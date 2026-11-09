@@ -1,6 +1,6 @@
 /**
  * release:prepare rewrites the version, the CHANGELOG section, the release
- * notes stamp and the workflow pins at the bump, which is what lets CI stop
+ * notes stamp at the bump, which is what lets CI stop
  * checking them on every push.
  */
 import { describe, expect, test } from 'bun:test';
@@ -10,9 +10,7 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import {
   bumpVersion,
   parsePrepareArgs,
-  peeledTagSha,
   prepareRelease,
-  rewriteWorkflowPins,
   scaffoldChangelogText,
   scaffoldReleaseNotesText,
   setManifestVersionText,
@@ -79,53 +77,16 @@ describe('versions', () => {
     expect(() => parsePrepareArgs(['--patch', '--minor'])).toThrow('Usage');
     expect(() => parsePrepareArgs(['--version', '2.2'])).toThrow('Usage');
     expect(parsePrepareArgs(['--version', '2.2.0', '--no-live'])).toEqual({
-      bump: { exact: '2.2.0' }, changelog: true, install: true, pins: true, live: false,
+      bump: { exact: '2.2.0' }, changelog: true, install: true, live: false,
     });
     expect(parsePrepareArgs(['--no-bump', '--no-changelog', '--no-install', '--no-pins'])).toEqual({
-      bump: null, changelog: false, install: false, pins: false, live: true,
+      bump: null, changelog: false, install: false, live: true,
     });
   });
 });
 
-describe('workflow pins', () => {
-  const OLD = 'a'.repeat(40);
-  const NEW = 'b'.repeat(40);
-  const WORKFLOW = [
-    `    uses: mgd34msu/goodvibes/.github/workflows/reusable-release-verify.yml@${OLD} # engine 2.1.0 release`,
-    '      toolchain-spec: "@goodvibes-jev/engine@2.1.0"',
-    `    uses: mgd34msu/goodvibes/.github/workflows/reusable-gh-release.yml@${OLD} # engine 2.1.0 release`,
-    '      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1',
-    `      publish-command: 'bunx @goodvibes-jev/engine@2.1.0 goodvibes-publish-package --poll'`,
-  ].join('\n');
-
-  test('every engine reusable-workflow ref and toolchain spec moves; other actions do not', () => {
-    const out = rewriteWorkflowPins(WORKFLOW, { engineVersion: '2.2.0', engineSha: NEW, toolchainVersion: '2.2.1' });
-    expect(out).not.toContain(OLD);
-    expect(out.match(new RegExp(`@${NEW} # engine 2\\.2\\.0 release`, 'g'))).toHaveLength(2);
-    expect(out.match(/@goodvibes-jev\/engine@2\.2\.1/g)).toHaveLength(2);
-    expect(out).toContain('actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1');
-  });
-
-  test('without a resolved SHA only the toolchain specs move', () => {
-    const out = rewriteWorkflowPins(WORKFLOW, { engineVersion: '2.2.0', engineSha: null, toolchainVersion: '2.2.1' });
-    expect(out.match(new RegExp(`@${OLD} # engine 2\\.1\\.0 release`, 'g'))).toHaveLength(2);
-    expect(out.match(/@goodvibes-jev\/engine@2\.2\.1/g)).toHaveLength(2);
-  });
-
-  test('the peeled tag line wins over the tag object line', () => {
-    const output = [
-      `${'c'.repeat(40)}\trefs/tags/v2.2.0`,
-      `${'d'.repeat(40)}\trefs/tags/v2.2.0^{}`,
-    ].join('\n');
-    expect(peeledTagSha(output, 'v2.2.0')).toBe('d'.repeat(40));
-    expect(peeledTagSha(`${'c'.repeat(40)}\trefs/tags/v2.2.0\n`, 'v2.2.0')).toBe('c'.repeat(40));
-    expect(peeledTagSha('', 'v2.2.0')).toBeNull();
-  });
-});
-
-
 describe('retained standalone release boundary', () => {
-  test('a synthetic legacy registry package can still prepare workflow pins with injected execution', async () => {
+  test('retained standalone preparation leaves existing workflow pins untouched without remote lookup', async () => {
     const root = makeProjectTempDir('gv-legacy-release-prepare');
     try {
       writeFileSync(join(root, 'package.json'), JSON.stringify({
@@ -145,19 +106,15 @@ describe('retained standalone release boundary', () => {
         root,
         runCommand: (command, args, options) => {
           calls.push({ command, args, cwd: options.cwd });
-          return { status: 0, stdout: command === 'git' ? `${'b'.repeat(40)}\trefs/tags/v2.1.0\n` : '' };
+          return { status: 0, stdout: '' };
         },
       });
       expect(calls.map(({ command, args }) => [command, ...args])).toEqual([
         ['bun', 'run', 'scripts/prebuild.ts'],
         ['bun', 'run', 'scripts/generate-google-runbook.ts'],
-        ['git', 'ls-remote', 'https://github.com/mgd34msu/goodvibes', 'refs/tags/v2.1.0', 'refs/tags/v2.1.0^{}'],
       ]);
       expect(calls.every((call) => call.cwd === root)).toBe(true);
-      const result = readFileSync(join(root, '.github/workflows/release.yml'), 'utf8');
-      expect(result).toContain('@goodvibes-jev/engine@2.1.0');
-      expect(result).toContain(`@${'b'.repeat(40)} # engine 2.1.0 release`);
-      expect(result).not.toContain('@goodvibes-jev/engine@2.0.0');
+      expect(readFileSync(join(root, '.github/workflows/release.yml'), 'utf8')).toBe(workflow);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

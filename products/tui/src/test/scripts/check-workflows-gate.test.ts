@@ -34,14 +34,14 @@ const VALID_WORKFLOW = [
   '',
 ].join('\n');
 
-function runGate(files: Record<string, string>): { exitCode: number; output: string } {
+function runGate(files: Record<string, string>, workspace = false): { exitCode: number; output: string } {
   const dir = makeProjectTempDir('check-workflows-fixture');
   const workflows = join(dir, 'workflows');
   mkdirSync(workflows, { recursive: true });
   for (const [name, body] of Object.entries(files)) {
     writeFileSync(join(workflows, name), body, 'utf8');
   }
-  const proc = Bun.spawnSync(['bun', GATE, workflows], {
+  const proc = Bun.spawnSync(['bun', GATE, workflows, ...(workspace ? ['--workspace'] : [])], {
     cwd: REPO_ROOT,
     stdout: 'pipe',
     stderr: 'pipe',
@@ -264,7 +264,38 @@ describe('check-workflows', () => {
     expect(res.output).toContain('must trail the npmjs publish');
   });
 
-  test("the repo's own workflows pass", () => {
+
+  const suiteRelease = [
+    'name: Suite Release', 'on:', '  workflow_dispatch:', 'jobs:',
+    '  verify-tag-version:', '    runs-on: ubuntu-latest', '    steps:', '      - run: echo verify',
+    '  release-verify:', '    uses: ./.github/workflows/reusable-release-verify.yml',
+    '    with:', '      toolchain-source: workspace',
+    '  publish-npm:', '    runs-on: ubuntu-latest', '    steps:', '      - run: echo publish',
+    '  complete-suite-assets:', '    uses: ./.github/workflows/suite-release-assets.yml',
+    '  prepare-native-assets:', '    runs-on: ubuntu-latest', '    steps:', '      - run: echo prepare',
+    '  github-release:', '    uses: ./.github/workflows/reusable-gh-release.yml',
+    '    with:', '      toolchain-source: workspace', '',
+  ].join('\n');
+
+  test('explicit workspace role accepts the suite and refuses missing suite ownership', () => {
+    expect(runGate({ 'release.yml': suiteRelease }, true).exitCode).toBe(0);
+    const missing = suiteRelease.replace('  complete-suite-assets:\n    uses: ./.github/workflows/suite-release-assets.yml\n', '');
+    const result = runGate({ 'release.yml': missing }, true);
+    expect(result.exitCode).toBe(1);
+    expect(result.output).toContain('missing the "complete-suite-assets" job');
+  });
+
+  test('workspace governance refuses a remote replacement and registry toolchain', () => {
+    const remote = runGate({ 'release.yml': suiteRelease.replace('./.github/workflows/suite-release-assets.yml', 'example.invalid/standalone/release.yml@main') }, true);
+    expect(remote.exitCode).toBe(1);
+    expect(remote.output).toContain('must use ./.github/workflows/suite-release-assets.yml');
+    const registry = runGate({ 'release.yml': suiteRelease.replaceAll('toolchain-source: workspace', 'toolchain-source: registry') }, true);
+    expect(registry.exitCode).toBe(1);
+    expect(registry.output).toContain('must use the workspace toolchain');
+    expect(runGate({ 'ci.yml': VALID_WORKFLOW }, true).exitCode).toBe(1);
+  });
+
+  test("the active root suite workflows pass from the product entrypoint", () => {
     const proc = Bun.spawnSync(['bun', GATE], {
       cwd: REPO_ROOT,
       stdout: 'pipe',

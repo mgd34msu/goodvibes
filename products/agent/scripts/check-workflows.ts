@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 /**
  * check-workflows.ts, structural validation gate for the GitHub Actions
- * workflow YAML under .github/workflows/.
+ * active monorepo workflow YAML under the root .github/workflows/.
+ * An explicit directory retains standalone fixture validation; --workspace
+ * instead applies the actual suite role to that explicit directory.
  *
  * The repo has no actionlint/yaml-lint gate, so a broken workflow edit would
  * only surface at release time. This check runs in the ordinary gate battery and
@@ -26,15 +28,21 @@
  *     manifest, missing-asset-fatal), matching the naming the curl installer
  *     parses.
  *
+ * Default release ownership is checked by the shared suite contract; the
+ * standalone release-specific rules below apply only to explicit legacy fixtures.
+ *
  * Exit code 0 = green (0 problems), non-zero = the count of structural problems.
  */
+import { suiteWorkflowProblems } from '@goodvibes-jev/engine/toolchain';
 import { readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
-const workflowsDir = join(root, '.github', 'workflows');
+const dirArg = process.argv[2];
+const workspace = dirArg === undefined || process.argv.includes('--workspace');
+const workflowsDir = dirArg ? resolve(dirArg) : resolve(root, '../..', '.github', 'workflows');
 
 type Json = Record<string, unknown>;
 
@@ -157,7 +165,11 @@ for (const file of files) {
     }
   }
 
-  if (file === 'release.yml') {
+  if (file === 'release.yml' && workspace) {
+    for (const problem of suiteWorkflowProblems(doc)) fail(file, problem);
+  }
+
+  if (file === 'release.yml' && !workspace) {
     for (const job of RELEASE_REQUIRED_JOBS) {
       if (!isObject((jobs as Json)[job])) {
         fail(file, `release workflow is missing the "${job}" job`);
@@ -215,6 +227,8 @@ for (const file of files) {
     // reusable binary matrix (post-build-smoke on the executable legs).
   }
 }
+
+if (workspace && !files.includes('release.yml')) fail('release.yml', 'workspace release workflow is missing');
 
 if (problems.length > 0) {
   console.error(`check-workflows: ${problems.length} structural problem(s):`);

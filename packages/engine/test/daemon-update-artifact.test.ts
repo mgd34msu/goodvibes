@@ -132,7 +132,7 @@ describe('daemon update artifact identity', () => {
 });
 
 describe('no silent gates: every reason the update loop stays off is logged', () => {
-  async function infoLinesFor(overrides: Parameters<typeof lifecycleWith>[1], artifact?: DaemonLifecycleRuntimeOptions['updateArtifact']): string[] {
+  async function infoLinesFor(overrides: Parameters<typeof lifecycleWith>[1], artifact?: DaemonLifecycleRuntimeOptions['updateArtifact']): Promise<string[]> {
     const spy = spyOn(logger, 'info') as Mock<typeof logger.info>;
     const { runtime } = lifecycleWith(artifact, overrides);
     try {
@@ -144,23 +144,23 @@ describe('no silent gates: every reason the update loop stays off is logged', ()
     }
   }
 
-  test('update.auto not true says so, instead of returning in silence', () => {
-    const lines = infoLinesFor({ configOverrides: { 'update.auto': false } }, { version: '1.0.0' });
+  test('update.auto not true says so, instead of returning in silence', async () => {
+    const lines = await infoLinesFor({ configOverrides: { 'update.auto': false } }, { version: '1.0.0' });
     expect(lines.some((line) => line.includes('auto-update loop off') && line.includes('update.auto'))).toBe(true);
   });
 
-  test('an empty releasesUrl says so, instead of returning in silence', () => {
-    const lines = infoLinesFor({ configOverrides: { 'update.releasesUrl': '   ' } }, { version: '1.0.0' });
+  test('an empty releasesUrl says so, instead of returning in silence', async () => {
+    const lines = await infoLinesFor({ configOverrides: { 'update.releasesUrl': '   ' } }, { version: '1.0.0' });
     expect(lines.some((line) => line.includes('auto-update loop off') && line.includes('update.releasesUrl'))).toBe(true);
   });
 
-  test('no artifact identity says so', () => {
-    const lines = infoLinesFor({});
+  test('no artifact identity says so', async () => {
+    const lines = await infoLinesFor({});
     expect(lines.some((line) => line.includes('auto-update loop off') && line.includes('host-managed'))).toBe(true);
   });
 
-  test('an armed loop announces its schedule, so "nothing updated" is never a guess', () => {
-    const lines = infoLinesFor({}, { version: '1.0.0' });
+  test('an armed loop announces its schedule, so "nothing updated" is never a guess', async () => {
+    const lines = await infoLinesFor({}, { version: '1.0.0' });
     expect(lines.some((line) => line.includes('auto-update loop armed'))).toBe(true);
   });
 });

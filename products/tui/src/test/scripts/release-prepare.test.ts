@@ -1,12 +1,11 @@
 /**
- * release:prepare rewrites the version, the CHANGELOG section and the workflow
- * pins at the bump, which is what lets CI stop checking them on every push.
+ * release:prepare rewrites the version, the CHANGELOG section at the bump, which is what lets CI stop checking them on every push.
  */
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import {
   bumpVersion,
-  peeledTagSha,
-  rewriteWorkflowPins,
   scaffoldChangelogText,
   setManifestVersionText,
 } from '../../../scripts/release-prepare.ts';
@@ -60,34 +59,14 @@ describe('versions', () => {
   });
 });
 
-describe('workflow pins', () => {
-  const OLD = 'a'.repeat(40);
-  const NEW = 'b'.repeat(40);
-  const WORKFLOW = [
-    `    uses: mgd34msu/goodvibes/.github/workflows/reusable-release-verify.yml@${OLD} # engine 2.1.0 release`,
-    '      toolchain-spec: "@goodvibes-jev/engine@2.1.0"',
-    `    uses: mgd34msu/goodvibes/.github/workflows/reusable-gh-release.yml@${OLD} # engine 2.1.0 release`,
-    '      uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1',
-    '      publish-command: "bunx @goodvibes-jev/engine@2.1.0 goodvibes-publish-package --poll"',
-  ].join('\n');
-
-  test('every engine reusable-workflow ref and toolchain spec moves; other actions do not', () => {
-    const out = rewriteWorkflowPins(WORKFLOW, { engineVersion: '2.2.0', engineSha: NEW, toolchainVersion: '2.2.1' });
-    expect(out).not.toContain(OLD);
-    expect(out.match(new RegExp(`@${NEW} # engine 2\\.2\\.0 release`, 'g'))).toHaveLength(2);
-    expect(out.match(/@goodvibes-jev\/engine@2\.2\.1/g)).toHaveLength(2);
-    expect(out).toContain('actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1');
+test('actual private workspace preparation refuses before commands or manifest writes', () => {
+  const root = resolve(import.meta.dir, '../../..');
+  const path = join(root, 'package.json');
+  const before = readFileSync(path, 'utf8');
+  const result = Bun.spawnSync(['bun', join(root, 'scripts/release-prepare.ts'), '--no-bump'], {
+    cwd: root, stdout: 'pipe', stderr: 'pipe',
   });
-
-  test('with no resolved SHA the engine refs are left exactly as they were', () => {
-    const out = rewriteWorkflowPins(WORKFLOW, { engineVersion: '2.2.0', engineSha: null, toolchainVersion: '2.1.0' });
-    expect(out).toBe(WORKFLOW);
-  });
-
-  test('the peeled commit of an annotated tag wins over the tag object', () => {
-    const lsRemote = `${'1'.repeat(40)}\trefs/tags/v2.1.0\n${'2'.repeat(40)}\trefs/tags/v2.1.0^{}\n`;
-    expect(peeledTagSha(lsRemote, 'v2.1.0')).toBe('2'.repeat(40));
-    expect(peeledTagSha(`${'3'.repeat(40)}\trefs/tags/v2.1.0\n`, 'v2.1.0')).toBe('3'.repeat(40));
-    expect(peeledTagSha('', 'v2.1.0')).toBeNull();
-  });
+  expect(result.exitCode).toBe(1);
+  expect(result.stderr.toString()).toContain('refuses a private/workspace package');
+  expect(readFileSync(path, 'utf8')).toBe(before);
 });

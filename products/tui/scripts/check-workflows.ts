@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 /**
  * check-workflows.ts, structural validation gate for the GitHub Actions
- * workflow YAML under .github/workflows/.
+ * active monorepo workflow YAML under the root .github/workflows/.
+ * An explicit directory retains standalone fixture validation; --workspace
+ * instead applies the actual suite role to that explicit directory.
  *
  * The repo has no actionlint/yaml-lint gate, so a broken workflow edit would
  * only surface at release time. This check runs in the ordinary gate battery and
@@ -18,12 +20,16 @@
  *     mirror job trails the npmjs publish and carries the same PUBLISH_NPM kill
  *     switch, so the mirror can never publish a version npmjs did not get.
  *
+ * Default release ownership is checked by the shared suite contract; the
+ * standalone release-specific rules below apply only to explicit legacy fixtures.
+ *
  * Exit code 0 = green (0 problems), non-zero = the check found problems.
  *
  * The first CLI argument overrides the directory to validate; it exists so the
  * gate's own test can point it at fixture workflows and prove each rule still
  * reports a problem when the workflow is actually broken.
  */
+import { suiteWorkflowProblems } from '@goodvibes-jev/engine/toolchain';
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +37,8 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const dirArg = process.argv[2];
-const workflowsDir = dirArg ? resolve(dirArg) : join(root, '.github', 'workflows');
+const workspace = dirArg === undefined || process.argv.includes('--workspace');
+const workflowsDir = dirArg ? resolve(dirArg) : resolve(root, '../..', '.github', 'workflows');
 
 type Json = Record<string, unknown>;
 
@@ -128,7 +135,11 @@ for (const file of files) {
     }
   }
 
-  if (file === 'release.yml') {
+  if (file === 'release.yml' && workspace) {
+    for (const problem of suiteWorkflowProblems(doc)) fail(file, problem);
+  }
+
+  if (file === 'release.yml' && !workspace) {
     for (const { job, githubPackages, killSwitch } of RELEASE_REQUIRED_JOBS) {
       const jobDef = (jobs as Json)[job];
       if (!isObject(jobDef)) {
@@ -154,6 +165,8 @@ for (const file of files) {
     }
   }
 }
+
+if (workspace && !files.includes('release.yml')) fail('release.yml', 'workspace release workflow is missing');
 
 if (problems.length > 0) {
   console.error(`check-workflows: ${problems.length} structural problem(s):`);

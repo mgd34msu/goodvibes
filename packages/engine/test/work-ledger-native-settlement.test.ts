@@ -5,8 +5,7 @@ import { originalObligationSource } from '../platform/src/platform/contract/batt
 import { CONTRACT_CONFIG_DEFAULTS } from '../platform/src/platform/contract/config.js';
 import { verifyNativeWorkExecution } from '../platform/src/platform/workflow/work-ledger/native-execution-verifier.js';
 import { nativeExecutionProvider } from './helpers/native-execution-provider.js';
-import * as nativeFs from 'node:fs';
-import type { SQLitePublicationIO } from '../platform/src/platform/state/sqlite-store-persistence.js';
+import * as atomicStore from '../platform/src/platform/utils/atomic-json-store.js';
 /** Real paired authority, workspace scope and KnowledgeStore bridge into the real durable runner. */
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -431,24 +430,44 @@ test('automatic completion settles through the owned lifetime and close drains h
 for (const failure of ['before-publication', 'after-rename'] as const) {
   test(`atomic settlement ${failure} leaves zero partial report and exact lost acknowledgement recovery`, async () => {
     const f = await fixture(); const started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId);
-    const persistence = (f.store as unknown as { sqlite: { persistence: { io: SQLitePublicationIO } } }).sqlite.persistence;
-    let fileSynced = false; let failed = false;
-    persistence.io = { ...nativeFs, fsyncSync(fd) {
-      const directory = nativeFs.fstatSync(fd).isDirectory();
-      if (!directory) fileSynced = true;
-      if (!failed && fileSynced && (failure === 'after-rename' ? directory : !directory)) { failed = true; throw new Error('Synthetic settlement persistence failure'); }
-      nativeFs.fsyncSync(fd);
-    } };
-    await expect(f.host.settle(f.key, f.authority)).rejects.toThrow(); persistence.io = nativeFs; expect(failed).toBe(true);
+    const path = join(f.root, '.goodvibes', 'knowledge.sqlite'), before = readFileSync(path);
+    const write = atomicStore.writeFileAtomic; let failed = false;
+    // The publisher captures native IO at construction. Inject at its actual
+    // public atomic writer, not a subsequently assigned, unused IO lookalike.
+    const fault = spyOn(atomicStore, 'writeFileAtomic').mockImplementation((selected, bytes, options) => {
+      if (selected !== path || failed) return write(selected, bytes, options);
+      const fail = (): never => { failed = true; throw new Error('Synthetic settlement persistence failure'); };
+      if (failure === 'before-publication') return fail();
+      return write(selected, bytes, { ...options, onEffect(published) {
+        const original: unknown = options?.onEffect?.(published);
+        if (original !== undefined) return original as never;
+        if (published) fail();
+      } });
+    });
+    try { await expect(f.host.settle(f.key, f.authority)).rejects.toThrow(); }
+    finally { fault.mockRestore(); }
+    expect(failed).toBe(true);
+    if (failure === 'before-publication') expect(readFileSync(path)).toEqual(before);
     const reopened = new KnowledgeStore({ dbPath: join(f.root, '.goodvibes', 'knowledge.sqlite') }); const storage = await reopened.openNativeWorkExecutionStorage('project');
     const current = storage.current(f.key); expect(current.ledger.revision).toBe(failure === 'after-rename' ? 4 : 2);
     expect(current.ledger.history.filter(event => event.type === 'report').length).toBe(current.ledger.evidence.length);
+    expect(current.ledger.evidence).toHaveLength(failure === 'after-rename' ? 1 : 0);
+    if (failure === 'after-rename') {
+      expect(current.settlement).not.toBeNull();
+      expect(current.ledger.history.slice(-2).map(event => event.type)).toEqual(['report', 'record_evidence']);
+    } else expect(current.settlement).toBeNull();
     const replacement = createNativeWorkExecutionHost({ ...f.hostOptions, storage }); replacement.attachRunner(f.harness.runner);
+    let publications = 0;
+    const recovery = spyOn(atomicStore, 'writeFileAtomic').mockImplementation((selected, bytes, options) => {
+      if (selected === path) publications++;
+      return write(selected, bytes, options);
+    });
     try {
       const receipt = await replacement.settle(f.key, f.authority);
       if (failure === 'after-rename') expect(receipt).toEqual(current.settlement!);
+      expect(publications).toBe(failure === 'after-rename' ? 0 : 1);
       expect(storage.current(f.key).ledger.revision).toBe(4); expect(f.harness.agentsOf('u1')).toHaveLength(1);
-    } finally { await replacement.close(); await reopened.close(); }
+    } finally { recovery.mockRestore(); await replacement.close(); await reopened.close(); }
   });
 }
 
@@ -544,8 +563,15 @@ test('restricted artifact reads and absent recorded proof remain unavailable, wi
   const started = await f.host.start(f.target, f.authority); await completed(f.harness, started.admission.contractId); allowed = false;
   await expect(f.host.settle(f.key, f.authority)).rejects.toThrow('access-restricted'); expect(f.storage.current(f.key).ledger.revision).toBe(2);
   allowed = true;
-  const record = f.storage.current(f.key).record!;
-  await expect(verifyNativeWorkExecution({ execution: record, runner: f.harness.runner, port: f.hostOptions.port, decisionLog: { get: () => undefined }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true, signal: new AbortController().signal, assertCurrent() {} })).rejects.toThrow('genuine');
+  const record = f.storage.current(f.key).record!, path = join(f.root, '.goodvibes', 'knowledge.sqlite'), before = readFileSync(path);
+  const requests = spyOn(f.hostOptions.port, 'ask');
+  try {
+    await expect(verifyNativeWorkExecution({ execution: record, runner: f.harness.runner, port: f.hostOptions.port, decisionLog: { get: () => undefined }, settings: checkSettings(CONTRACT_CONFIG_DEFAULTS), readAccessFilter: async () => true, signal: new AbortController().signal, assertCurrent() {} })).rejects.toMatchObject({ code: 'unavailable' });
+    expect(requests).not.toHaveBeenCalled();
+  } finally { requests.mockRestore(); }
+  expect(readFileSync(path)).toEqual(before);
+  const unchanged = f.storage.current(f.key);
+  expect(unchanged.ledger.revision).toBe(2); expect(unchanged.ledger.evidence).toHaveLength(0); expect(unchanged.settlement).toBeNull();
 });
 
 test('independent quality and exact recorded state are required even when every original criterion reads met', async () => {

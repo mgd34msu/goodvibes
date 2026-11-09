@@ -55,7 +55,7 @@ afterAll(() => {
 });
 
 describe('gatherTrainStatus against real git repos', () => {
-  test('a tagged sdk repo with commits since the tag reports the correct counts and action', () => {
+  test('a tagged platform repo with commits since the tag reports the correct counts and action', () => {
     const manifest: TrainStatusManifest = {
       repos: [{ path: taggedDir, name: 'goodvibes-platform', kind: 'platform' }],
     };
@@ -69,9 +69,9 @@ describe('gatherTrainStatus against real git repos', () => {
     expect(row.action).toBe('cut vNEXT');
   });
 
-  test('an untagged sdk-consumer counts every commit as since-tag and flags a stale pin', () => {
+  test('an untagged engine-consumer counts every commit as since-tag and flags a stale pin', () => {
     const manifest: TrainStatusManifest = {
-      repos: [{ path: untaggedDir, name: 'consumer-repo', kind: 'sdk-consumer' }],
+      repos: [{ path: untaggedDir, name: 'consumer-repo', kind: 'engine-consumer' }],
     };
     const result = gatherTrainStatus(manifest, { exec: realExec, fetchLatestEngineVersion: () => '1.4.0' });
     expect(result.latestEngineVersion).toBe('1.4.0');
@@ -84,7 +84,7 @@ describe('gatherTrainStatus against real git repos', () => {
     expect(row.action).toBe('repin to 1.4.0 then release');
   });
 
-  test('fetchLatestEngineVersion is never called when no repo in the manifest is an sdk-consumer', () => {
+  test('fetchLatestEngineVersion is never called when no repo in the manifest is an engine-consumer', () => {
     const manifest: TrainStatusManifest = {
       repos: [{ path: taggedDir, name: 'goodvibes-platform', kind: 'platform' }],
     };

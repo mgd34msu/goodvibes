@@ -84,7 +84,8 @@ describe('original triage code assertions with recorded readings', () => {
     await runInboxTriage([current], { store: owner.store, port: recorded(.01, .99).port });
     await runInboxTriage([item('held')], { store: owner.store, port: recorded(.5, .5).port });
     await runInboxTriage([item('unavailable')], { store: owner.store });
-    const saved = owner.rows.get(current.id)!;
+    const saved = owner.rows.get(current.id);
+    if (!saved || saved.latest.status !== 'settled' || saved.latest.receiptVersion !== 2) throw new Error('The current fixture must have actual settled v2 evidence.');
     owner.rows.set('invalid', { latest: { ...saved.latest, id: 'invalid', inputHash: 'invalid' }, settled: saved.settled });
     const unscored = [...Array.from({ length: 20 }, (_, index) => item(`missing-${index}`)), item('held'), item('unavailable'), item('invalid')];
     const hashes = spyOn(crypto, 'createHash');

@@ -93,7 +93,7 @@ test('unavailable receipts do not invent a requested or answered model; historic
   expect(unavailable?.model).toBeUndefined(); expect(unavailable?.actualModel).toBeUndefined();
   expect(checkTriageReceipt(unavailable)).toEqual(unavailable);
   const historical: Record<string, unknown> = { ...triageBinding(captureTriageInputs([item])[0]!), status: 'unavailable', model: 'jev-latest' };
-  delete historical.receiptVersion; expect(checkTriageReceipt(historical)).toEqual(historical);
+  delete historical.receiptVersion; expect<unknown>(checkTriageReceipt(historical)).toEqual(historical);
 });
 
 test('a borrowed recorder getter is rejected without executing user code', async () => {

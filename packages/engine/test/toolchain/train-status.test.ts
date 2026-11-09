@@ -76,20 +76,20 @@ describe('classifyEnginePin', () => {
     expect(classifyEnginePin('1.0.0', '1.0.0', 'independent')).toBe('n/a');
   });
   test('unpinned consumer', () => {
-    expect(classifyEnginePin(null, '1.0.0', 'sdk-consumer')).toBe('unpinned');
+    expect(classifyEnginePin(null, '1.0.0', 'engine-consumer')).toBe('unpinned');
   });
   test('pin matches latest: current', () => {
-    expect(classifyEnginePin('1.2.3', '1.2.3', 'sdk-consumer')).toBe('1.2.3 (current)');
+    expect(classifyEnginePin('1.2.3', '1.2.3', 'engine-consumer')).toBe('1.2.3 (current)');
   });
   test('pin behind latest: repin needed', () => {
-    expect(classifyEnginePin('1.2.0', '1.2.3', 'sdk-consumer')).toBe('1.2.0 -> 1.2.3 (repin needed)');
+    expect(classifyEnginePin('1.2.0', '1.2.3', 'engine-consumer')).toBe('1.2.0 -> 1.2.3 (repin needed)');
   });
   test('latest unknown (npm view failed)', () => {
-    expect(classifyEnginePin('1.2.0', null, 'sdk-consumer')).toBe('1.2.0 (latest unknown)');
+    expect(classifyEnginePin('1.2.0', null, 'engine-consumer')).toBe('1.2.0 (latest unknown)');
   });
 });
 
-describe('deriveAction: sdk repos', () => {
+describe('deriveAction: platform repos', () => {
   test('idle with no commits since the last tag', () => {
     const g = gathered({ entry: entry({ kind: 'platform' }), commitsSinceTag: 0 });
     expect(deriveAction(g, null)).toBe('idle');
@@ -100,10 +100,10 @@ describe('deriveAction: sdk repos', () => {
   });
 });
 
-describe('deriveAction: sdk-consumer repos', () => {
+describe('deriveAction: engine-consumer repos', () => {
   test('repin takes priority over an unreleased count', () => {
     const g = gathered({
-      entry: entry({ kind: 'sdk-consumer' }),
+      entry: entry({ kind: 'engine-consumer' }),
       enginePin: '1.0.0',
       commitsSinceTag: 5,
     });
@@ -111,7 +111,7 @@ describe('deriveAction: sdk-consumer repos', () => {
   });
   test('release (N unreleased) when the pin is current', () => {
     const g = gathered({
-      entry: entry({ kind: 'sdk-consumer' }),
+      entry: entry({ kind: 'engine-consumer' }),
       enginePin: '1.1.0',
       commitsSinceTag: 4,
     });
@@ -119,7 +119,7 @@ describe('deriveAction: sdk-consumer repos', () => {
   });
   test('idle when the pin is current and nothing unreleased', () => {
     const g = gathered({
-      entry: entry({ kind: 'sdk-consumer' }),
+      entry: entry({ kind: 'engine-consumer' }),
       enginePin: '1.1.0',
       commitsSinceTag: 0,
     });
@@ -127,7 +127,7 @@ describe('deriveAction: sdk-consumer repos', () => {
   });
   test('an unresolvable latest version never triggers a repin suggestion', () => {
     const g = gathered({
-      entry: entry({ kind: 'sdk-consumer' }),
+      entry: entry({ kind: 'engine-consumer' }),
       enginePin: '1.1.0',
       commitsSinceTag: 2,
     });
@@ -216,7 +216,7 @@ describe('renderTrainStatusTable', () => {
     ];
     const table = renderTrainStatusTable(rows);
     const lines = table.split('\n');
-    expect(lines[0]).toMatch(/^REPO\s+KIND\s+VERSION\s+platform PIN\s+LAST TAG\s+SINCE TAG\s+UNPUSHED\s+ACTION$/);
+    expect(lines[0]).toMatch(/^REPO\s+KIND\s+VERSION\s+engine PIN\s+LAST TAG\s+SINCE TAG\s+UNPUSHED\s+ACTION$/);
     expect(lines.some((l) => l.includes('goodvibes-platform') && l.includes('cut vNEXT'))).toBe(true);
     expect(lines.some((l) => l.includes('goodvibes-plugin') && l.includes('idle'))).toBe(true);
     expect(lines.at(-1)).toBe('2 repos, 1 need action');

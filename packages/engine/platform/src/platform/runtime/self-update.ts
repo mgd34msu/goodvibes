@@ -32,7 +32,7 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { compareSemanticVersions, parseSemanticVersion } from './semantic-version.js';
 import { assertDaemonNativePayloadPins, createDaemonNativeRenameGuard, inspectDaemonNativeInstallation, parseDaemonCiArtifact, resolveDaemonNativeTargets, retainDaemonNativeFiles, type DaemonNativeTarget, type DaemonNativeRenameGuard, type DaemonPreviousReader, type DaemonInstallationReceipt } from './daemon-native-cohort.js';
 import { assertNativeReaderCompatible, NATIVE_READER_REQUIREMENT_FILE, NATIVE_PREVIOUS_READER_RECEIPT_FORMAT, parseNativeReaderCapabilities, type NativeReaderCapabilities } from './native-reader-compatibility.js';
-export { DAEMON_NATIVE_TARGETS, DAEMON_INSTALLATION_RECEIPT, assertDaemonNativePayloadBytes, inspectDaemonNativeInstallation,
+export { DAEMON_NATIVE_TARGETS, DAEMON_INSTALLATION_RECEIPT, assertDaemonNativePayloadBytes, assertDaemonNativePayloadPins, inspectDaemonNativeInstallation,
   parseDaemonCiArtifact, parseDaemonInstallationReceipt, resolveDaemonInstallationReaders, resolveDaemonNativePayloads, resolveDaemonNativeTargets, retainDaemonNativeFiles,
   type DaemonNativeTarget, type DaemonNativePayload, type DaemonArtifactSource, type DaemonCiArtifact, type DaemonInstallationReceipt, type DaemonPreviousReader } from './daemon-native-cohort.js';
 export { createNativeDataWriteOwner, assertNativeReaderCompatible, nativeReaderCapabilities, parseNativeReaderCapabilities, NativeDataCompatibilityError, NATIVE_READER_REQUIREMENT_FILE } from './native-reader-compatibility.js';

@@ -323,3 +323,16 @@ test('real A→B→A evidence starts a current lifecycle while an actual delayed
     const current = JSON.stringify(store.getIssue(first.id)); release.resolve(); await expect(delayed).rejects.toThrow('stale'); expect(JSON.stringify(store.getIssue(first.id))).toBe(current);
   } finally { release.resolve(); }
 });
+
+
+test('review preserves the exact owned opaque issue namespace and absent log IDs remain JSON-consistent across refresh and restart', async () => {
+  const f = await fixture(); readings(); await f.run();
+  const issue = f.store.listIssues().find(issue => issue.code === 'homegraph.device.missing_manual')!;
+  expect(Object.hasOwn(issue.metadata.qualityReading as object, 'decisionId')).toBe(false);
+  await reviewHomeGraphFact(f.store, spaceId, installationId, { issueId: issue.id, action: 'resolve', reviewer: 'owner' });
+  expect(f.store.getIssue(issue.id)!.metadata.namespace).toBe(homeGraphQualityNamespace(spaceId));
+  readings(); await f.run(); expect(f.store.listIssues().filter(current => current.code === issue.code).map(current => current.id)).toEqual([issue.id]);
+  await f.store.close(); const reopened = new KnowledgeStore({ dbPath: f.dbPath }); stores.push(reopened); await reopened.init();
+  readings(); await refreshHomeGraphQualityIssues(reopened, spaceId, installationId);
+  expect(reopened.listIssues().filter(current => current.code === issue.code).map(current => current.id)).toEqual([issue.id]); expect(reopened.getIssue(issue.id)!.status).toBe('resolved');
+});

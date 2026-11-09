@@ -21,7 +21,7 @@ for (const path of ['upsert','replace','guarded-replacement','node-issue','impor
     : path === 'guarded-replacement' ? store.replaceIssuesGuarded([changed],'homegraph:house:quality',() => {})
     : path === 'node-issue' ? store.applyGuardedNodeIssueWrites({ nodes: [], issues: [changed] },() => {})
     : path === 'import' ? store.applyImport(graph)
-    : store.applyPreparedIngest(graph,async () => ({ nodes: [], edges: [], issues: [] }));
+    : store.applyPreparedIngest(graph,async () => ({ nodes: [], edges: [], issues: [changed] }));
   await expect(work).rejects.toThrow('Original reader cohort retained'); expect(declarations).toBe(1); expect(JSON.stringify(store.getIssue(original.id))).toBe(snapshot); expect(readFileSync(dbPath)).toEqual(before);
 });
 

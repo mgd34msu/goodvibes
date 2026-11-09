@@ -142,7 +142,7 @@ describe('automatic triage respects operator authority and frozen state', () => 
     const { store, node, run } = await fixture(['homegraph.device.unknown_battery', 'homegraph.device.missing_manual']); readings();
     const controller = new AbortController(); const original = SQLiteStore.prototype.run; let queued = false;
     const spy = spyOn(SQLiteStore.prototype, 'run').mockImplementation(function(this: SQLiteStore, sql, params) {
-      if (!queued && sql.includes('INSERT OR REPLACE INTO knowledge_nodes')) { queued = true; queueMicrotask(() => controller.abort()); }
+      if (!queued && sql.includes('INSERT INTO knowledge_nodes')) { queued = true; queueMicrotask(() => controller.abort()); }
       return original.call(this, sql, params);
     });
     try {

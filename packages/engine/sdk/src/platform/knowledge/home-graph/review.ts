@@ -53,10 +53,10 @@ export async function reviewHomeGraphFact(
       status: issueStatusForAction(input.action, issue.status),
       sourceId: issue.sourceId,
       nodeId: issue.nodeId,
-      metadata: buildHomeGraphMetadata(spaceId, installationId, {
+      metadata: { ...buildHomeGraphMetadata(spaceId, installationId, {
         review: reviewMetadata(input, reviewedAt),
         ...(suppression ? { suppression } : {}),
-      }),
+      }), ...(typeof issue.metadata.namespace === 'string' ? { namespace: issue.metadata.namespace } : {}) },
     }, issueMutation);
     const node = appliedFacts?.node ?? subjectNode ?? undefined;
     return {

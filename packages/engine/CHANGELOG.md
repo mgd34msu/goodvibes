@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Preserve reviewed Home Graph quality issue identities during refresh and
+  restart. Omit absent reading IDs from saved provenance, and import objects
+  shared between entity/helper groups once while retaining both memberships
+  and the last supplied value.
+
 - Project the known legacy work-import manifest transform into its transport
   schema before Zod rejects it. Contract generation and product imports work
   while the host retains complete manifest validation and rejects unrelated

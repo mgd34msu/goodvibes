@@ -218,10 +218,23 @@ async function upsertSnapshotObjects(
     labels: 0,
     integrations: 0,
   };
+  // One object may be supplied by both entities and helpers (or repeated in
+  // a group). Keep the existing last supplied value and complete membership,
+  // but publish it once: a staged row is not a persisted activation input.
+  const lastObjects = new Map<string, HomeGraphObjectInput>();
+  const publishedObjects = new Set<string>();
+  const objectKey = (kind: Parameters<typeof buildHomeGraphNodeInput>[2], object: HomeGraphObjectInput) => {
+    const nodeKind = nodeKindForHomeGraphObject(kind);
+    return JSON.stringify([nodeKind, homeGraphObjectId(nodeKind, object)]);
+  };
+  for (const [group, kind] of snapshotGroups) for (const object of input[group] ?? []) lastObjects.set(objectKey(kind, object), object);
   const upsertGroup = async (kind: Parameters<typeof buildHomeGraphNodeInput>[2], objects: readonly HomeGraphObjectInput[] | undefined) => {
     let count = 0;
     for (const [index, rawObject] of (objects ?? []).entries()) {
       await yieldEvery(index, 16);
+      const key = objectKey(kind, rawObject);
+      if (lastObjects.get(key) !== rawObject || publishedObjects.has(key)) { count += 1; continue; }
+      publishedObjects.add(key);
       const object = normalizeHomeGraphObjectInput(kind, rawObject);
       const nodeKind = nodeKindForHomeGraphObject(kind);
       const identity = prepareHomeGraphNodeIdentity(identities, store, { spaceId, kind: nodeKind, objectId: homeGraphObjectId(nodeKind, object) });

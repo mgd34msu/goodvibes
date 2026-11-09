@@ -155,7 +155,7 @@ describe('refreshed saved source and extraction references', () => {
 
   test('answer-gap source URI text receives privacy checks without a producer proof', async () => {
     readings(); const { store, source } = await fixture('00001af0');
-    const unknown = await store.upsertSource({ ...structuredClone(source), id: 'copied-source', canonicalUri: 'https://manuals.example.test/4111111111111111' });
+    const unknown = await store.upsertSource({ ...structuredClone(source), id: 'copied-source', connectorId: 'manual', metadata: { knowledgeSpaceId: spaceId }, canonicalUri: 'https://manuals.example.test/4111111111111111' });
     const fake = readings();
     await expect(prepareAnswerGapUniverse(store, spaceId, 'What is its power consumption?')
       .prepare({ spaceId, sources: [unknown] }).read()).rejects.toMatchObject({ name: 'JudgmentInputError', problem: 'card-material' });

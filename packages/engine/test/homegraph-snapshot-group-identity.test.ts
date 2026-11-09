@@ -1,6 +1,6 @@
-/** UNRUN: recognized input identity preflight and actual partial-group ownership. */
+/** Recognized input identity preflight and actual partial-group ownership. */
 import { afterEach, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ArtifactStore } from '../sdk/src/platform/artifacts/store.ts';
@@ -22,11 +22,11 @@ async function fixture() {
 }
 for (const group of ['entities', 'devices', 'areas', 'automations', 'scripts', 'scenes', 'labels', 'integrations', 'helpers'] as const) {
   test(`identity-free middle item in ${group} refuses before any snapshot/source/earlier-group write`, async () => {
-    const f = await fixture(), before = readFileSync(f.store.storagePath), secret = 'do-not-print-private-payload';
+    const f = await fixture(), before = existsSync(f.store.storagePath) ? readFileSync(f.store.storagePath) : null, secret = 'do-not-print-private-payload';
     let error: unknown;
     try { await f.sync({ devices: [{ id: 'valid-device' }], [group]: [{ id: 'valid-first' }, { metadata: { privatePayload: secret } }, { id: 'valid-last' }] }); } catch (failure) { error = failure; }
     expect(error).toBeInstanceOf(HomeGraphObjectIdentityError); expect(String(error)).toContain(`${group} item 2`); expect(String(error)).not.toContain(secret);
-    expect(f.store.listSources()).toHaveLength(0); expect(f.store.listNodes()).toHaveLength(0); expect(f.artifacts.list()).toHaveLength(0); expect(readFileSync(f.store.storagePath)).toEqual(before);
+    expect(f.store.listSources()).toHaveLength(0); expect(f.store.listNodes()).toHaveLength(0); expect(f.artifacts.list()).toHaveLength(0); expect(existsSync(f.store.storagePath) ? readFileSync(f.store.storagePath) : null).toEqual(before);
   });
 }
 test('all documented syntactic aliases/name/title still normalize without a raw-body identity fallback', async () => {
@@ -75,6 +75,17 @@ test('native group bookkeeping preserves unrelated raw JSON integer/decimal toke
   const original = store.getNode(id)!, before = store.getRecordSnapshot('node', id).raw!;
   const next = await updateHomeGraphSnapshotGroups(store, original, ['entities'], () => {}), after = store.getRecordSnapshot('node', id).raw!;
   expect(after.metadata).toContain('"precise":9007199254740993'); expect(after.metadata).toContain('"decimal":1.2300');
-  for (const key of Object.keys(before)) if (key !== 'metadata' && key !== 'gv_revision') expect(after[key]).toEqual(before[key]);
+  for (const key of Object.keys(before)) if (key !== 'metadata' && key !== 'gv_revision' && key !== 'gv_content_revision') expect(after[key]).toEqual(before[key]);
+  expect(after.gv_revision).not.toBe(before.gv_revision); expect(after.gv_content_revision).not.toBe(before.gv_content_revision);
   expect(next.sourceId).toBe(original.sourceId); expect(next.status).toBe(original.status); expect(next.metadata.review).toEqual(original.metadata.review); expect(next.createdAt).toBe(original.createdAt); expect(next.updatedAt).toBe(original.updatedAt);
+});
+
+
+test('overlapping entity/helper values publish once with the final supplied value, complete membership and unchanged input counts', async () => {
+  const f = await fixture();
+  const result = await f.sync({ entities: [{ entity_id: 'input_boolean.shared', name: 'Earlier' }, { entity_id: 'sensor.repeated', name: 'First' }, { entity_id: 'sensor.repeated', name: 'Final' }], helpers: [{ entity_id: 'input_boolean.shared', name: 'Helper final' }] });
+  expect(result.counts.entities).toBe(3); expect(result.counts.helpers).toBe(1);
+  expect(f.node('input_boolean.shared')?.title).toBe('Helper final'); expect(f.node('sensor.repeated')?.title).toBe('Final');
+  expect((f.node('input_boolean.shared')!.metadata.homeAssistant as { snapshotGroups: string[] }).snapshotGroups).toEqual(['entities', 'helpers']);
+  expect(f.store.listNodes().filter(node => node.kind === 'ha_entity')).toHaveLength(2);
 });

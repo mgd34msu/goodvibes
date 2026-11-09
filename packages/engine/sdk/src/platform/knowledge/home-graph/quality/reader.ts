@@ -123,7 +123,7 @@ export async function readHomeGraphQuality(inputs: readonly HomeGraphQualityInpu
               if (reading.outcome !== 'act' || reading.verdict === 'uncertain') throw new Held('unsettled');
               answers[question] = reading.verdict === 'yes';
               provenance[question] = { battery: battery.name, version: battery.version, probability: reading.probability,
-                decisionId: read.result.decisionId, model, requestedModel };
+                ...(read.result.decisionId === undefined ? {} : { decisionId: read.result.decisionId }), model, requestedModel };
               batteries.push({ name: battery.name, version: battery.version });
             }
             if (read.result.decisionId) decisionIds.push(read.result.decisionId);

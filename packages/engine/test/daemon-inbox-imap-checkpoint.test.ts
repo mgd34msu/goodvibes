@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import * as fs from 'node:fs/promises';
+import { observeNextInboxImageWrite } from './_helpers/inbox-native-write.ts';
 import { readFileSync } from 'node:fs';
 import * as syncFs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -99,9 +99,10 @@ describe('durable IMAP inbox checkpoints', () => {
   test('actual write failure leaves the checkpoint pending and permits a fresh retry', async () => {
     const { store, dir } = await open();
     await store.commitImapPoll('email', [], seed(), current);
-    const write = spyOn(fs, 'writeFile').mockRejectedValueOnce(new Error('synthetic disk failure'));
+    let writes = 0; const write = observeNextInboxImageWrite(store.dbPath, async () => { writes += 1; throw new Error('synthetic disk failure'); });
     cleanup.push(() => write.mockRestore());
     await expect(store.commitImapPoll('email', [item()], advance(), current)).rejects.toThrow('disk failure');
+    expect(writes).toBe(1); write.mockRestore();
     expect(store.getImapCheckpoint('email')).toEqual(baseline());
     expect(store.countItems()).toBe(0);
     const { store: recovered } = await open(dir);

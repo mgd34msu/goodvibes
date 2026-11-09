@@ -125,7 +125,7 @@ test('future saved and live formats are refused without rewriting their database
   journal = open(f);
   const change = new Database(f.path); change.exec('PRAGMA user_version=3'); change.close();
   const changed = readFileSync(f.path);
-  try { expect(() => journal.read(f.binding)).toThrow('format changed'); expect(() => journal.dispatch(f.binding, f.command)).toThrow(); expect(readFileSync(f.path)).toEqual(changed); }
+  try { expect(() => journal.read(f.binding)).toThrow('Unsupported import journal version; preserve existing data'); expect(() => journal.dispatch(f.binding, f.command)).toThrow(); expect(readFileSync(f.path)).toEqual(changed); }
   finally { journal.close(); }
 });
 

@@ -10,6 +10,7 @@ import { redactSensitiveDataAsync } from '../platform/src/platform/utils/redacti
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
+import { CODE_INDEX_SCHEMA_VERSION } from '../platform/src/platform/state/code-index-db.js';
 import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -66,7 +67,7 @@ describe('every store the platform writes carries PRAGMA user_version', () => {
     const status = store.stats();
     store.close();
     expect(status.available).toBe(true);
-    expect(readUserVersion(dbPath)).toBe(1);
+    expect(readUserVersion(dbPath)).toBe(CODE_INDEX_SCHEMA_VERSION);
   }));
 
   test('memory vector index stamps its schema version at open', () => withScratch(async (dir) => {

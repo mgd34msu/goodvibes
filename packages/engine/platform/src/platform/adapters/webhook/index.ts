@@ -1,4 +1,3 @@
-import { timingSafeEqual } from 'node:crypto';
 import type { GenericWebhookAdapterContext } from '../types.js';
 import { validatePublicWebhookUrl } from '../../utils/url-safety.js';
 import { constantTimeEquals, readTextBodyWithinLimit } from '../helpers.js';
@@ -26,11 +25,12 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
   const providedSecret = req.headers.get('x-goodvibes-webhook-secret')
     ?? req.headers.get('authorization')?.replace(/^Bearer\s+/i, '')
     ?? '';
-  const computedSignature = context.signWebhookPayload(rawBody, configuredSecret);
-  const signatureValid =
-    providedSignature.length === computedSignature.length
-    && timingSafeEqual(Buffer.from(providedSignature), Buffer.from(computedSignature));
-  if ((!providedSecret || !constantTimeEquals(configuredSecret, providedSecret)) && !signatureValid) {
+  const secretValid = constantTimeEquals(configuredSecret, providedSecret);
+  // The native producer emits exactly sha256= plus 64 lowercase hex digits.
+  // A valid bearer needs no HMAC; an impossible signature cannot authenticate.
+  const signatureValid = !secretValid && providedSignature.length === 71 && /^sha256=[0-9a-f]{64}$/.test(providedSignature)
+    && constantTimeEquals(context.signWebhookPayload(rawBody, configuredSecret), providedSignature);
+  if (!secretValid && !signatureValid) {
     return Response.json({ error: 'Unauthorized' }, { status: 401 });
   }
 

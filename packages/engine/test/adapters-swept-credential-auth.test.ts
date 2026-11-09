@@ -144,10 +144,69 @@ function makeContext(options: HarnessOptions) {
   };
 }
 
-test('Twilio JSON signature verifies the actual body once across internal and public URLs', async () => {
+for (const signature of [undefined, '', 'sha256=short', `sha256=${'A'.repeat(64)}`,
+  `sha256=${'g'.repeat(64)}`, `sha256=${'é'.repeat(64)}`, `sha256=${'a'.repeat(65)}`]) {
+  test(`generic webhook refuses an impossible signature without asking for an HMAC (${signature ?? 'missing'})`, async () => {
+    const f = makeContext({ shape: 'literal', configKeys: ['surfaces.webhook.secret'], extraConfig: { 'surfaces.webhook.enabled': true } });
+    let signs = 0;
+    const context = Object.assign(f.context, { signWebhookPayload() { signs += 1; throw new Error('Impossible signature must not reach the signer.'); } });
+    const headers = new Headers({ 'content-type': 'application/json' });
+    if (signature !== undefined) headers.set('x-goodvibes-signature', signature);
+    const response = await handleGenericWebhookSurface(new Request('http://localhost/webhook', { method: 'POST', headers,
+      body: JSON.stringify({ task: 'Original webhook task' }) }), context);
+    expect(response.status).toBe(401); expect(signs).toBe(0); expect(f.calls).toEqual([]);
+  });
+}
+
+for (const ending of ['\n', '\r', '\r\n']) test('a borrowed raw webhook header with a trailing line ending cannot reach the signer', async () => {
+  const f = makeContext({ shape: 'literal', configKeys: ['surfaces.webhook.secret'], extraConfig: { 'surfaces.webhook.enabled': true } });
+  let signs = 0;
+  const context = Object.assign(f.context, { signWebhookPayload() { signs += 1; throw new Error('Overlong signature must not reach the signer.'); } });
+  const original = new Request('http://localhost/webhook', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ task: 'Original webhook task' }) });
+  // Native Headers trims/rejects these values. A borrowed Request facade can
+  // expose the exact raw value, so prove the adapter's own length boundary.
+  const headers = new Proxy(original.headers, { get(target, property) {
+    if (property === 'get') return (name: string) => name.toLowerCase() === 'x-goodvibes-signature' ? `sha256=${'a'.repeat(64)}${ending}` : target.get(name);
+    const value: unknown = Reflect.get(target, property, target); return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  const request = new Proxy(original, { get(target, property) {
+    if (property === 'headers') return headers;
+    const value: unknown = Reflect.get(target, property, target); return typeof value === 'function' ? value.bind(target) : value;
+  } });
+  const response = await handleGenericWebhookSurface(request, context);
+  expect(response.status).toBe(401); expect(signs).toBe(0); expect(f.calls).toEqual([]);
+});
+
+test('a genuine generic webhook bearer bypasses signing even when an unrelated signature is malformed', async () => {
+  const f = makeContext({ shape: 'literal', configKeys: ['surfaces.webhook.secret'], extraConfig: { 'surfaces.webhook.enabled': true } });
+  let signs = 0;
+  const context = Object.assign(f.context, { signWebhookPayload() { signs += 1; throw new Error('Bearer authentication needs no signature.'); } });
+  const response = await handleGenericWebhookSurface(new Request('http://localhost/webhook', { method: 'POST',
+    headers: { authorization: `Bearer ${SECRET}`, 'x-goodvibes-signature': `sha256=${'é'.repeat(64)}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ task: 'Original webhook task' }) }), context);
+  expect(response.status).toBe(200); expect(signs).toBe(0);
+  expect(f.calls.some(call => call.kind === 'authorizeSurfaceIngress')).toBe(true);
+});
+
+for (const valid of [false, true]) test(`a viable generic webhook signature performs one actual body HMAC and authenticates only exact bytes (valid=${valid})`, async () => {
+  const f = makeContext({ shape: 'literal', configKeys: ['surfaces.webhook.secret'], extraConfig: { 'surfaces.webhook.enabled': true } });
+  const body = JSON.stringify({ task: 'Original signed webhook task' });
+  const provided = valid ? `sha256=${crypto.createHmac('sha256', SECRET).update(body).digest('hex')}` : `sha256=${'0'.repeat(64)}`;
+  let signs = 0;
+  const context = Object.assign(f.context, { signWebhookPayload(raw: string, secret: string) {
+    signs += 1; expect(raw).toBe(body); expect(secret).toBe(SECRET);
+    return `sha256=${crypto.createHmac('sha256', secret).update(raw).digest('hex')}`;
+  } });
+  const response = await handleGenericWebhookSurface(new Request('http://localhost/webhook', { method: 'POST',
+    headers: { authorization: 'Bearer wrong-secret', 'x-goodvibes-signature': provided, 'content-type': 'application/json' }, body }), context);
+  expect(response.status).toBe(valid ? 200 : 401); expect(signs).toBe(1);
+  if (!valid) expect(f.calls).toEqual([]);
+});
+
+for (const upperCase of [false, true]) test(`Twilio JSON signature verifies the actual body once across internal and public URLs (uppercase=${upperCase})`, async () => {
   const body = JSON.stringify({ From: '+15555550123', To: '+15555550124' });
   const hash = crypto.createHash('sha256').update(body).digest('hex');
-  const suffix = `/telephony?bodySHA256=${hash}`;
+  const suffix = `/telephony?bodySHA256=${upperCase ? hash.toUpperCase() : hash}`;
   const signature = crypto.createHmac('sha1', SECRET).update(`https://voice.example.test${suffix}`).digest('base64');
   const f = makeContext({ shape: 'literal', configKeys: ['surfaces.telephony.authToken'],
     extraConfig: { 'web.publicBaseUrl': 'https://voice.example.test' } });
@@ -161,6 +220,38 @@ test('Twilio JSON signature verifies the actual body once across internal and pu
     expect(hashing.mock.calls.filter(([algorithm]) => algorithm === 'sha256')).toHaveLength(1);
   } finally { hashing.mockRestore(); }
 });
+
+for (const signature of [undefined, '', 'bad', 'A'.repeat(27), 'A'.repeat(28), `${'A'.repeat(26)}==`, 'é'.repeat(28)]) {
+  test('an impossible Twilio signature performs no body SHA or HMAC before refusing', async () => {
+    const f = makeContext({ shape: 'literal', configKeys: ['surfaces.telephony.authToken'] });
+    const headers = new Headers({ 'content-type': 'application/json' });
+    if (signature !== undefined) headers.set('x-twilio-signature', signature);
+    const hash = spyOn(crypto, 'createHash'), hmac = spyOn(crypto, 'createHmac');
+    try {
+      const response = await handleTelephonySurfaceWebhook(new Request(`http://localhost/telephony?bodySHA256=${'0'.repeat(64)}`, {
+        method: 'POST', headers, body: JSON.stringify({ From: '+15555550123', To: '+15555550124' }),
+      }), f.context);
+      expect(response.status).toBe(401); expect(f.calls).toEqual([]);
+      expect(hash).not.toHaveBeenCalled(); expect(hmac).not.toHaveBeenCalled();
+    } finally { hash.mockRestore(); hmac.mockRestore(); }
+  });
+}
+
+for (const bodyHash of [undefined, '', 'a'.repeat(63), 'a'.repeat(65), 'g'.repeat(64), 'é'.repeat(64)]) {
+  test('an impossible Twilio JSON body-hash query performs no SHA or HMAC before refusing', async () => {
+    const f = makeContext({ shape: 'literal', configKeys: ['surfaces.telephony.authToken'] });
+    const suffix = bodyHash === undefined ? '' : `?bodySHA256=${encodeURIComponent(bodyHash)}`;
+    const hash = spyOn(crypto, 'createHash'), hmac = spyOn(crypto, 'createHmac');
+    try {
+      const response = await handleTelephonySurfaceWebhook(new Request(`http://localhost/telephony${suffix}`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-twilio-signature': 'AAAAAAAAAAAAAAAAAAAAAAAAAAA=' },
+        body: JSON.stringify({ From: '+15555550123', To: '+15555550124' }),
+      }), f.context);
+      expect(response.status).toBe(401); expect(f.calls).toEqual([]);
+      expect(hash).not.toHaveBeenCalled(); expect(hmac).not.toHaveBeenCalled();
+    } finally { hash.mockRestore(); hmac.mockRestore(); }
+  });
+}
 
 test('Twilio refuses a modified JSON body before ingress even when its signed URL is unchanged', async () => {
   const original = JSON.stringify({ From: '+15555550123', To: '+15555550124' });

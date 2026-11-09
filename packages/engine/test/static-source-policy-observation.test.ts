@@ -36,9 +36,9 @@ for (const withProgress of [false, true]) for (const failed of [false, true]) te
   const native = crypto.createHash; let inputKeys = 0;
   const hash = spyOn(crypto, 'createHash').mockImplementation((...args: Parameters<typeof native>) => {
     const current = native(...args), update = current.update.bind(current);
-    spyOn(current, 'update').mockImplementation((...values: Parameters<typeof update>) => {
-      if (values[0] === expectedInput) inputKeys += 1;
-      return update(...values);
+    spyOn(current, 'update').mockImplementation((data: crypto.BinaryLike, inputEncoding?: crypto.Encoding) => {
+      if (data === expectedInput) inputKeys += 1;
+      return typeof data === 'string' && inputEncoding !== undefined ? update(data, inputEncoding) : update(data);
     });
     return current;
   });

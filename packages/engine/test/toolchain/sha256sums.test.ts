@@ -40,8 +40,8 @@ describe('sha256sums', () => {
   test('actual CLI refuses an already missing later asset before hashing earlier payloads or replacing a manifest', () => {
     const dir = staging({ 'original-program': 'actual bytes', 'SHA256SUMS.txt': 'Original manifest must survive failure' });
     const marker = join(dir, 'hash-called'), observer = join(dir, 'observe.mjs');
-    writeFileSync(observer, `import crypto from 'node:crypto';import {syncBuiltinESMExports} from 'node:module';import {appendFileSync} from 'node:fs';
-      const original=crypto.createHash;crypto.createHash=(...args)=>{if(args[0]==='sha256')appendFileSync(${JSON.stringify(marker)},'sha256\\n');return original(...args)};syncBuiltinESMExports();`);
+    writeFileSync(observer, `import * as crypto from 'node:crypto';import {mock} from 'bun:test';import {appendFileSync} from 'node:fs';
+      const original=crypto.createHash;mock.module('node:crypto',()=>({...crypto,createHash:(...args)=>{if(args[0]==='sha256')appendFileSync(${JSON.stringify(marker)},'sha256\\n');return original(...args)}}));`);
     const refused = runBin(dir, ['--out', 'SHA256SUMS.txt', 'original-program', 'missing-program'], observer);
     expect(refused.status).toBe(1); expect(refused.output).toContain('missing asset(s): missing-program');
     expect(() => readFileSync(marker)).toThrow();

@@ -72,3 +72,7 @@ export { createNativeCheckoutWindowRestorer } from './native-window-restoration.
 export type { NativeCheckoutWindowRestorationOptions } from './native-window-restoration.js';
 export type { ProtectedPaymentRequest, PaymentRequestHostFacts, PaymentRequestStore } from './protected-requests.js';
 export type { PaymentOperationWriter, PaymentRecoveryLease } from './operation-store.js';
+export { PaymentReplyHistoryError } from '../reply-history.js';
+export type { PaymentReplyHistory, PaymentReplyHistoryWindow, PaymentReplyHistoryBinding, PaymentReplyHistoryEntry } from '../reply-history.js';
+export type { RetainedPaymentReplyHistory } from '../reply-history-owner.js';
+export type { RestoredCheckoutWindow } from './checkout-handlers.js';

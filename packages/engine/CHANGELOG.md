@@ -4,6 +4,12 @@
 
 ### Fixed
 
+- Retain authorized Telegram owner replies in the original encrypted checkout
+  request before confirming provider delivery. Keep prior-window replies separate,
+  preserve first receipt time on redelivery and stop receiving if archival fails.
+  Recovery can honor a saved objection under the original native authority;
+  positive answers and silence still require unfinished receive-coverage work.
+
 - Wire native startup into checkout-window resumption under the existing
   operation lease, original issued pairing grant and restored native page.
   Wait for host registration without blocking payment handler readiness.

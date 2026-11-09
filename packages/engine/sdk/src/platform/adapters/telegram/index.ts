@@ -200,10 +200,16 @@ export async function processTelegramUpdate(
       chatTitle: readString(chat?.title),
       fromUsername: readString(from?.username),
       messageId: readNumberString(message.message_id),
+      messageSentAtMs: typeof message.date === 'number' && Number.isSafeInteger(message.date) && message.date > 0 && message.date <= 8.64e12
+        ? message.date * 1000 : undefined,
+      messageIsEdit: payload.edited_message === message || payload.edited_channel_post === message,
+      messageEditedAtMs: typeof message.edit_date === 'number' && Number.isSafeInteger(message.edit_date) && message.edit_date > 0 && message.edit_date <= 8.64e12
+        ? message.edit_date * 1000 : undefined,
       replyToMessageId: readNumberString(replied?.message_id),
     },
   });
   if (!policy.allowed) {
+    if (policy.reason === 'payment-reply-recorded') return Response.json({ ok: true, acknowledged: true, consumed: true, queued: false, outcome: 'payment-reply', recorded: true });
     const paymentAnswer = /^payment-reply-(approve|deny|acknowledge|object)$/.exec(policy.reason)?.[1];
     if (paymentAnswer) return Response.json({ ok: true, acknowledged: true, consumed: true, queued: false, outcome: 'payment-reply', answer: paymentAnswer });
     return Response.json({ ok: false, error: `Blocked by channel policy: ${policy.reason}` }, { status: 403 });

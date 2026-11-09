@@ -52,7 +52,6 @@ export async function tryResolvePaymentReplyFromChannel(
   telegramAccounts?: TelegramSourceAccountReader,
   options: { readonly assertCurrent?: (() => void) | undefined; readonly signal?: AbortSignal | undefined } = {},
 ): Promise<PaymentReplyOffer> {
-  if (isClassicOperation()) return { consumed: false, reason: 'decision-model-required' };
   if (inbox === undefined || inbox.pending === 0 || !input.userId || !input.text) return { consumed: false, reason: 'no-window' };
   const owners = decision.matchedGroupPolicy?.allowlistUserIds ?? decision.policy.allowlistUserIds;
   if (owners.length === 0 || !owners.includes(input.userId)) return { consumed: false, reason: 'no-window' };
@@ -62,13 +61,17 @@ export async function tryResolvePaymentReplyFromChannel(
   const current = () => { signal?.throwIfAborted(); check?.(); };
   const conversationId = input.channelId, threadId = input.threadId;
   const messageId = input.metadata?.['messageId'], replyToMessageId = input.metadata?.['replyToMessageId'];
+  const sentAtMs = input.metadata?.['messageIsEdit'] === true ? input.metadata['messageEditedAtMs'] : input.metadata?.['messageSentAtMs'];
+  const updateId = input.metadata?.['updateId'];
   const correlation: PaymentReplyCorrelation | undefined = conversationId === undefined ? undefined : Object.freeze({
-    conversationId, threadId, messageId: typeof messageId === 'string' ? messageId : undefined,
+    conversationId, threadId, userId: input.userId, sentAtMs: typeof sentAtMs === 'number' ? sentAtMs : undefined,
+    updateId: typeof updateId === 'string' ? updateId : undefined,
+    messageId: typeof messageId === 'string' ? messageId : undefined,
     replyToMessageId: typeof replyToMessageId === 'string' ? replyToMessageId : undefined,
     assertCurrent: current,
     ...(channel === 'telegram' ? { verifyAccount: accountVerifier(telegramAccounts, input.acquireTelegramAccount?.bind(input), current) } : {}),
   });
-  const offer = await inbox.offer(channel, input.text, correlation);
+  const offer = await inbox.offer(channel, input.text, correlation, { archiveOnly: isClassicOperation() });
   if (offer.consumed) {
     logger.info('Purchase window answered from a channel reply', { surface: input.surface, answer: offer.answer });
   } else if (offer.reason === 'several-windows') {

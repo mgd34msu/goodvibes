@@ -20,7 +20,9 @@ import type { RetainedTaintEvidence } from '../../security/untrusted-content.js'
 import type { PaymentRequestHostFacts, PaymentRequestStore, ProtectedPaymentRequest } from './protected-requests.js';
 import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.js';
 import { capturePaymentContinuation } from './continuation-binding.js';
-import { PaymentReplyWindowError } from '../reply-inbox.js';
+import { PaymentReplyWindowError, type PaymentReplyInbox } from '../reply-inbox.js';
+import type { RetainedPaymentReplyHistory } from '../reply-history-owner.js';
+import { paymentReplyHistoryBinding, type PaymentReplyHistory } from '../reply-history.js';
 import { captureBrowserPageConnection, type BrowserPageConnection } from '../../browser/browser-page-connection-data.js';
 import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from '../../browser/browser-checkout-recovery-data.js';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../checkout-window-checkpoint.js';
@@ -40,6 +42,7 @@ export interface DetachedCheckoutOwner {
   readonly assertCurrent: () => void;
   readonly taintEvidence?: RetainedTaintEvidence | undefined;
   readonly retainWindowCheckpoint?: ((checkpoint: CheckoutWindowCheckpoint) => Promise<void>) | undefined;
+  readonly readReplyHistory?: (() => Promise<PaymentReplyHistory | undefined>) | undefined;
 }
 interface ActiveOperation {
   readonly writer: PaymentOperationWriter;
@@ -47,6 +50,7 @@ interface ActiveOperation {
   readonly source: DetachedCheckoutSource;
   protectedRequest: boolean;
   continuation: NativeContinuationGrant | undefined;
+  history?: RetainedPaymentReplyHistory | undefined;
 }
 export interface RecoveredCheckoutExecution {
   readonly source: DetachedCheckoutSource;
@@ -61,6 +65,7 @@ interface PreparingRecovery {
   readonly request: ProtectedPaymentRequest;
   started: boolean;
   readonly releaseOriginalWindow: () => Promise<boolean>;
+  history?: RetainedPaymentReplyHistory | undefined;
 }
 export class CheckoutOperations {
   // Constructed with the registration, before request dispatch. Background
@@ -73,17 +78,31 @@ export class CheckoutOperations {
   private closed = false;
   private recovered = false;
   private readonly reserved = new Set<string>();
-  private readonly requests: Pick<PaymentRequestStore, 'retain' | 'read' | 'remove' | 'checkpointWindow'> | undefined;
+  private readonly requests: Pick<PaymentRequestStore, 'retain' | 'read' | 'remove' | 'checkpointWindow' | 'appendReply'> | undefined;
+  private readonly history: Pick<PaymentReplyInbox, 'retainReplyHistory'> | undefined;
   private closing: Promise<void> | undefined;
   constructor(private readonly store: DurablePaymentOperations, private readonly journal: CheckoutJournal,
     private readonly purchases: DaemonPurchaseLedger,
     private readonly execute: (input: BeginCheckoutInput, id: string, owner: DetachedCheckoutOwner) => Promise<PaymentBeginResult>,
     private readonly now: () => number = Date.now,
-    requests?: PaymentRequestStore) {
+    requests?: PaymentRequestStore, replies?: Pick<PaymentReplyInbox, 'retainReplyHistory'>) {
     // Retain the original host methods, rather than consulting a mutable
     // embed wrapper again after admission or during asynchronous cleanup.
     this.requests = requests ? Object.freeze({ retain: requests.retain.bind(requests), read: requests.read.bind(requests), remove: requests.remove.bind(requests),
-      ...(requests.checkpointWindow ? { checkpointWindow: requests.checkpointWindow.bind(requests) } : {}) }) : undefined;
+      ...(requests.checkpointWindow ? { checkpointWindow: requests.checkpointWindow.bind(requests) } : {}),
+      ...(requests.supportsReplyHistory && requests.appendReply ? { appendReply: requests.appendReply.bind(requests) } : {}) }) : undefined;
+    this.history = this.requests?.appendReply && replies ? Object.freeze({ retainReplyHistory: replies.retainReplyHistory.bind(replies) }) : undefined;
+  }
+
+  private retainHistory(writer: PaymentOperationWriter, checkpoint: CheckoutWindowCheckpoint): RetainedPaymentReplyHistory | undefined {
+    const append = this.requests?.appendReply; if (!this.history || !append) return undefined;
+    const current = () => {
+      if (this.closed || !(this.active.get(writer.purchaseId)?.writer === writer || this.preparingRecovery.get(writer.purchaseId)?.writer === writer)) throw new CheckoutOwnershipError();
+      writer.assertCurrent();
+    };
+    const binding = paymentReplyHistoryBinding(checkpoint);
+    return this.history.retainReplyHistory(writer.purchaseId, checkpoint, (entry, receivedCurrent) => this.work.run(() =>
+      append(writer.purchaseId, writer.read().operationId, binding, entry, () => { current(); receivedCurrent(); })), current);
   }
 
   /** Take actual execution leases before the conservative journal sweep.
@@ -113,8 +132,10 @@ export class CheckoutOperations {
           const latest = await this.journal.list(); current();
           if (!isDeepStrictEqual(latest.find(row => row.purchaseId === record.purchaseId), record)) continue;
           const releaseOriginalWindow = retainCleanup(request, () => writer.assertCurrent());
-          this.preparingRecovery.set(record.purchaseId, { writer, request, abort: new AbortController(), started: false, releaseOriginalWindow }); retained = true;
-        } finally { if (!retained) writer.release(); }
+          const recovery: PreparingRecovery = { writer, request, abort: new AbortController(), started: false, releaseOriginalWindow };
+          this.preparingRecovery.set(record.purchaseId, recovery);
+          recovery.history = this.retainHistory(writer, request.window); retained = true;
+        } finally { if (!retained) { this.preparingRecovery.delete(record.purchaseId); writer.release(); } }
       }
     });
   }
@@ -140,10 +161,15 @@ export class CheckoutOperations {
             current(); writer.update({ ...writer.read(), state: 'running', outcome: null, updatedAtMs: this.now() });
             await withConfiguredDecisionModelPolicy(async () => {
               await Promise.resolve(); current();
-              restored = await prepare(request, { signal: abort.signal, assertCurrent: current }); current();
+              restored = await prepare(request, { signal: abort.signal, assertCurrent: current,
+                readReplyHistory: async () => {
+                  current(); const latest = await this.requests?.read(writer.purchaseId, request.operationId, current); current();
+                  if (!latest?.window || !request.window || !isDeepStrictEqual(paymentReplyHistoryBinding(latest.window), paymentReplyHistoryBinding(request.window))) throw new CheckoutOwnershipError();
+                  return latest.replyHistory;
+                } }); current();
               restored.source.assertCurrent();
               if (restored.source.principalId !== request.principalId) throw new CheckoutOwnershipError();
-              operation = { writer, abort, source: restored.source, protectedRequest: true, continuation: request.host.continuation };
+              operation = { writer, abort, source: restored.source, protectedRequest: true, continuation: request.host.continuation, history: recovery.history };
               this.active.set(writer.purchaseId, operation); this.preparingRecovery.delete(writer.purchaseId);
               await this.run(restored.input, operation, restored.execute.bind(restored));
             });
@@ -152,6 +178,8 @@ export class CheckoutOperations {
             else writer.update({ ...writer.read(), state: 'interrupted', outcome: abort.signal.aborted ? 'cancelled' : 'refused:recovery-unavailable', updatedAtMs: this.now() });
           } finally {
             try {
+              await (operation?.history ?? recovery.history)?.retire();
+              if (operation) operation.history = undefined;
               let released: boolean;
               try { released = await recovery.releaseOriginalWindow(); }
               catch (error) {
@@ -264,7 +292,7 @@ export class CheckoutOperations {
           });
         } catch (error) { await this.settleFailure(operation, error); }
         finally {
-          try { await this.releaseProtectedRequest(operation); }
+          try { await operation.history?.retire(); operation.history = undefined; await this.releaseProtectedRequest(operation); }
           finally { this.active.delete(writer.purchaseId); writer.release(); }
         }
       });
@@ -332,10 +360,16 @@ export class CheckoutOperations {
     current();
     const latest = await this.journal.list(); current();
     if (!isDeepStrictEqual(latest.find(record => record.purchaseId === writer.purchaseId), checkpoint.record)) throw new PaymentOperationStoreError('unavailable');
+    // Stop and drain the old window's admitted archive writes before the
+    // encrypted binding changes. Same-window page-coordinate refreshes retain it.
+    if (operation.history && !isDeepStrictEqual(operation.history.binding, paymentReplyHistoryBinding(checkpoint))) {
+      await operation.history.retire(); operation.history = undefined; current();
+    }
     // Recapture the exact selected native controls for this quote, rather than
     // keep the admission snapshot after a reprice or intervening native read.
     await save(writer.purchaseId, writer.read().operationId, checkpoint, browser, current);
     current();
+    operation.history ??= this.retainHistory(writer, checkpoint);
   }
 
   private async settleFailure(operation: ActiveOperation, error: unknown): Promise<void> {
@@ -343,7 +377,8 @@ export class CheckoutOperations {
     let state: PaymentOperationView['state'] = 'uncertain';
     let outcome: string | null = previous.outcome ?? (error instanceof JudgmentPortMissingError || error instanceof JudgmentError && error.kind === 'unavailable'
       ? 'decision-unavailable' : error instanceof DecisionModelsDisabledError ? 'decision-disabled'
-        : error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable' ? 'reply-source-unavailable' : null);
+        : error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable' ? 'reply-source-unavailable'
+          : error instanceof PaymentReplyWindowError && error.kind === 'history-unavailable' ? 'refused:reply-history-unavailable' : null);
     try {
       const entries = await this.journal.list(), retained = entries.find(row => row.purchaseId === writer.purchaseId);
       const recorded = this.purchases.get(writer.purchaseId);
@@ -409,7 +444,11 @@ export class CheckoutOperations {
     for (const operation of this.active.values()) operation.abort.abort(new CheckoutOwnershipError());
     for (const operation of this.preparingRecovery.values()) operation.abort.abort(new CheckoutOwnershipError());
     // Prepared leases not yet launched also belong to this registration.
-    for (const [id, operation] of this.preparingRecovery) if (!operation.started) { operation.writer.release(); this.preparingRecovery.delete(id); }
+    for (const [id, operation] of this.preparingRecovery) if (!operation.started) {
+      this.preparingRecovery.delete(id);
+      const cleanup = this.work.run(async () => { try { await operation.history?.retire(); } finally { operation.writer.release(); } });
+      void cleanup.catch(error => this.errors.push(error));
+    }
     void this.work.join().then(() => {
       this.execution.emitDestroy();
       if (this.errors.length) reject(new AggregateError(this.errors, 'Purchase operation metadata did not settle cleanly'));

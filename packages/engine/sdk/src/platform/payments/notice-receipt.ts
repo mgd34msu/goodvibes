@@ -21,3 +21,23 @@ export function capturePaymentNoticeReceipt(value: unknown, channel: CommandAuth
     || (Object.hasOwn(row, 'threadId') && !reference(row['threadId']))) return null;
   return captured as unknown as ChannelDeliveryReceipt;
 }
+
+export interface PaymentReceiptCorrelation {
+  readonly conversationId: string;
+  readonly threadId?: string | undefined;
+  readonly accountId?: string | undefined;
+  readonly messageId?: string | undefined;
+  readonly replyToMessageId?: string | undefined;
+}
+/** Match only actual recipient/topic and a later message, preserving explicit
+ * replies to the exact notice. A matching account ID is still not authority. */
+export function matchesPaymentNoticeReceipt(receipt: ChannelDeliveryReceipt, context: PaymentReceiptCorrelation): boolean {
+  if (receipt.conversationId !== context.conversationId || receipt.threadId !== context.threadId) return false;
+  if (receipt.accountId !== undefined && context.accountId !== undefined && receipt.accountId !== context.accountId) return false;
+  if (context.replyToMessageId !== undefined && context.replyToMessageId !== receipt.messageId) return false;
+  if (receipt.surfaceKind === 'telegram') {
+    const id = (value: string | undefined): value is string => value !== undefined && /^[1-9]\d{0,15}$/.test(value) && Number.isSafeInteger(Number(value));
+    if (!id(context.messageId) || !id(receipt.messageId) || Number(context.messageId) <= Number(receipt.messageId)) return false;
+  }
+  return true;
+}

@@ -380,7 +380,7 @@ export class CheckoutServiceHolder {
     this.restoreWindow = deps.checkout.restoreWindow?.bind(deps.checkout);
     this.retireContinuation = deps.checkout.retireContinuation?.bind(deps.checkout);
     this.operations = new CheckoutOperations(deps.checkout.operations, journal, deps.purchases,
-      (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now, deps.checkout.requests);
+      (input, id, owner) => this.runAdmittedCheckout(input, id, owner), deps.now, deps.checkout.requests, deps.checkout.replies);
     this.registry = new CheckoutRegistry({ list: () => journal.list(), remove: id => journal.remove(id),
       put: async record => { await journal.put(record); this.operations.progress(record); } });
     this.recovery = new CheckoutRecovery({ registry: this.registry, journal,

@@ -22,6 +22,8 @@ import { captureBrowserControlSnapshot, type BrowserControlSnapshot } from '../.
 import { captureBrowserCheckoutRecovery, type BrowserCheckoutRecovery } from '../../browser/browser-checkout-recovery-data.js';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowCheckpoint } from '../checkout-window-checkpoint.js';
 import { atomicWriteFileSync } from '../../config/atomic-write.js';
+import { capturePaymentReplyHistory, capturePaymentReplyHistoryEntry, paymentReplyHistoryBinding, historyEntryIdentity,
+  type PaymentReplyHistory, type PaymentReplyHistoryBinding, type PaymentReplyHistoryEntry } from '../reply-history.js';
 
 export interface PaymentRequestHostFacts {
   readonly authority: NativePairedSnapshot;
@@ -42,13 +44,17 @@ export interface ProtectedPaymentRequest {
   readonly host: PaymentRequestHostFacts;
   /** Actual latest window facts; admission-only records omit this field. */
   readonly window?: CheckoutWindowCheckpoint;
+  readonly replyHistory?: PaymentReplyHistory;
 }
 export interface PaymentRequestStore {
+  readonly supportsReplyHistory?: boolean;
   retain(request: ProtectedPaymentRequest, assertCurrent: () => void): Promise<void>;
   read(purchaseId: string, operationId: string, assertCurrent: () => void): Promise<ProtectedPaymentRequest>;
   remove(purchaseId: string, operationId: string, assertCurrent: () => void): Promise<void>;
   checkpointWindow?(purchaseId: string, operationId: string, window: CheckoutWindowCheckpoint,
     browser: BrowserCheckoutRecovery | null, assertCurrent: () => void): Promise<void>;
+  appendReply?(purchaseId: string, operationId: string, binding: PaymentReplyHistoryBinding,
+    entry: PaymentReplyHistoryEntry, assertCurrent: () => void): Promise<void>;
 }
 export class ProtectedPaymentRequestError extends Error {
   override readonly name = 'ProtectedPaymentRequestError';
@@ -72,7 +78,7 @@ function current(check: () => void): void {
 }
 function own(value: unknown): ProtectedPaymentRequest {
   const row = captureOwnedJson(value);
-  if (!object(row) || Object.keys(row).length !== 7 + (Object.hasOwn(row, 'window') ? 1 : 0) || row['version'] !== 1
+  if (!object(row) || Object.keys(row).length !== 7 + (Object.hasOwn(row, 'window') ? 1 : 0) + (Object.hasOwn(row, 'replyHistory') ? 1 : 0) || row['version'] !== 1
     || !text(row['principalId']) || !text(row['operationId']) || !/^payment-operation:[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/.test(row['operationId'])) throw new ProtectedPaymentRequestError();
   checkoutRequestId(row['purchaseId']);
   const input = row['input'], host = row['host'];
@@ -84,6 +90,7 @@ function own(value: unknown): ProtectedPaymentRequest {
     || host['browserControls'] !== undefined && host['browser'] === undefined
     || !object(host['authority']) || !object(host['configuration'])) throw new ProtectedPaymentRequestError();
   const window = row['window'] === undefined ? undefined : captureCheckoutWindowCheckpoint(row['window']);
+  const replyHistory = row['replyHistory'] === undefined ? undefined : window ? capturePaymentReplyHistory(row['replyHistory'], window) : (() => { throw new ProtectedPaymentRequestError(); })();
   if (window && (window.record.purchaseId !== row['purchaseId'] || window.record.cardId !== input['cardId'] || window.record.item !== input['item']
     || window.record.reservationId !== row['purchaseId'])) throw new ProtectedPaymentRequestError();
   const reading = readCheckoutReadingInput(input['reading']);
@@ -128,7 +135,7 @@ function own(value: unknown): ProtectedPaymentRequest {
     ]);
     if (browserControls.controls.length !== refs.size || browserControls.controls.some(control => !refs.has(control.ref))) throw new ProtectedPaymentRequestError();
   }
-  return Object.freeze({ ...row, ...(window ? { window } : {}), evidence: captureRetainedTaintEvidence(row['evidence']),
+  return Object.freeze({ ...row, ...(window ? { window } : {}), ...(replyHistory ? { replyHistory } : {}), evidence: captureRetainedTaintEvidence(row['evidence']),
     input: optionalFields({ ...input, controls: optionalFields(controls, ['addressFields', 'shippingTargets', 'expirySeparator', 'twoDigitYear']) }, ['preferredTier', 'requestedMax', 'merchantDiscovered']),
     host: Object.freeze({ authority, configuration: savedConfig,
       ...(host['browser'] === undefined ? {} : { browser: captureBrowserPageConnection(host['browser']) }),
@@ -143,7 +150,9 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   private key: { bytes: Buffer; file: FileObservation; owner: ImportFileObservation } | undefined;
   private failed = false;
   private readonly records = new Map<string, { operationId: string; physical: string }>();
-  constructor(private readonly directory: string, private readonly beforeCheckpoint?: (version: 1 | 2) => void) {}
+  constructor(private readonly directory: string, private readonly beforeCheckpoint?: (version: 1 | 2) => void,
+    private readonly beforeReplyHistory?: () => void) {}
+  get supportsReplyHistory(): boolean { return this.beforeReplyHistory !== undefined; }
   private path(id: string): string { return join(this.directory, `${Buffer.from(checkoutRequestId(id)).toString('base64url')}.json`); }
   private safeDirectory(): void {
     const entry = lstatSync(this.directory);
@@ -209,6 +218,12 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
     let staged: string | undefined;
     try {
       current(check); const request = own(value), plaintext = JSON.stringify(request);
+      if (request.replyHistory) {
+        if (!this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
+        const declared: unknown = this.beforeReplyHistory();
+        if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
+        current(check);
+      }
       if (Buffer.byteLength(plaintext) > MAX_REQUEST_BYTES) throw new ProtectedPaymentRequestError();
       const path = this.path(request.purchaseId), key = this.keyBytes(true, check);
       try { lstatSync(path); throw new ProtectedPaymentRequestError(); } catch (error) { if (!absent(error)) throw error; }
@@ -224,6 +239,44 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
   async read(id: string, operationId: string, check: () => void): Promise<ProtectedPaymentRequest> {
     try { return this.readOwned(id, operationId, check); }
     catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
+  }
+  private replaceOwned(next: ProtectedPaymentRequest, file: FileObservation, check: () => void, declare: () => unknown): void {
+    const id = next.purchaseId, operationId = next.operationId, path = this.path(id), plaintext = JSON.stringify(next);
+    if (Buffer.byteLength(plaintext) > MAX_REQUEST_BYTES) throw new ProtectedPaymentRequestError();
+    const key = this.keyBytes(false, check);
+    const before = () => {
+      current(check); this.keyBytes(false, check);
+      const observed = readFileObservation(path);
+      if (observed.physical !== file.physical || !observed.bytes.equals(file.bytes)) throw new ProtectedPaymentRequestError();
+    };
+    before(); const declared = declare();
+    if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
+    before(); atomicWriteFileSync(path, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, assertCurrent: before });
+    current(check); this.keyBytes(false, check); this.records.set(id, { operationId, physical: fileObservationIdentity(path) });
+    if (!isDeepStrictEqual(this.readOwned(id, operationId, check), next)) throw new ProtectedPaymentRequestError();
+  }
+
+  /** Native ingress must await this before confirming its provider cursor.
+   * Duplicate redelivery preserves the first receive time; changed bytes under
+   * the same bot/update event fail rather than overwrite. Edits are distinct
+   * provider updates, retaining their actual event time and original message. */
+  async appendReply(id: string, operationId: string, binding: PaymentReplyHistoryBinding, value: PaymentReplyHistoryEntry, check: () => void): Promise<void> {
+    try {
+      if (!this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
+      current(check); const original = this.readOwned(id, operationId, check), file = readFileObservation(this.path(id));
+      const entry = capturePaymentReplyHistoryEntry(value);
+      if (!original.window || !isDeepStrictEqual(paymentReplyHistoryBinding(original.window), binding)) throw new ProtectedPaymentRequestError();
+      const history = original.replyHistory ?? { version: 1 as const, windows: [{ startedAtMs: entry.receivedAtMs, binding, entries: [] }] };
+      const window = history.windows.at(-1);
+      if (!window || !isDeepStrictEqual(window.binding, binding)) throw new ProtectedPaymentRequestError();
+      const identity = historyEntryIdentity(entry), previous = window.entries.find(candidate => historyEntryIdentity(candidate) === identity);
+      if (previous) {
+        if (!isDeepStrictEqual({ ...entry, receivedAtMs: previous.receivedAtMs }, previous)) throw new ProtectedPaymentRequestError();
+        current(check); return;
+      }
+      const next = own({ ...original, replyHistory: { ...history, windows: [...history.windows.slice(0, -1), { ...window, entries: [...window.entries, entry] }] } });
+      this.replaceOwned(next, file, check, this.beforeReplyHistory);
+    } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
   }
   /** Refresh the same encrypted request under its execution lease. Original
    * identity, intent, paired grant, configuration and source evidence survive;
@@ -244,24 +297,18 @@ export class ProtectedPaymentRequests implements PaymentRequestStore {
         && (!recovery || !original.host.browser || !isDeepStrictEqual(recovery.connection, original.host.browser))) throw new ProtectedPaymentRequestError();
       if (selected.terms && selected.terms.submitTarget !== original.input.controls.placeOrderTarget) throw new ProtectedPaymentRequestError();
       const { browser: _oldBrowser, browserControls: _oldControls, ...authority } = original.host;
-      const next = own({ ...original, window: selected,
+      if (original.replyHistory && !this.beforeReplyHistory) throw new ProtectedPaymentRequestError();
+      const binding = this.beforeReplyHistory ? paymentReplyHistoryBinding(selected) : undefined;
+      const replyHistory = binding ? isDeepStrictEqual(original.replyHistory?.windows.at(-1)?.binding, binding) ? original.replyHistory
+        : { version: 1, windows: [...(original.replyHistory?.windows ?? []), { startedAtMs: selected.record.updatedAtMs, binding, entries: [] }] } : undefined;
+      const { replyHistory: _oldHistory, ...retained } = original;
+      const next = own({ ...retained, window: selected, ...(replyHistory ? { replyHistory } : {}),
         host: { ...authority, ...(recovery ? { browser: recovery.connection, browserControls: recovery.controls } : {}) } });
-      const plaintext = JSON.stringify(next);
-      if (Buffer.byteLength(plaintext) > MAX_REQUEST_BYTES) throw new ProtectedPaymentRequestError();
-      const key = this.keyBytes(false, check);
-      const before = () => {
-        current(check); this.keyBytes(false, check);
-        const observed = readFileObservation(path);
-        if (observed.physical !== file.physical || !observed.bytes.equals(file.bytes)) throw new ProtectedPaymentRequestError();
-      };
-      before();
-      const declared: unknown = this.beforeCheckpoint?.(selected.terms === undefined ? 1 : 2);
-      if (declared !== undefined) { drainOwned(declared); throw new ProtectedPaymentRequestError(); }
-      before();
-      atomicWriteFileSync(path, `${JSON.stringify(encryptStore(plaintext, key))}\n`, { mode: 0o600, assertCurrent: before });
-      current(check); this.keyBytes(false, check);
-      this.records.set(id, { operationId, physical: fileObservationIdentity(path) });
-      if (!isDeepStrictEqual(this.readOwned(id, operationId, check), next)) throw new ProtectedPaymentRequestError();
+      this.replaceOwned(next, file, check, () => {
+        const declared: unknown = this.beforeCheckpoint?.(selected.terms === undefined ? 1 : 2);
+        if (declared !== undefined) return declared;
+        return replyHistory ? this.beforeReplyHistory?.() : undefined;
+      });
     } catch { this.failed = true; throw new ProtectedPaymentRequestError(); }
   }
   async remove(id: string, operationId: string, check: () => void): Promise<void> {

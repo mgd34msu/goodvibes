@@ -1147,9 +1147,24 @@ original journal and reservation still match; uncertain evidence remains held
 for inspection. Other interrupted records continue through the conservative
 sweep.
 
-**Durable reply history and account receive/downtime coverage are unfinished.**
-The complete backfill and expiry behavior described below remains a requirement;
-live source identity and a delivered-notice receipt do not establish it.
+Native authorized Telegram owner replies are retained in the original encrypted
+checkout request before the provider cursor is confirmed. Replies remain bound
+to their actual notice, sender account, chat, topic and provider message. A
+redelivery preserves the first recorded receipt time. Message edits remain
+distinct provider events and retain their edit time. A new window keeps earlier
+window replies separate. Receiving stops if a matching reply cannot be saved.
+The channel acknowledgement reports storage, without claiming an interpreted
+answer. This also works while a checkout is waiting for native restoration and
+while the selected policy is Classic.
+
+Recovery can honor a saved objection after restoring the original native
+authority and verifying its reply account. A saved positive answer or a list
+with no objection does not establish that receive history is complete.
+
+**Account receive/downtime coverage and complete provider-backlog recovery are
+unfinished.** The complete backfill and expiry behavior described below remains
+a requirement; live source identity, a delivered-notice receipt and a saved
+reply list do not establish it.
 
 **The rule that follows is `recoverInterruptedWindow()`'s design, verified
 against its own unit tests and applied by boot recovery to every interrupted

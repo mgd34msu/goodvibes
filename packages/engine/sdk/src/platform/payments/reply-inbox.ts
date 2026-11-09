@@ -24,7 +24,10 @@ import { readPaymentReply } from './notice-delivery.js';
 import { parseCommandAuthorityChannel, type CommandAuthorityChannel, type PaymentAnswerChannel } from './types.js';
 import { JudgmentError } from '@goodvibes-jev/judgment';
 import type { ChannelDeliveryReceipt } from '../channels/delivery/types.js';
-import { capturePaymentNoticeReceipt } from './notice-receipt.js';
+import { capturePaymentNoticeReceipt, matchesPaymentNoticeReceipt as matchesReceipt } from './notice-receipt.js';
+import { PaymentReplyHistoryOwner, type RetainedPaymentReplyHistory } from './reply-history-owner.js';
+import type { CheckoutWindowCheckpoint } from './checkout-window-checkpoint.js';
+import { PaymentReplyHistoryError, type PaymentReplyHistoryEntry } from './reply-history.js';
 import type { ChannelDelivery } from './windows.js';
 import type { PaymentWindowView, PaymentWindowAnswer } from './window-view.js';
 import type { TelegramSourceAccountReader } from '../channels/telegram/source-account.js';
@@ -53,7 +56,7 @@ interface Waiter {
 /** Value-free window failures; failure/cancellation can never mean silence. */
 export class PaymentReplyWindowError extends Error {
   readonly code = 'PAYMENT_REPLY_WINDOW_UNAVAILABLE';
-  constructor(readonly kind: 'invalid' | 'duplicate' | 'cancelled' | 'settled' | 'unsettled-reply' | 'reading-failed' | 'source-unavailable' | 'clock-unavailable' | 'stale') {
+  constructor(readonly kind: 'invalid' | 'duplicate' | 'cancelled' | 'settled' | 'unsettled-reply' | 'reading-failed' | 'source-unavailable' | 'history-unavailable' | 'clock-unavailable' | 'stale') {
     super(`The payment reply window is unavailable: ${kind}.`);
     this.name = 'PaymentReplyWindowError';
   }
@@ -69,12 +72,15 @@ export class PaymentReplyInboxClosedError extends Error {
 }
 
 export type PaymentReplyOffer =
-  | { readonly consumed: false; readonly reason: 'no-window' | 'several-windows' | 'not-an-answer' | 'decision-model-required' }
+  | { readonly consumed: false; readonly reason: 'no-window' | 'several-windows' | 'not-an-answer' | 'decision-model-required' | 'recorded' }
   | { readonly consumed: true; readonly answer: PaymentAnswer };
 
 /** Host-read ingress facts. Account custody is checked by the original
  * transport owner before and after the semantic reading, never by JSON IDs. */
 export interface PaymentReplyCorrelation {
+  readonly userId?: string | undefined;
+  readonly updateId?: string | undefined;
+  readonly sentAtMs?: number | undefined;
   readonly conversationId: string;
   readonly threadId?: string | undefined;
   readonly accountId?: string | undefined;
@@ -83,17 +89,6 @@ export interface PaymentReplyCorrelation {
   readonly assertCurrent?: (() => void) | undefined;
   /** Deferred until this exact wait owns the reading, including its timer. */
   readonly verifyAccount?: (() => Promise<{ readonly accountId: string; readonly assertCurrent: () => void }>) | undefined;
-}
-
-function matchesReceipt(receipt: ChannelDeliveryReceipt, context: PaymentReplyCorrelation): boolean {
-  if (receipt.conversationId !== context.conversationId || receipt.threadId !== context.threadId) return false;
-  if (receipt.accountId !== undefined && context.accountId !== undefined && receipt.accountId !== context.accountId) return false;
-  if (context.replyToMessageId !== undefined && context.replyToMessageId !== receipt.messageId) return false;
-  if (receipt.surfaceKind === 'telegram') {
-    const id = (value: string | undefined): value is string => value !== undefined && /^[1-9]\d{0,15}$/.test(value) && Number.isSafeInteger(Number(value));
-    if (!id(context.messageId) || !id(receipt.messageId) || Number(context.messageId) <= Number(receipt.messageId)) return false;
-  }
-  return true;
 }
 
 export class PaymentReplyInbox implements PaymentReplySource {
@@ -105,6 +100,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
   readonly #incarnation = crypto.randomUUID();
   #windowSequence = 0;
   readonly #sources = new PaymentReplySourceOwner();
+  readonly #history = new PaymentReplyHistoryOwner();
 
   constructor(options: { readonly now?: () => number } = {}) {
     this.#now = options.now ?? Date.now;
@@ -114,6 +110,12 @@ export class PaymentReplyInbox implements PaymentReplySource {
    * replies. Rebinding retires prior preparations; it does no provider I/O. */
   bindTelegramSource(reader: TelegramSourceAccountReader | undefined, lifetime: AbortSignal): void {
     this.#sources.bindTelegram(reader, lifetime);
+  }
+
+  retainReplyHistory(purchaseId: string, checkpoint: CheckoutWindowCheckpoint,
+    append: (entry: PaymentReplyHistoryEntry, assertCurrent: () => void) => Promise<void>, assertCurrent: () => void): RetainedPaymentReplyHistory {
+    if (this.#closed) throw new PaymentReplyInboxClosedError();
+    return this.#history.retain(purchaseId, checkpoint, append, assertCurrent);
   }
 
   /** Construction-only recovery preflight. A stored receipt identifies the
@@ -273,14 +275,14 @@ export class PaymentReplyInbox implements PaymentReplySource {
     this.#closed = true;
     const error = new PaymentReplyInboxClosedError();
     for (const waiter of this.#waiting.values()) waiter.cancel(error);
-    void Promise.allSettled([...this.#offers, this.#sources.close()]).then(() => finish());
+    void Promise.allSettled([...this.#offers, this.#sources.close(), this.#history.close()]).then(() => finish());
     return this.#closing;
   }
 
   /** Reserved receptions plus armed windows. Channel ingress must also offer
    * replies while sending; inspect() returns only the armed operator windows. */
   get pending(): number {
-    return this.#waiting.size;
+    return this.#history.pending + [...this.#waiting.keys()].filter(id => !this.#history.has(id)).length;
   }
 
   /** A snapshot of the actual live windows. Polling never creates a delivery
@@ -314,7 +316,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
    * Offer an inbound owner message that arrived on `channel`. The caller has
    * already established that the sender is the owner.
    */
-  offer(channel: CommandAuthorityChannel, text: string, correlation?: PaymentReplyCorrelation): Promise<PaymentReplyOffer> {
+  offer(channel: CommandAuthorityChannel, text: string, correlation?: PaymentReplyCorrelation, options: { readonly archiveOnly?: boolean } = {}): Promise<PaymentReplyOffer> {
     if (this.#closed) return Promise.resolve({ consumed: false, reason: 'no-window' });
     this.expireWindows();
     if (this.#closed) return Promise.resolve({ consumed: false, reason: 'no-window' });
@@ -324,7 +326,14 @@ export class PaymentReplyInbox implements PaymentReplySource {
       const receipt = waiter.receipts.get(channel);
       return !context || !receipt || matchesReceipt(receipt, context);
     });
-    if (waiting.length === 0) return Promise.resolve({ consumed: false, reason: 'no-window' });
+    if (waiting.length === 0 || options.archiveOnly) {
+      const receivedAtMs = this.currentTime();
+      const work = Promise.resolve().then(async (): Promise<PaymentReplyOffer> => {
+        if (channel === 'telegram' && await this.#history.record(text, context, receivedAtMs ?? Number.NaN)) return { consumed: false, reason: 'recorded' };
+        return { consumed: false, reason: options.archiveOnly ? 'decision-model-required' : 'no-window' };
+      });
+      this.#offers.add(work); void work.then(() => this.#offers.delete(work), () => this.#offers.delete(work)); return work;
+    }
     if (waiting.length > 1) return Promise.resolve({ consumed: false, reason: 'several-windows' });
     const waiter = waiting[0];
     if (!waiter) return Promise.resolve({ consumed: false, reason: 'no-window' });
@@ -357,6 +366,12 @@ export class PaymentReplyInbox implements PaymentReplySource {
       }
       if (receipt && context && !matchesReceipt(receipt, context)) return { consumed: false, reason: 'no-window' };
       context?.assertCurrent?.();
+      if (channel === 'telegram' && context) {
+        const receivedAtMs = this.currentTime();
+        if (receivedAtMs === undefined) throw new PaymentReplyWindowError('clock-unavailable');
+        await this.#history.record(text, context, receivedAtMs);
+        context.assertCurrent?.(); if (!this.current(waiter)) return { consumed: false, reason: 'recorded' };
+      }
       if (waiter.deadlineMs === undefined) throw new PaymentReplyWindowError('invalid');
       const arrivedAt = this.currentTime();
       if (arrivedAt === undefined) { waiter.cancel(new PaymentReplyWindowError('clock-unavailable')); return { consumed: false, reason: 'no-window' }; }
@@ -377,7 +392,7 @@ export class PaymentReplyInbox implements PaymentReplySource {
       // A reply arrived but could not be interpreted. Allowing the veto timer
       // to call this silence would spend while the decision layer is unavailable.
       if (this.current(waiter)) waiter.cancel(error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable'
-        ? error : new PaymentReplyWindowError('reading-failed'));
+        ? error : new PaymentReplyWindowError(error instanceof PaymentReplyHistoryError ? 'history-unavailable' : 'reading-failed'));
       throw error;
     } finally { waiter.readings--; }
   }

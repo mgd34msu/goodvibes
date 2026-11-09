@@ -67,6 +67,8 @@ export function paymentOperationDescription(operation: PaymentOperationView): st
     case 'uncertain': return 'Submission or its recording is uncertain. Check purchase history and the merchant before taking further action. The daemon will not retry it.';
     case 'failed': return operation.outcome === 'decision-unavailable'
       ? 'No decision models are currently available. Check provider keys, endpoints, model access and any local model service, then review this checkout before starting a new one.'
+      : operation.outcome === 'refused:reply-history-unavailable'
+        ? 'The purchase reply could not be saved. Receiving stopped before confirming its cursor. Inspect payment and channel status before starting another checkout.'
       : operation.outcome === 'reply-source-unavailable'
         ? 'The purchase reply channel could not be verified. Check Telegram polling or webhook registration and bot account settings, or use the paired host’s Payments controls for a new checkout.'
       : operation.outcome === 'decision-disabled'

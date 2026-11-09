@@ -14,7 +14,8 @@ import { captureBrowserCheckoutRecovery } from '../../browser/browser-checkout-r
 import type { RestoredCheckoutPage } from '../../browser/browser-engine.js';
 import { CheckoutOwnershipError } from '../checkout-ownership.js';
 import { readPaymentsEnabled, readPaymentsServiceConfig, type PaymentsConfigReader } from '../payments-config.js';
-import { createChannelPaymentNotifier, type PaymentNoticeTarget } from '../notice-delivery.js';
+import { createChannelPaymentNotifier, readPaymentReply, type PaymentNoticeTarget } from '../notice-delivery.js';
+import { capturePaymentReplyHistory, type PaymentReplyHistory } from '../reply-history.js';
 import { capturePaymentNoticeReceipt } from '../notice-receipt.js';
 import { PaymentReplyWindowError, type PaymentReplyInbox } from '../reply-inbox.js';
 import { daemonNoticeRouter } from './notifier.js';
@@ -42,6 +43,7 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
   const leader = options.isPaymentsLeader, config = options.config, replies = options.replies;
   const router = daemonNoticeRouter(options.router), catalog = options.catalog;
   return async (request, owner) => {
+    const readHistory = owner.readReplyHistory?.bind(owner);
     await waitForGatewayScopePolicyBootstrap(catalog, owner.signal); owner.assertCurrent();
     const grant = request.host.continuation, checkpoint = request.window;
     const kind = checkpoint?.record.windowKind, notice = checkpoint?.record.windowNotice;
@@ -109,6 +111,7 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           });
           const notifier = createChannelPaymentNotifier({ requireDeliveryReceipt: true, router, targets, replies });
           let reception: import('../payment-ports.js').PaymentNoticeWindow | undefined, retired = false;
+          let historicalRefusal: 'deny' | 'object' | undefined;
           const ready = (async () => {
             const pending = await Promise.allSettled(receipts.map(receipt => replies.retainTelegramReceipt(receipt, { signal, assertCurrent: windowCurrent })));
             const accounts: { assertCurrent(): void }[] = [];
@@ -118,6 +121,26 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
             }
             windowCurrent(); if (retired) throw new CheckoutOwnershipError();
             const originalSources = () => { windowCurrent(); for (const account of accounts) account.assertCurrent(); };
+            let retainedHistory: PaymentReplyHistory | undefined;
+            try { retainedHistory = await readHistory?.(); }
+            catch { throw new PaymentReplyWindowError('history-unavailable'); }
+            originalSources();
+            if (retainedHistory) {
+              let history: PaymentReplyHistory;
+              try { history = capturePaymentReplyHistory(retainedHistory, checkpoint); }
+              catch { throw new PaymentReplyWindowError('history-unavailable'); }
+              const originalWindow = history.windows.at(-1); if (!originalWindow) throw new PaymentReplyWindowError('source-unavailable');
+              for (const entry of [...originalWindow.entries].sort((a, b) => a.sentAtMs - b.sentAtMs || Number(a.messageId) - Number(b.messageId) || Number(a.updateId) - Number(b.updateId))) {
+                if (entry.sentAtMs >= originalWindow.binding.deadlineMs) continue;
+                const answer = await readPaymentReply(entry.text, kind, notice, signal, originalSources); originalSources();
+                // A saved objection is enough to stop a purchase. Positive
+                // answers and silence still need complete receive coverage;
+                // a stored list alone cannot prove an earlier reply is absent.
+                if (answer === 'deny' || answer === 'object') {
+                  historicalRefusal = answer; return checkpoint.record.windowDeliveries ?? [];
+                }
+              }
+            }
             reception = notifier.prepareWindow?.({ purchaseId: request.purchaseId, kind, notice,
               signal, assertCurrent: originalSources });
             if (!reception) throw new CheckoutOwnershipError();
@@ -133,10 +156,13 @@ export function createNativeCheckoutWindowRestorer(options: NativeCheckoutWindow
           const deliveries = ready.catch(error => { reception?.cancel(); throw error; }); void deliveries.catch(() => {});
           const deadlineMs = deliveries.then(() => {
             windowCurrent();
+            if (historicalRefusal) return checkpoint.record.windowDeadlineMs ?? Number.NaN;
             return Date.now() + (kind === 'approval' ? request.host.configuration.approvalMinutes : request.host.configuration.vetoMinutes) * 60_000;
           }); void deadlineMs.catch(() => {});
           return Object.freeze({ deliveries, deadlineMs, cancel: () => { retired = true; retiredWindow.abort(); reception?.cancel(); },
-            awaitAnswer: (deadline: number) => { windowCurrent(); if (retired || !reception) throw new CheckoutOwnershipError(); return reception.awaitAnswer(deadline); } });
+            awaitAnswer: (deadline: number) => { windowCurrent(); if (retired) throw new CheckoutOwnershipError();
+              if (historicalRefusal) return Promise.resolve({ answer: historicalRefusal, channel: 'telegram' as const });
+              if (!reception) throw new CheckoutOwnershipError(); return reception.awaitAnswer(deadline); } });
         } }),
       });
     } catch (error) { await page?.release(); throw error; }

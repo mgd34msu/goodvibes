@@ -21,6 +21,8 @@ import { DurablePaymentOperations } from '../sdk/src/platform/payments/host/oper
 import { ProtectedPaymentRequests } from '../sdk/src/platform/payments/host/protected-requests.js';
 import { DaemonPurchaseLedger } from '../sdk/src/platform/payments/host/purchase-ledger.js';
 import { MemoryCheckoutJournal } from '../sdk/src/platform/payments/checkout-registry.js';
+import { paymentReplyHistoryBinding, type PaymentReplyHistory } from '../sdk/src/platform/payments/reply-history.js';
+import { withPaymentsReadings } from './helpers/payments-readings.js';
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); });
@@ -147,6 +149,38 @@ test('scope readiness cancellation and graph retirement cannot mint a ready repl
   await expect(waitForGatewayScopePolicyBootstrap(f.catalog, new AbortController().signal)).rejects.toThrow();
   await expect(waitForGatewayScopePolicyBootstrap(new GatewayMethodCatalog(), new AbortController().signal)).rejects.toThrow();
   expect(f.restored()).toBe(0);
+});
+
+test.each(['approval', 'veto'] as const)('native recovery honors an archived %s objection without sending another notice', async kind => {
+  const f = await fixture(), request = { ...f.request, window: { ...f.request.window, record: { ...f.request.window.record, windowKind: kind } } };
+  completeGatewayScopePolicyBootstrap(f.catalog);
+  const history: PaymentReplyHistory = { version: 1, windows: [{ startedAtMs: 2, binding: paymentReplyHistoryBinding(request.window), entries: [{
+    accountId: '123', userId: '42', conversationId: '-100123', threadId: null, messageId: '52', updateId: '91', replyToMessageId: '51',
+    sentAtMs: 3000, receivedAtMs: 4000, text: 'Do not buy this item.' }] }] };
+  await withPaymentsReadings({ approvalReply: () => 'deny', vetoReply: () => 'object' }, async requests => {
+    const restored = await f.restore(request, { ...f.owner, readReplyHistory: async () => history }), window = restored.resumption.prepare(f.owner);
+    expect(await window.deliveries).toEqual(request.window.record.windowDeliveries ?? []);
+    expect(await window.deadlineMs).toBe(request.window.record.windowDeadlineMs ?? 0);
+    expect(await window.awaitAnswer(await window.deadlineMs)).toEqual({ answer: kind === 'approval' ? 'deny' : 'object', channel: 'telegram' });
+    expect(requests).toHaveLength(1); expect(f.sent).toEqual([]); window.cancel(); await restored.release();
+  });
+});
+
+test.each(['positive', 'after-deadline'] as const)('an archived %s reply cannot substitute for complete receive coverage', async reason => {
+  const f = await fixture(); completeGatewayScopePolicyBootstrap(f.catalog);
+  const delivery = f.request.window.record.windowDeliveries?.[0]; if (!delivery?.receipt) throw new Error('Missing original receipt');
+  const request = { ...f.request, window: { ...f.request.window, record: { ...f.request.window.record,
+    windowDeliveries: [{ ...delivery, receipt: { ...delivery.receipt, threadId: '9' } }] } } };
+  const history: PaymentReplyHistory = { version: 1, windows: [{ startedAtMs: 2, binding: paymentReplyHistoryBinding(request.window), entries: [{
+    accountId: '123', userId: '42', conversationId: '-100123', threadId: '9', messageId: '52', updateId: '91', replyToMessageId: '51',
+    sentAtMs: reason === 'after-deadline' ? request.window.record.windowDeadlineMs ?? 0 : 3000, receivedAtMs: 200_000, text: 'Yes.' }] }] };
+  await withPaymentsReadings({ approvalReply: () => 'approve' }, async requests => {
+    const restored = await f.restore(request, { ...f.owner, readReplyHistory: async () => history }), window = restored.resumption.prepare(f.owner);
+    await window.deliveries; expect(f.sent).toHaveLength(1); expect(requests).toHaveLength(reason === 'positive' ? 1 : 0);
+    const waiting = window.awaitAnswer(await window.deadlineMs), pending = f.replies.inspect()[0]; if (!pending) throw new Error('Missing fresh window');
+    f.replies.answer({ purchaseId: pending.purchaseId, windowId: pending.windowId, action: 'deny' });
+    expect(await waiting).toEqual({ answer: 'deny', channel: 'operator' }); window.cancel(); await restored.release();
+  });
 });
 
 test('the real staged executor hands its original lease to native restoration and remains stoppable after handoff', async () => {

@@ -169,6 +169,8 @@ import type { PurchaseLedger, PaymentNotifier, PaymentNoticeWindow } from './pay
 import { isDeepStrictEqual } from 'node:util';
 import { retainResumedCheckoutHold } from './resumed-hold.js';
 import { PaymentReplyWindowError } from './reply-inbox.js';
+import { JudgmentError } from '@goodvibes-jev/judgment';
+import { JudgmentPortMissingError, DecisionModelsDisabledError } from '@goodvibes-jev/engine/errors';
 import { captureCheckoutWindowCheckpoint, type CheckoutWindowResumption } from './checkout-window-checkpoint.js';
 
 export interface CheckoutFlowDeps extends CheckoutOperationOwnership {
@@ -743,7 +745,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       }
       catch (error) {
         await release();
-        if (error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable') throw error;
+        if (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable')) throw error;
+        if (error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
         return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.');
       }
       const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.approvalMinutes);
@@ -848,7 +851,8 @@ async function runOwnedCheckout(request: PurchaseRequest, reading: RawCheckoutRe
       }
       catch (error) {
         await release();
-        if (error instanceof PaymentReplyWindowError && error.kind === 'source-unavailable') throw error;
+        if (error instanceof PaymentReplyWindowError && (error.kind === 'source-unavailable' || error.kind === 'history-unavailable')) throw error;
+        if (error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof DecisionModelsDisabledError) throw error;
         return refused('no-shipping-address', 'The address reading or purchase notice became unavailable. Nothing was submitted.');
       }
       const deadlineMs = resumption ? await restoredDeadline : windowDeadlineMs(now(), deps.vetoMinutes);

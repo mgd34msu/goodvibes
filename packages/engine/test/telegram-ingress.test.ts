@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { TelegramIngressSupervisor, describeWebhookUrlProblem } from '../sdk/src/platform/channels/telegram/ingress.ts';
 import { TelegramApiError, TelegramBotApi } from '../sdk/src/platform/channels/telegram/api.ts';
 import { TelegramOffsetStore } from '../sdk/src/platform/channels/telegram/offset-store.ts';
+import { PaymentReplyHistoryError } from '../sdk/src/platform/payments/reply-history.js';
 
 // ── fakes ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,7 @@ interface Harness {
 }
 
 function makeHarness(options: {
+  readonly ingressFailure?: Error;
   readonly config?: Record<string, unknown>;
   readonly secrets?: Record<string, string>;
   readonly registrySecret?: string | null;
@@ -140,7 +142,7 @@ function makeHarness(options: {
         submitMessage: async () => ({ mode: 'spawn', task: { prompt: 'x' }, session: { id: 'session-1' } }),
         bindAgent: async () => { /* no-op */ },
       },
-      authorizeSurfaceIngress: async () => ({ allowed: true }),
+      authorizeSurfaceIngress: async () => { if (options.ingressFailure) throw options.ingressFailure; return { allowed: true }; },
       parseSurfaceControlCommand: () => null,
       performSurfaceControlCommand: async () => 'ok',
       trySpawnAgent: (input: { task: unknown }) => {
@@ -186,6 +188,21 @@ async function waitFor(predicate: () => boolean, label: string, ceilingMs = 10_0
 // ── mode selection ──────────────────────────────────────────────────────────
 
 describe('telegram ingress: mode selection is explicit and exclusive', () => {
+  test('an unsaved payment reply stops the real poller before confirming its original update cursor', async () => {
+    const h = makeHarness({ ingressFailure: new PaymentReplyHistoryError() });
+    const cursor = new TelegramOffsetStore(h.offsetPath, '123456'); cursor.save(500);
+    const bytes = readFileSync(h.offsetPath);
+    h.telegram.queue('getUpdates', () => ok([textUpdate(500, 'Do not buy the original item.')]));
+    try {
+      await h.supervisor.start(); await waitFor(() => h.supervisor.status.mode === 'inactive', 'payment archive failure');
+      expect(h.supervisor.status.running).toBe(false); expect(h.supervisor.status.reason).toContain('before confirming its cursor');
+      expect(h.telegram.calls.filter(call => call.method === 'getUpdates')).toHaveLength(1);
+      expect(h.telegram.calls.find(call => call.method === 'getUpdates')?.body.offset).toBe(500);
+      expect(readFileSync(h.offsetPath)).toEqual(bytes); expect(new TelegramOffsetStore(h.offsetPath, '123456').load()).toEqual({ mode: 'resume', offset: 500 });
+      expect(h.spawned).toEqual([]);
+    } finally { await h.supervisor.stop(); h.cleanup(); }
+  }, TEST_BUDGET_MS);
+
   test('polling mode clears any registered webhook before polling, and never registers one', async () => {
     const h = makeHarness();
     try {

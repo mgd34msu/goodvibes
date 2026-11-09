@@ -40,6 +40,7 @@ import { CONFLICT_ESCALATION_ATTEMPTS, classifyTelegramConflict } from './confli
 import { TelegramCursorMigration } from './cursor-migration.js';
 import type { TelegramCursorPreview, TelegramCursorMigrationResult } from './cursor-migration-data.js';
 import type { TelegramSourceAccountLease, TelegramSourceAccountOwner } from './source-account.js';
+import { PaymentReplyHistoryError } from '../../payments/reply-history.js';
 
 /** Telegram holds the request open this long when there is nothing to report. */
 const POLL_TIMEOUT_SECONDS = 25;
@@ -514,6 +515,10 @@ export class TelegramIngressSupervisor {
           logger.error('Telegram polling stopped before confirming an unpersisted cursor', { kind: error.kind });
           return;
         }
+        if (error instanceof PaymentReplyHistoryError) {
+          this.currentStatus = { mode: 'inactive', reason: error.message, running: false };
+          logger.error('Telegram polling stopped before confirming an unsaved payment reply'); return;
+        }
 
         const terminal = await this.handlePollError(error, api, () => {
           conflictRecoveries += 1;
@@ -735,6 +740,7 @@ export class TelegramIngressSupervisor {
         });
         this.processing.recordSuccess();
       } catch (error) {
+        if (error instanceof PaymentReplyHistoryError) throw error;
         // Still advance past it, a cursor wedged on one poison update
         // redelivers it forever. What is no longer true is that skipping is
         // quiet: IngressProcessingHealth degrades the surface and reaches the

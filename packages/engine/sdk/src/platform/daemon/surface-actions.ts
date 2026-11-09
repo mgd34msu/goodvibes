@@ -341,6 +341,7 @@ export class DaemonSurfaceActionHelper {
       addressedPayment = await tryResolvePaymentReplyFromChannel(input, decision, this.paymentReplies, this.context.telegramSourceAccounts,
         { assertCurrent: assertReplyCurrent, signal: lifecycle });
       if (addressedPayment.consumed) return { ...decision, allowed: false, reason: `payment-reply-${addressedPayment.answer}` };
+      if (addressedPayment.reason === 'recorded') return { ...decision, allowed: false, reason: 'payment-reply-recorded' };
     }
     const proposalReply = await tryResolveWorkProposalReplyFromChannel(input, {
       readingOptions: { signal: lifecycle, beforeAttempt: assertReplyCurrent },
@@ -375,6 +376,7 @@ export class DaemonSurfaceActionHelper {
     if (paymentReply.consumed) {
       return { ...decision, allowed: false, reason: `payment-reply-${paymentReply.answer}` };
     }
+    if (paymentReply.reason === 'recorded') return { ...decision, allowed: false, reason: 'payment-reply-recorded' };
     const consumed = await tryResolveApprovalReplyFromChannel(input, decision, {
       approvalBroker: this.context.approvalBroker,
       routeBindings: this.context.routeBindings,

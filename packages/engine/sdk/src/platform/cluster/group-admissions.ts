@@ -84,7 +84,8 @@ export type AdmissionOutcome =
 
 interface PendingAdmission {
   readonly kind: 'join' | 'rejoin';
-  readonly joinVerifier: string;
+  readonly groupId: string;
+  joinVerifier: string | null;
   readonly node: NodeKeyMaterial;
   readonly deadline: number;
   readonly settle: (result: AdmissionOutcome) => void;
@@ -99,20 +100,52 @@ interface PendingAdmission {
 
 export class GroupAdmissionService {
   private pending: PendingAdmission | null = null;
+  private active = true;
+  private revision = 0;
+  private readonly work = new Set<Promise<void>>();
 
   constructor(private readonly host: AdmissionHost) {}
 
   /** Fail an in-flight request, on shutdown, or when its deadline passes. */
   expire(now: number, reason: string): void {
-    if (this.pending && this.pending.deadline <= now) this.settle({ ok: false, failure: 'unanswered', reason });
+    if (this.pending && this.pending.deadline <= now) {
+      const pending = this.pending;
+      this.settle(pending.joinVerifier === null
+        ? { ok: false, failure: 'not-sent', reason: 'the admission deadline elapsed while preparing the join proof' }
+        : { ok: false, failure: 'unanswered', reason }, pending);
+    }
   }
 
+  /** Reopen only after the owning runtime has acquired its transport. */
+  start(): void { if (!this.active) { this.active = true; this.revision += 1; } }
+
+  /** Stop immediately, including requests still deriving their verifier. */
+  stop(reason: string): void { this.active = false; this.abandon(reason); }
+
   abandon(reason: string): void {
+    this.revision += 1;
     this.settle({ ok: false, failure: 'abandoned', reason });
   }
 
   /** Route a datagram the group layer could not authenticate with a group key. */
-  async handle(raw: string, type: string): Promise<void> {
+  handle(raw: string, type: string): Promise<void> {
+    if (!this.active) return Promise.resolve();
+    return this.own(this.handleOwned(raw, type));
+  }
+
+  /** Drain work retained before stop, including non-cancellable scrypt. */
+  async join(): Promise<void> {
+    while (this.work.size > 0) await Promise.allSettled([...this.work]);
+  }
+
+  private own(work: Promise<void>): Promise<void> {
+    this.work.add(work);
+    // Attach both outcomes even when a router has no request caller to await it.
+    void work.then(() => { this.work.delete(work); }, () => { this.work.delete(work); });
+    return work;
+  }
+
+  private async handleOwned(raw: string, type: string): Promise<void> {
     switch (type) {
       case GROUP_MESSAGE_TYPES.join:
         await this.onJoinRequest(raw);
@@ -137,11 +170,12 @@ export class GroupAdmissionService {
   // ── admitting others ──────────────────────────────────────────────────────
 
   private async onJoinRequest(raw: string): Promise<void> {
+    const revision = this.revision;
     const material = this.host.material();
     const state = this.host.state();
     if (!material || !state) return;
     const checked = checkJoinClassMessage(raw, material.joinVerifier);
-    if (!checked || checked.envelope.groupId !== material.groupId) return;
+    if (!checked || checked.envelope.groupId !== material.groupId || checked.envelope.type !== GROUP_MESSAGE_TYPES.join) return;
     if (checked.envelope.nodeId === this.host.nodeId) return;
     const body = parseJoinRequestBody(checked.envelope.body);
     if (!body) return;
@@ -186,7 +220,7 @@ export class GroupAdmissionService {
       return;
     }
     await this.host.commitState(admitted.state, true);
-    await this.grant(checked.envelope.nodeId, body.agreementKey, 'join', admitted.state);
+    if (!await this.grant(checked.envelope.nodeId, body.agreementKey, 'join', admitted.state, material, revision)) return;
     this.host.logger.info('cluster: a machine joined the group', {
       nodeId: checked.envelope.nodeId,
       members: admitted.state.members.length,
@@ -203,6 +237,7 @@ export class GroupAdmissionService {
    * an unknown machine can present here that gets it in.
    */
   private async onRejoinRequest(raw: string): Promise<void> {
+    const revision = this.revision;
     const material = this.host.material();
     const state = this.host.state();
     if (!material || !state) return;
@@ -253,7 +288,7 @@ export class GroupAdmissionService {
     });
     if (refreshed.refused) return;
     await this.host.commitState(refreshed.state, true);
-    await this.grant(member.nodeId, agreementKey, 'rejoin', refreshed.state);
+    if (!await this.grant(member.nodeId, agreementKey, 'rejoin', refreshed.state, material, revision)) return;
     this.host.logger.info('cluster: a machine already on the roster came back and was re-keyed to the current group key', {
       nodeId: member.nodeId,
     });
@@ -323,9 +358,10 @@ export class GroupAdmissionService {
     agreementKey: string,
     path: 'join' | 'rejoin',
     state: GroupStateDocument,
-  ): Promise<void> {
-    const material = this.host.material();
-    if (!material) return;
+    material: GroupKeyMaterial,
+    revision: number,
+  ): Promise<boolean> {
+    if (!this.grantOwnerCurrent(material, state, revision)) return false;
     const sealed = sealGrant(
       {
         joinKey: material.joinKey,
@@ -347,45 +383,55 @@ export class GroupAdmissionService {
       ts: this.host.clock.now(),
       body: { forNodeId: nodeId, sealed },
     };
+    if (!this.grantOwnerCurrent(material, state, revision)) return false;
     await this.host.send(path === 'join'
       ? encodeJoinClassMessage(draft, material.groupId, material.joinVerifier)
       // Signed as the GROUP, not as this machine: the returning member's roster
       // is stale and may not contain this machine at all.
       : encodeIdentityClassMessage(draft, material.groupId, material.groupSigning));
+    return true;
+  }
+
+  private grantOwnerCurrent(material: GroupKeyMaterial, state: GroupStateDocument, revision: number): boolean {
+    if (!this.active || this.revision !== revision) return false;
+    const currentMaterial = this.host.material();
+    const currentState = this.host.state();
+    return currentMaterial === material && currentState === state && state.groupId === material.groupId;
   }
 
   // ── getting in ────────────────────────────────────────────────────────────
 
   /** Broadcast a JOIN and wait for the group to answer. */
-  async requestJoin(input: {
+  requestJoin(input: {
     readonly groupId: string;
     readonly joinKey: string;
     readonly joinSalt: string;
     readonly timeoutMs: number;
   }): Promise<AdmissionOutcome> {
-    const node = this.host.material()?.node ?? generateNodeKeyMaterial();
-    let joinVerifier: string;
-    try {
-      joinVerifier = await deriveJoinVerifier(input.joinKey, input.joinSalt);
-    } catch {
-      return { ok: false, failure: 'not-sent', reason: 'that group advertised a join salt this build cannot read' };
-    }
-    return this.await('join', joinVerifier, node, input.timeoutMs, () => this.host.send(encodeJoinClassMessage(
-      {
+    // Capture request values once; a caller cannot change the group while the
+    // expensive scrypt operation is pending. Reserve ownership before starting it.
+    const { groupId, joinKey, joinSalt, timeoutMs } = input;
+    if (!this.active || this.pending) return Promise.resolve(this.unavailable());
+    const material = this.host.material();
+    const node = material?.node ?? generateNodeKeyMaterial();
+    return this.await('join', groupId, null, node, timeoutMs, async (pending) => {
+      let joinVerifier: string;
+      try { joinVerifier = await deriveJoinVerifier(joinKey, joinSalt); }
+      catch {
+        this.settle({ ok: false, failure: 'not-sent', reason: 'that group advertised a join salt this build cannot read' }, pending);
+        return;
+      }
+      if (this.pending !== pending || !this.active) return;
+      pending.joinVerifier = joinVerifier;
+      await this.host.send(encodeJoinClassMessage({
         type: GROUP_MESSAGE_TYPES.join,
         nodeId: this.host.nodeId,
         nodeVersion: this.host.version,
         seq: this.host.nextSeq(),
         ts: this.host.clock.now(),
-        body: {
-          displayName: this.host.nodeDisplayName,
-          identityKey: node.identity.publicKey,
-          agreementKey: node.agreement.publicKey,
-        },
-      },
-      input.groupId,
-      joinVerifier,
-    )));
+        body: { displayName: this.host.nodeDisplayName, identityKey: node.identity.publicKey, agreementKey: node.agreement.publicKey },
+      }, groupId, joinVerifier));
+    });
   }
 
   /**
@@ -397,10 +443,11 @@ export class GroupAdmissionService {
    * that it is itself; the group decides whether that is enough, and it is
    * enough only because the node id is already on the roster.
    */
-  async requestRejoin(timeoutMs: number): Promise<AdmissionOutcome> {
+  requestRejoin(timeoutMs: number): Promise<AdmissionOutcome> {
+    if (!this.active || this.pending) return Promise.resolve(this.unavailable());
     const material = this.host.material();
-    if (!material) return { ok: false, failure: 'not-sent', reason: 'this machine is not in a group' };
-    return this.await('rejoin', material.joinVerifier, material.node, timeoutMs, () => this.host.send(
+    if (!material) return Promise.resolve({ ok: false, failure: 'not-sent', reason: 'this machine is not in a group' });
+    return this.await('rejoin', material.groupId, material.joinVerifier, material.node, timeoutMs, () => this.host.send(
       encodeIdentityClassMessage(
         {
           type: GROUP_MESSAGE_TYPES.rejoin,
@@ -423,9 +470,9 @@ export class GroupAdmissionService {
 
   private onJoinReply(raw: string, type: string): void {
     const pending = this.pending;
-    if (!pending || pending.kind !== 'join') return;
+    if (!pending || pending.kind !== 'join' || pending.joinVerifier === null) return;
     const checked = checkJoinClassMessage(raw, pending.joinVerifier);
-    if (!checked || !checked.joinKeyProved) return;
+    if (!checked || !checked.joinKeyProved || checked.envelope.groupId !== pending.groupId || checked.envelope.type !== type) return;
     if (checked.envelope.body['forNodeId'] !== this.host.nodeId) return;
 
     if (type === GROUP_MESSAGE_TYPES.joinRefuse) {
@@ -439,8 +486,8 @@ export class GroupAdmissionService {
       return;
     }
     const grant = openGrant(pending.node, checked.envelope.body['sealed'], 'join');
-    if (!grant) return;
-    this.settle({ ok: true, grant, node: pending.node });
+    if (!grant || grant.state.groupId !== pending.groupId) return;
+    this.settle({ ok: true, grant, node: pending.node }, pending);
   }
 
   /**
@@ -474,8 +521,9 @@ export class GroupAdmissionService {
     const pending = this.pending;
     if (!pending || pending.kind !== 'rejoin') return;
     const peeked = peekIdentityClassMessage(raw);
-    if (!peeked || peeked.body['forNodeId'] !== this.host.nodeId) return;
-    if (!this.rejoinReplyIsAuthentic(raw, peeked.nodeId)) {
+    if (!peeked || peeked.body['forNodeId'] !== this.host.nodeId || peeked.groupId !== pending.groupId
+      || peeked.type !== GROUP_MESSAGE_TYPES.rejoinAccept) return;
+    if (!this.rejoinReplyIsAuthentic(raw, peeked.nodeId, pending.groupId)) {
       // Counted, not just dropped: a reply arriving at all proves the group is
       // on this network and heard us. Without that count the timeout below
       // reports "nobody answered", which is the opposite of what happened and
@@ -487,8 +535,8 @@ export class GroupAdmissionService {
       return;
     }
     const grant = openGrant(pending.node, peeked.body['sealed'], 'rejoin');
-    if (!grant) return;
-    this.settle({ ok: true, grant, node: pending.node });
+    if (!grant || grant.state.groupId !== pending.groupId) return;
+    this.settle({ ok: true, grant, node: pending.node }, pending);
   }
 
   /**
@@ -507,8 +555,9 @@ export class GroupAdmissionService {
     const pending = this.pending;
     if (!pending || pending.kind !== 'rejoin') return;
     const peeked = peekIdentityClassMessage(raw);
-    if (!peeked || peeked.body['forNodeId'] !== this.host.nodeId) return;
-    if (!this.rejoinReplyIsAuthentic(raw, peeked.nodeId)) {
+    if (!peeked || peeked.body['forNodeId'] !== this.host.nodeId || peeked.groupId !== pending.groupId
+      || peeked.type !== GROUP_MESSAGE_TYPES.rejoinRefuse) return;
+    if (!this.rejoinReplyIsAuthentic(raw, peeked.nodeId, pending.groupId)) {
       pending.unauthenticatedReplies += 1;
       return;
     }
@@ -523,25 +572,37 @@ export class GroupAdmissionService {
   }
 
   /** Group signing key first, then a remembered member's identity key. Never neither. */
-  private rejoinReplyIsAuthentic(raw: string, responderNodeId: string): boolean {
-    const groupSigningKey = this.host.material()?.groupSigning.publicKey
-      ?? this.host.state()?.groupSigning.publicKey;
-    if (groupSigningKey && checkIdentityClassMessage(raw, groupSigningKey)?.identityProved) return true;
-    const responder = this.host.state()?.members.find((entry) => entry.nodeId === responderNodeId);
-    if (!responder) return false;
-    return checkIdentityClassMessage(raw, responder.identityKey)?.identityProved ?? false;
+  private rejoinReplyIsAuthentic(raw: string, responderNodeId: string, groupId: string): boolean {
+    const material = this.host.material();
+    const state = this.host.state();
+    if (!material || material.groupId !== groupId || !state || state.groupId !== groupId) return false;
+    if (checkIdentityClassMessage(raw, material.groupSigning.publicKey)?.identityProved) return true;
+    const responder = state.members.find((entry) => entry.nodeId === responderNodeId);
+    return responder ? checkIdentityClassMessage(raw, responder.identityKey)?.identityProved ?? false : false;
+  }
+
+  private unavailable(): AdmissionOutcome {
+    return { ok: false, failure: 'not-sent', reason: this.active
+      ? 'another group admission request is already in progress'
+      : 'the group runtime is not accepting admission requests' };
   }
 
   private await(
     kind: 'join' | 'rejoin',
-    joinVerifier: string,
+    groupId: string,
+    joinVerifier: string | null,
     node: NodeKeyMaterial,
     timeoutMs: number,
-    send: () => Promise<void>,
+    send: (pending: PendingAdmission) => Promise<void>,
   ): Promise<AdmissionOutcome> {
+    if (!this.active || this.pending) return Promise.resolve(this.unavailable());
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647) {
+      return Promise.resolve({ ok: false, failure: 'not-sent', reason: 'the admission deadline must be a finite positive timeout' });
+    }
     return new Promise((resolve) => {
       const pending: PendingAdmission = {
         kind,
+        groupId,
         joinVerifier,
         node,
         deadline: this.host.clock.now() + timeoutMs,
@@ -549,21 +610,13 @@ export class GroupAdmissionService {
         unauthenticatedReplies: 0,
       };
       this.pending = pending;
-      void send().catch((error: unknown) => {
-        this.settle(
-          {
-            ok: false,
-            failure: 'not-sent',
-            reason: error instanceof Error ? error.message : 'the request could not be sent',
-          },
-          pending,
-        );
-      });
       // Identity-scoped so a timer left over from an earlier attempt cannot
       // settle a later one with a deadline that never applied to it.
       pending.cancelDeadline = this.host.clock.setTimer(() => {
         this.settle(
-          pending.unauthenticatedReplies > 0
+          pending.joinVerifier === null
+            ? { ok: false, failure: 'not-sent', reason: 'the admission deadline elapsed while preparing the join proof' }
+            : pending.unauthenticatedReplies > 0
             ? {
               ok: false,
               failure: 'unverifiable-replies',
@@ -575,8 +628,15 @@ export class GroupAdmissionService {
           pending,
         );
       }, timeoutMs);
-      // A synchronous in-memory response or shutdown can settle during send().
-      if (this.pending !== pending) pending.cancelDeadline();
+      if (this.pending !== pending) { pending.cancelDeadline(); return; }
+      this.own(Promise.resolve().then(async () => {
+        if (this.pending !== pending || !this.active) return;
+        try { await send(pending); }
+        catch (error) {
+          this.settle({ ok: false, failure: 'not-sent',
+            reason: error instanceof Error ? error.message : 'the request could not be sent' }, pending);
+        }
+      }));
     });
   }
 

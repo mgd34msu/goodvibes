@@ -192,13 +192,17 @@ export class ClusterGroupRuntime {
       send: (raw) => this.router.sendRaw(raw),
       nextSeq: () => this.router.nextSeq(),
     });
+    this.admissions.stop('the group runtime has not started');
   }
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
 
   start(): Promise<void> { return this.lifecycle.start(); }
 
-  stop(): Promise<void> { return this.lifecycle.stop(); }
+  stop(): Promise<void> {
+    this.admissions.stop('the daemon shut down before the group answered');
+    return this.lifecycle.stop();
+  }
 
   private async startOwned(signal: AbortSignal): Promise<void> {
     await this.reloadMaterial();
@@ -214,6 +218,7 @@ export class ClusterGroupRuntime {
     }
     await this.router.ensureStarted();
     signal.throwIfAborted();
+    this.admissions.start();
     this.periodic.schedule(this.options.settings.beaconSeconds * 1_000, () => this.sendBeacon());
     this.periodic.schedule(HOUSEKEEPING_INTERVAL_MS, () => this.runHousekeeping());
     if (!this.material) {
@@ -225,7 +230,8 @@ export class ClusterGroupRuntime {
   }
 
   private async stopOwned(): Promise<void> {
-    this.admissions.abandon('the daemon shut down before the group answered');
+    this.admissions.stop('the daemon shut down before the group answered');
+    await this.admissions.join();
     await this.periodic.stop();
     await this.router.stop();
   }
@@ -336,6 +342,7 @@ export class ClusterGroupRuntime {
 
   /** Install new material and its roster, persisting both. */
   async adoptMembership(material: GroupKeyMaterial, state: GroupStateDocument): Promise<void> {
+    this.admissions.abandon('this machine changed its group membership');
     // Re-seed the replica with the group this machine has just joined. Without
     // this it keeps the empty group id it was constructed with, and every
     // incoming settings document is refused for belonging to a different group
@@ -360,6 +367,7 @@ export class ClusterGroupRuntime {
    * machine has just left.
    */
   async forgetMembership(): Promise<void> {
+    this.admissions.abandon('this machine left its group');
     this.replication?.adopt(createConfigReplicaDocument(''));
     this.material = null;
     this.keyringInstance = null;

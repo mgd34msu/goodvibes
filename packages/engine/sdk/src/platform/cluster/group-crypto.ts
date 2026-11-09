@@ -143,8 +143,16 @@ export function normalizeJoinKey(value: string): string {
  * group id has everything it needs to attempt a join without the group first
  * having to advertise a salt on the network.
  *
- * It is deliberately independent of the join key, so changing the join key
- * leaves the salt alone and a joiner's derivation keeps working.
+ * Existing wire/KDF compatibility, not authentication or identity concealment:
+ * released peers use HMAC-SHA256 under the FIXED PUBLIC label
+ * `goodvibes-join-salt-v1`, truncate its output to 16 bytes, then apply scrypt.
+ * createGroup stores that exact salt/verifier; joinGroup must reconstruct the
+ * same bytes BEFORE its first JOIN can be authenticated. A random or differently
+ * encoded salt would prevent real released clients from joining new groups.
+ * Only actual create/join bootstrap calls use this derivation; stored members,
+ * grants, key rotation and steady-state guards reuse their original salt.
+ * It is independent of the join key, so the bootstrap contract survives a
+ * deliberate key change. The public HMAC label contributes no secret entropy.
  */
 export function deriveJoinSalt(groupId: string): string {
   return encodeKeyBytes(

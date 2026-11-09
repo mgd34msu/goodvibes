@@ -39,14 +39,15 @@
  */
 import { createHash } from 'node:crypto';
 import { isClassicOperation } from './decision-policy.js';
-import { statSync, existsSync, unlinkSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, unlinkSync, readdirSync, type BigIntStats } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { mapLimit } from '@goodvibes-jev/judgment';
 import { captureJudgmentPort, type JudgmentPortCapture } from '@goodvibes-jev/engine/errors';
 import { captureRedactionSource, containsIssuerCredential, findCredentialCandidates, redactIssuerCredentials, type CredentialCandidate } from '../utils/redaction.js';
 import { logger } from '../utils/logger.js';
 import { captureOwnedJson, snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { atRestCredential } from './batteries/at-rest-credential.js';
+import { captureExistingDirectory } from '../utils/atomic-json-store.js';
 
 /** Resolved at-rest policy the journal + ledger writers consult. */
 export interface AtRestPolicy {
@@ -405,6 +406,19 @@ export interface RetentionOutcome {
   readonly reclaimedBytes: number;
 }
 
+interface RetentionFile {
+  readonly path: string;
+  readonly size: number;
+  readonly mtimeMs: number;
+  removeOriginal(): void;
+}
+function sameRetentionFile(current: BigIntStats, original: BigIntStats): boolean {
+  return current.isFile() && !current.isSymbolicLink() && current.nlink === 1n
+    && current.dev === original.dev && current.ino === original.ino && current.mode === original.mode
+    && current.uid === original.uid && current.gid === original.gid && current.size === original.size
+    && current.mtimeNs === original.mtimeNs && current.ctimeNs === original.ctimeNs && current.birthtimeNs === original.birthtimeNs;
+}
+
 /**
  * Enforce the age + total-size caps over a set of append-only files, deleting
  * oldest-first. Missing files are skipped. Deletion failures are swallowed
@@ -412,35 +426,59 @@ export interface RetentionOutcome {
  * reclaimed total. Returns what was reclaimed for the caller to log.
  */
 export function enforceFileRetention(files: readonly string[], policy: AtRestPolicy): RetentionOutcome {
+  return enforceSelectedRetention(files, policy, new Map());
+}
+
+/** Directory enumeration can pass its actual original parent into deletion. */
+function enforceSelectedRetention(files: readonly string[], policy: AtRestPolicy,
+  parents: Map<string, ReturnType<typeof captureExistingDirectory>>): RetentionOutcome {
   const now = Date.now();
-  const stats: Array<{ path: string; size: number; mtimeMs: number }> = [];
+  const stats: RetentionFile[] = [];
+  const selected = new Set<string>();
+  const uid = process.geteuid?.();
+  if (uid === undefined) return { deletedFiles: [], reclaimedBytes: 0 };
   for (const path of files) {
     try {
-      const stat = statSync(path);
-      if (!stat.isFile()) continue;
-      stats.push({ path, size: stat.size, mtimeMs: stat.mtimeMs });
+      const parentPath = dirname(path), parent = parents.get(parentPath) ?? captureExistingDirectory(parentPath);
+      parents.set(parentPath, parent); parent.assertCurrent();
+      const nativePath = join(parent.canonical, basename(path));
+      if (selected.has(nativePath)) continue;
+      const original = lstatSync(nativePath, { bigint: true }), size = Number(original.size);
+      if (!original.isFile() || original.isSymbolicLink() || original.nlink !== 1n || original.uid !== BigInt(uid)
+        || !Number.isSafeInteger(size) || size < 0) continue;
+      parent.assertCurrent(); selected.add(nativePath);
+      stats.push({ path, size, mtimeMs: Number(original.mtimeMs), removeOriginal() {
+        parent.assertCurrent();
+        if (!sameRetentionFile(lstatSync(nativePath, { bigint: true }), original)) throw new Error('Retention source changed');
+        parent.assertCurrent(); unlinkSync(nativePath);
+      } });
     } catch {
-      // Missing / unreadable file, nothing to retain.
+      // Missing, unsafe, foreign or unreadable leaves are not ours to remove.
     }
   }
 
   const deleted: string[] = [];
   let reclaimed = 0;
-  const remove = (entry: { path: string; size: number }): void => {
+  const attempted = new Set<RetentionFile>();
+  const remove = (entry: RetentionFile): boolean => {
+    if (attempted.has(entry)) return false;
+    attempted.add(entry);
     try {
-      unlinkSync(entry.path);
+      entry.removeOriginal();
       deleted.push(entry.path);
       reclaimed += entry.size;
+      return true;
     } catch {
       // Best-effort: a file we cannot delete is left in place.
+      return false;
     }
   };
 
   // Age cap: drop anything older than maxAgeMs.
-  const survivors: Array<{ path: string; size: number; mtimeMs: number }> = [];
+  const survivors: RetentionFile[] = [];
   for (const entry of stats) {
-    if (now - entry.mtimeMs > policy.retention.maxAgeMs) remove(entry);
-    else survivors.push(entry);
+    if (now - entry.mtimeMs > policy.retention.maxAgeMs && remove(entry)) continue;
+    survivors.push(entry);
   }
 
   // Size cap: oldest-first until the surviving set is under the byte budget.
@@ -448,8 +486,7 @@ export function enforceFileRetention(files: readonly string[], policy: AtRestPol
   let total = survivors.reduce((sum, entry) => sum + entry.size, 0);
   for (const entry of survivors) {
     if (total <= policy.retention.maxTotalBytes) break;
-    remove(entry);
-    total -= entry.size;
+    if (remove(entry)) total -= entry.size;
   }
 
   return { deletedFiles: deleted, reclaimedBytes: reclaimed };
@@ -462,12 +499,14 @@ export function enforceFileRetention(files: readonly string[], policy: AtRestPol
  * is a no-op.
  */
 export function enforceJournalDirectoryRetention(dir: string, policy: AtRestPolicy): RetentionOutcome {
-  if (!existsSync(dir)) return { deletedFiles: [], reclaimedBytes: 0 };
-  let names: string[];
   try {
-    names = readdirSync(dir).filter((name) => name.endsWith('.jsonl'));
+    const parent = captureExistingDirectory(dir);
+    parent.assertCurrent();
+    const names = readdirSync(parent.canonical).filter((name) => name.endsWith('.jsonl'));
+    parent.assertCurrent();
+    return enforceSelectedRetention(names.map(name => join(parent.canonical, name)), policy,
+      new Map([[parent.canonical, parent]]));
   } catch {
     return { deletedFiles: [], reclaimedBytes: 0 };
   }
-  return enforceFileRetention(names.map((name) => join(dir, name)), policy);
 }

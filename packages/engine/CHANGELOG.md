@@ -4,6 +4,11 @@
 
 ### Fixed
 
+- Count retention space only after a selected original file is removed. Failed
+  age deletions remain in the size budget; failed unlinks no longer stop later
+  cleanup early. Preserve replaced directories and aliased, linked or foreign
+  files, and avoid counting the same selected file twice.
+
 - Hash complete native operation input only when saving or matching an actual
   deferred decision. Ordinary decision history reuses its existing action
   incarnation; saved deferred comparisons and exact live claim guards remain.

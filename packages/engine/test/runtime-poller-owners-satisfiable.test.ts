@@ -16,8 +16,39 @@
 import { describe, expect, test } from 'bun:test';
 import { cancelAllAgentRuns, type CancellableAgentRuns } from '../sdk/src/platform/tools/index.js';
 import { registerRuntimePollers } from '../sdk/src/platform/runtime/disposal.js';
+import { createAsyncDisposalScope } from '../sdk/src/platform/runtime/async-disposal.js';
 
 describe('RuntimePollerOwners is satisfiable from the published surface', () => {
+  test('fleet polling stops before trigger shutdown and its asynchronous native drain', async () => {
+    const scope = createAsyncDisposalScope('poller shutdown fixture');
+    const calls: string[] = [];
+    let release!: () => void;
+    const pendingChild = new Promise<void>((resolve) => { release = resolve; });
+    let fleetStopped = false;
+    const stub = { dispose() {}, stop() {} };
+    registerRuntimePollers(scope.registry, {
+      stopConfigWatch() {}, watcherRegistry: stub, storeSnapshotScheduler: stub,
+      appendOnlyRetentionScheduler: stub, memoryConsolidationScheduler: stub,
+      codeIndexReindexScheduler: stub, sessionOrchestration: stub, knowledgeService: stub,
+      agentKnowledgeService: stub, homeGraphService: stub, contractRunner: stub,
+      processRegistry: { dispose() { fleetStopped = true; calls.push('fleet stopped'); } },
+      memoryGovernor: stub, agentOrchestrator: stub,
+      cancelHostedAgentRuns() { calls.push('agents cancelled'); return 0; },
+      triggerManager: {
+        shutdown() { expect(fleetStopped).toBe(true); calls.push('triggers stopped'); },
+        async join() { calls.push('child draining'); await pendingChild; calls.push('child drained'); },
+      },
+    });
+    const closing = scope.close();
+    try {
+      // Async disposal advances one owner at a time; wait until the child is
+      // actually held so the assertion covers the entire shutdown interval.
+      for (let turn = 0; turn < 50 && !calls.includes('child draining'); turn++) await Promise.resolve();
+      expect(calls).toEqual(['agents cancelled', 'fleet stopped', 'triggers stopped', 'child draining']);
+    } finally { release(); await closing; }
+    expect(calls.at(-1)).toBe('child drained');
+  });
+
   test('the tools barrel publishes the agent-run canceller the contract names', () => {
     expect(typeof cancelAllAgentRuns).toBe('function');
   });

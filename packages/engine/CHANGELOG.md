@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Stop fleet polling before shutting down the trigger manager and waiting for
+  its active children, preventing reads against the closed store during daemon
+  shutdown.
+
 - Attach trigger controls to the existing catalog entries during daemon boot,
   and validate stored triggers through the current recovery parser during
   migration and sweeping.

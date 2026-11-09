@@ -151,11 +151,13 @@ export function registerRuntimePollers(registry: AsyncDisposalRegistry, owners: 
   registry.add('agent knowledge service', () => owners.agentKnowledgeService.dispose());
   registry.add('home graph service', () => owners.homeGraphService.dispose());
   registry.add('contract runner', () => owners.contractRunner.dispose());
-  registry.add('fleet process registry', () => owners.processRegistry.dispose());
   registry.add('memory governor', () => owners.memoryGovernor.stop());
   registry.add('agent orchestrator tool registries', () => owners.agentOrchestrator.dispose());
   const triggers = owners.triggerManager;
   if (triggers) registry.add('trigger manager', async () => { triggers.shutdown(); await triggers.join?.(); });
+  // Fleet polling reads the trigger supervisor. Stop that reader before the
+  // supervisor is stopped and its native children take time to drain.
+  registry.add('fleet process registry', () => owners.processRegistry.dispose());
   // Registered LAST so it runs FIRST (the scope unwinds in reverse). A running
   // agent keeps making tool calls into the fleet registry, orchestration engine
   // and process registry, so it has to be told to stop BEFORE those are taken

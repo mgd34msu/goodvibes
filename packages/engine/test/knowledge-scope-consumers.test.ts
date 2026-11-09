@@ -6,6 +6,7 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { ArtifactStore } from '../platform/src/platform/artifacts/index.js';
+import { configureKnowledgeArtifactReferences } from '../platform/src/platform/knowledge/artifact-reference-ensemble.js';
 import { ConfigManager } from '../platform/src/platform/config/manager.js';
 import { KnowledgeProjectionService } from '../platform/src/platform/knowledge/projections.js';
 import { KnowledgeService } from '../platform/src/platform/knowledge/service.js';
@@ -18,19 +19,23 @@ import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '..
 
 const roots: string[] = [];
 const services: KnowledgeService[] = [];
+const stores: KnowledgeStore[] = [];
 let previous: JudgmentPort | undefined;
 beforeEach(() => { previous = installJudgmentPort(undefined); });
-afterEach(() => {
+afterEach(async () => {
   for (const service of services.splice(0)) service.dispose();
+  await Promise.all(stores.splice(0).map(store => store.close()));
   installJudgmentPort(previous);
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'goodvibes-scope-consumers-')); roots.push(root);
-  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') });
+  const store = new KnowledgeStore({ dbPath: join(root, 'knowledge-wiki.sqlite') });
+  stores.push(store);
   await store.init();
   const artifactStore = new ArtifactStore({ rootDir: join(root, 'artifacts') });
+  configureKnowledgeArtifactReferences({ artifactStore, controlPlaneDirectory: root, stores: [store] });
   const memoryStore = new MemoryStore(undefined, {
     embeddingRegistry: new MemoryEmbeddingProviderRegistry({ configManager: new ConfigManager({ configDir: join(root, 'config') }) }),
     enableVectorIndex: false,
@@ -184,11 +189,11 @@ describe('retained canonical scope consumers', () => {
 
   test('original source replacement during artifact handoff prevents generated-source commit', async () => {
     const { store, projection, artifactStore } = await fixture(); const rows = await corpus(store); readings();
-    const create = artifactStore.create.bind(artifactStore);
-    artifactStore.create = async (...args) => {
-      const artifact = await create(...args);
+    const create = artifactStore.createForPublication.bind(artifactStore);
+    artifactStore.createForPublication = async (...args) => {
+      const publication = await create(...args);
       await store.upsertSource({ ...rows.allowed, title: 'Replaced source content' });
-      return artifact;
+      return publication;
     };
     await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toThrow('Knowledge scope selection held');
     expect(store.listSources()).toHaveLength(2); expect(artifactStore.list()).toEqual([]);
@@ -196,11 +201,11 @@ describe('retained canonical scope consumers', () => {
 
   test('rendered extraction replacement during artifact handoff prevents stale text publication', async () => {
     const { store, projection, artifactStore } = await fixture(); const rows = await corpus(store); readings();
-    const create = artifactStore.create.bind(artifactStore);
-    artifactStore.create = async (...args) => {
-      const artifact = await create(...args);
+    const create = artifactStore.createForPublication.bind(artifactStore);
+    artifactStore.createForPublication = async (...args) => {
+      const publication = await create(...args);
       await store.upsertExtraction({ sourceId: rows.allowed.id, extractorId: 'synthetic', format: 'text', excerpt: 'Replacement body.' });
-      return artifact;
+      return publication;
     };
     await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toThrow('Knowledge scope selection held');
     expect(store.listSources()).toHaveLength(2); expect(artifactStore.list()).toEqual([]);
@@ -234,7 +239,7 @@ describe('retained canonical scope consumers', () => {
     const { root, store } = await fixture(); const rows = await corpus(store); readings();
     const selection = await prepareKnowledgeScopeSelection(store);
     const state = { sources: store.listSources(), nodes: store.listNodes(), edges: store.listEdges(), issues: store.listIssues() };
-    const writer = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); await writer.init();
+    const writer = new KnowledgeStore({ dbPath: join(root, 'knowledge-wiki.sqlite') }); await writer.init();
     try {
       await writer.replaceEdgeRecord({ ...rows.visibleEdge, relation: 'contradicts' });
       await writer.replaceEdgeRecord(rows.visibleEdge);
@@ -244,16 +249,16 @@ describe('retained canonical scope consumers', () => {
 
   test.each(['replacement', 'addition', 'ABA'] as const)('persisted edge %s during artifact handoff prevents stale projection commit', async mode => {
     const { root, store, projection, artifactStore } = await fixture(); const rows = await corpus(store); readings();
-    const writer = new KnowledgeStore({ dbPath: join(root, 'knowledge.sqlite') }); await writer.init();
-    const create = artifactStore.create.bind(artifactStore);
-    artifactStore.create = async (...args) => {
-      const artifact = await create(...args);
+    const writer = new KnowledgeStore({ dbPath: join(root, 'knowledge-wiki.sqlite') }); await writer.init();
+    const create = artifactStore.createForPublication.bind(artifactStore);
+    artifactStore.createForPublication = async (...args) => {
+      const publication = await create(...args);
       if (mode === 'addition') await writer.upsertEdge({ fromKind: 'source', fromId: rows.allowed.id, toKind: 'node', toId: rows.node.id, relation: 'contradicts' });
       else {
         await writer.replaceEdgeRecord({ ...rows.visibleEdge, relation: 'contradicts' });
         if (mode === 'ABA') await writer.replaceEdgeRecord(rows.visibleEdge);
       }
-      return artifact;
+      return publication;
     };
     try {
       await expect(projection.materialize({ kind: 'source', id: rows.allowed.id })).rejects.toThrow('Knowledge scope selection held');

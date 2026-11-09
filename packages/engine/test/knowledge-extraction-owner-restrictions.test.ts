@@ -2,12 +2,52 @@
 import { afterEach, expect, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
-import { createKnowledgeExtractionOwner } from '../platform/src/platform/knowledge/extraction-ownership.js';
+import { assertKnowledgeRestriction, createKnowledgeExtractionOwner } from '../platform/src/platform/knowledge/extraction-ownership.js';
 import { KnowledgeExtractionJudgmentHoldError, readKnowledgeExtractionTextUsability } from '../platform/src/platform/knowledge/extraction-policy.js';
+import { KnowledgeEntityAliasHoldError } from '../platform/src/platform/knowledge/entity-aliases.js';
+import { KnowledgeSourceQualityHeldError } from '../platform/src/platform/knowledge/source-quality.js';
+import { HomeGraphPagePriorityHeldError } from '../platform/src/platform/knowledge/home-graph/page-priority.js';
+import { HomeGraphQualityHeldError } from '../platform/src/platform/knowledge/home-graph/quality/types.js';
+import { KnowledgeUriCanonicalizationHeldError } from '../platform/src/platform/knowledge/uri-canonicalization/types.js';
+import { KnowledgeGeneratedFactSupportHeldError } from '../platform/src/platform/knowledge/semantic/verification/types.js';
 
 const previous = installJudgmentPort(undefined);
 afterEach(() => { installJudgmentPort(previous); });
 const text = 'The reference manual describes the original device controls.';
+
+test('local restriction failures preserve their typed finite refusal without retaining private error payloads', () => {
+  for (const original of [new KnowledgeEntityAliasHoldError(), new KnowledgeSourceQualityHeldError('stale'),
+    new HomeGraphPagePriorityHeldError('aborted'), new HomeGraphQualityHeldError('stale'),
+    new KnowledgeUriCanonicalizationHeldError('aborted'), new KnowledgeGeneratedFactSupportHeldError('stale')]) {
+    original.message = 'PRIVATE_RESTRICTION_DETAIL';
+    Object.defineProperty(original, 'privateBody', { value: 'PRIVATE_RESTRICTION_DETAIL', enumerable: true });
+    let failure: unknown;
+    try { assertKnowledgeRestriction(() => { throw original; }); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(Error);
+    if (!(failure instanceof Error)) throw new Error('Expected a typed restriction refusal');
+    expect(failure.constructor).toBe(original.constructor);
+    expect(failure).not.toBe(original);
+    expect(Object.getOwnPropertyDescriptor(failure, 'reason')?.value).toBe(Object.getOwnPropertyDescriptor(original, 'reason')?.value);
+    expect(failure.message).not.toContain('PRIVATE_RESTRICTION_DETAIL');
+    expect(Object.hasOwn(failure, 'privateBody')).toBe(false);
+    const owner = createKnowledgeExtractionOwner({ assertCurrent() { throw original; } });
+    expect(() => owner.assertCurrent()).toThrow(failure);
+  }
+});
+
+test('unknown private errors and borrowed reason accessors remain value-free extraction holds', () => {
+  let reads = 0;
+  const local = new KnowledgeSourceQualityHeldError('stale');
+  Object.defineProperty(local, 'reason', { get() { reads++; return 'stale'; } });
+  for (const original of [new Error('PRIVATE_RESTRICTION_DETAIL'), local,
+    new Proxy({}, { getPrototypeOf() { throw new Error('PRIVATE_RESTRICTION_DETAIL'); } })]) {
+    let failure: unknown;
+    try { assertKnowledgeRestriction(() => { throw original; }); } catch (error) { failure = error; }
+    expect(failure).toBeInstanceOf(KnowledgeExtractionJudgmentHoldError);
+    expect(String(failure)).not.toContain('PRIVATE_RESTRICTION_DETAIL');
+  }
+  expect(reads).toBe(0);
+});
 
 for (const kind of ['value', 'promise', 'thrown-promise'] as const) {
   test(`the actual extraction reader holds a caller restriction returning ${kind} before transmitting content`, async () => {

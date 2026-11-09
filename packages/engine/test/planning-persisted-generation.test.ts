@@ -1,4 +1,7 @@
-import { afterEach, expect, spyOn, test } from 'bun:test';
+import { afterEach, beforeEach, expect, spyOn, test } from 'bun:test';
+import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
+import type { JudgmentPort } from '@goodvibes-jev/judgment';
+import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -6,22 +9,36 @@ import { ordinaryPlanningRevision } from './_helpers/planning-revision.ts';
 import { KnowledgeStore, ProjectPlanningService, type ProjectPlanningStateUpsertInput } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { findCardNumberShapes } from '../platform/src/platform/security/card-shapes.ts';
 
-const roots: string[] = [];
-afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
+const roots: string[] = [], stores: KnowledgeStore[] = [];
+let previous: JudgmentPort | undefined;
+beforeEach(() => {
+  previous = installJudgmentPort(fakePort(name => {
+    if (name !== 'specified') throw new Error(`Unexpected planning concurrency fixture question: ${name}`);
+    // These authored planning states are ordinary setup; this suite exercises
+    // persisted CAS ownership, not a live model or another suite's port.
+    return noulAnswer(0.99);
+  }).port);
+});
+afterEach(async () => {
+  installJudgmentPort(previous);
+  await Promise.all(stores.splice(0).map(store => store.close()));
+  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+function owned(store: KnowledgeStore): KnowledgeStore { stores.push(store); return store; }
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'planning-persisted-generation-')); roots.push(root);
   const path = join(root, 'knowledge.sqlite');
-  const first = new KnowledgeStore({ dbPath: path });
+  const first = owned(new KnowledgeStore({ dbPath: path }));
   const firstService = new ProjectPlanningService(first);
   const authored: ProjectPlanningStateUpsertInput['state'] = { goal: 'Original goal', executionApproved: false, tasks: [{ id: 'original', title: 'Original work' }] };
   await firstService.upsertState({ projectId: 'fixture', state: authored });
   const selected = await ordinaryPlanningRevision(first, firstService, 'fixture');
-  const second = new KnowledgeStore({ dbPath: path }); await second.init();
+  const second = owned(new KnowledgeStore({ dbPath: path })); await second.init();
   const secondService = new ProjectPlanningService(second);
   return { path, first, second, firstService, secondService, selected, authored };
 }
 async function reopen(path: string) {
-  const store = new KnowledgeStore({ dbPath: path }); await store.init();
+  const store = owned(new KnowledgeStore({ dbPath: path })); await store.init();
   return { store, state: await new ProjectPlanningService(store).getState({ projectId: 'fixture' }) };
 }
 
@@ -112,7 +129,7 @@ for (const state of ['stale', 'absent'] as const) {
   test(`a caller-authored card-shaped generation is refused on the ${state} path without writes`, async () => {
     const f = await fixture();
     const path = state === 'absent' ? `${f.path}.absent` : f.path;
-    const store = state === 'absent' ? new KnowledgeStore({ dbPath: path }) : f.first;
+    const store = state === 'absent' ? owned(new KnowledgeStore({ dbPath: path })) : f.first;
     await store.init();
     const service = state === 'absent' ? new ProjectPlanningService(store) : f.firstService;
     const before = existsSync(path) ? readFileSync(path) : undefined;
@@ -128,7 +145,7 @@ for (const state of ['stale', 'absent'] as const) {
     test(`a ${state} hold still refuses protected ${material} content outside its opaque generation`, async () => {
       const f = await fixture();
       const path = state === 'absent' ? `${f.path}.protected-absent` : f.path;
-      const store = state === 'absent' ? new KnowledgeStore({ dbPath: path }) : f.first;
+      const store = state === 'absent' ? owned(new KnowledgeStore({ dbPath: path })) : f.first;
       await store.init();
       const service = state === 'absent' ? new ProjectPlanningService(store) : f.firstService;
       const before = existsSync(path) ? readFileSync(path) : undefined;
@@ -146,10 +163,19 @@ for (const state of ['stale', 'absent'] as const) {
 test('malformed opaque generations remain invalid before a planning action', async () => {
   const f = await fixture();
   const before = readFileSync(f.path);
-  for (const generation of ['4111111111111111', 'password=synthetic-protected-password']) {
+  for (const generation of ['', 'a'.repeat(257)]) {
     await expect(f.firstService.applyStateAction({ projectId: 'fixture',
       expected: { kind: 'revision', revision: { ...f.selected.revision!, generation } }, action: { kind: 'approve' },
     })).rejects.toBeInstanceOf(TypeError);
+    expect(readFileSync(f.path)).toEqual(before);
+  }
+  for (const [generation, problem] of [
+    ['4111111111111111', 'card-material'],
+    ['password=synthetic-protected-password', 'credential-material'],
+  ] as const) {
+    await expect(f.firstService.applyStateAction({ projectId: 'fixture',
+      expected: { kind: 'revision', revision: { ...f.selected.revision!, generation } }, action: { kind: 'approve' },
+    })).rejects.toMatchObject({ problem });
     expect(readFileSync(f.path)).toEqual(before);
   }
 });

@@ -11,13 +11,29 @@ import { configureKnowledgeArtifactReferences } from '../platform/src/platform/k
 import { createInactiveArtifactReferenceOwner } from '../platform/src/platform/knowledge/inactive-artifact-reference-owner.ts';
 const roots: string[] = [], stores: KnowledgeStore[] = [];
 afterEach(async () => { for (const store of stores.splice(0)) await store.close(); for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
-async function fixture() {
+async function fixture(persisted = true) {
   const root = mkdtempSync(join(tmpdir(), 'artifact-ensemble-')); roots.push(root);
   const artifacts = new ArtifactStore({ rootDir: join(root, 'artifacts') }), store = new KnowledgeStore({ dbPath: join(root, 'knowledge-agent.sqlite') }); stores.push(store); await store.init();
+  // Initialization is read-only. Most cases exercise a real clean published
+  // family; create that baseline through an actual unrelated source mutation.
+  if (persisted) await store.upsertSource({ id: 'clean-fixture-source', connectorId: 'test', sourceType: 'document', status: 'indexed', title: 'Clean family baseline' });
   configureKnowledgeArtifactReferences({ artifactStore: artifacts, controlPlaneDirectory: root, stores: [store] });
   const artifact = await artifacts.create({ kind: 'document', text: 'generated body', filename: 'page.md', retentionMs: 0 });
   return { root, artifacts, store, artifact };
 }
+test('an initialized but unpublished family preserves its artifact until a genuine clean publication permits retry', async () => {
+  const f = await fixture(false), record = f.artifacts.getRecord(f.artifact.id)!;
+  expect(existsSync(f.store.storagePath)).toBe(false);
+  expect(await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id))).toBe('held');
+  expect(existsSync(record.contentPath)).toBe(true);
+  expect(existsSync(f.store.storagePath)).toBe(false);
+  await f.store.upsertSource({ id: 'first-clean-source', connectorId: 'test', sourceType: 'document', status: 'indexed', title: 'First genuine publication' });
+  const published = readFileSync(f.store.storagePath);
+  for (let turn = 0; existsSync(record.contentPath) && turn < 100; turn++) await new Promise<void>(resolve => setImmediate(resolve));
+  expect(existsSync(record.contentPath)).toBe(false);
+  expect(readFileSync(f.store.storagePath)).toEqual(published);
+  for (const file of ['knowledge-wiki.sqlite', 'knowledge-home-graph.sqlite']) expect(existsSync(join(f.root, file))).toBe(false);
+});
 test('uninitialized families stay absent and exact configured zero-reference original is removed without changing any DB bytes', async () => {
   const f = await fixture(), before = readFileSync(f.store.storagePath), record = f.artifacts.getRecord(f.artifact.id)!;
   expect(await f.store.cleanupUnreferencedArtifact(f.artifacts.captureOriginal(f.artifact.id))).toBe('deleted');
@@ -123,6 +139,7 @@ test('a64-artifact restart batch reads each actual persisted family image once i
     ids.push(created.artifact.id); created.lease.release();
   }
   const owners = ['knowledge-wiki.sqlite', 'knowledge-agent.sqlite', 'knowledge-home-graph.sqlite'].map(file => new KnowledgeStore({ dbPath: join(root, file) })); stores.push(...owners); await Promise.all(owners.map(owner => owner.init()));
+  await Promise.all(owners.map(owner => owner.upsertSource({ id: 'clean-fixture-source', connectorId: 'test', sourceType: 'document', status: 'indexed', title: 'Clean family baseline' })));
   const nativeRead = persistedImages.readSQLitePersistedImage; let imageReads = 0;
   const read = spyOn(persistedImages, 'readSQLitePersistedImage').mockImplementation(owner => { imageReads++; return nativeRead(owner); });
   try {

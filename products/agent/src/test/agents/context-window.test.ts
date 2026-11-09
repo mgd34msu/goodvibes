@@ -92,7 +92,7 @@ async function withMockProvider<T>(
   modelDef: typeof MOCK_MODEL_SMALL,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const reg = getTestProviderRegistry();
+  const reg = (await getTestProviderRegistry());
   const readDiagnostic = authoredPrivacyAnswer({ parts: [[errorText('401 Unauthorized')]] });
   const diagnostics = fakePort((name, question, state) => {
     const diagnostic = readDiagnostic(name, question, state);
@@ -133,7 +133,7 @@ describe('AgentOrchestrator context-window awareness', () => {
     const record = makeRecord({ id: 'g01-normal-01' });
 
     await withMockProvider(provider, MOCK_MODEL_LARGE, async () => {
-      const orch = getTestAgentOrchestrator();
+      const orch = (await getTestAgentOrchestrator());
       await orch.runAgent(record);
     });
 
@@ -150,7 +150,7 @@ describe('AgentOrchestrator context-window awareness', () => {
     const record = makeRecord({ id: 'g01-retry-01' });
 
     await withMockProvider(provider, MOCK_MODEL_LARGE, async () => {
-      const orch = getTestAgentOrchestrator();
+      const orch = (await getTestAgentOrchestrator());
       await orch.runAgent(record);
     });
 
@@ -169,7 +169,7 @@ describe('AgentOrchestrator context-window awareness', () => {
     const record = makeRecord({ id: 'g01-retry-fail-01' });
 
     await withMockProvider(provider, MOCK_MODEL_SMALL, async () => {
-      const orch = getTestAgentOrchestrator();
+      const orch = (await getTestAgentOrchestrator());
       await orch.runAgent(record);
     });
 
@@ -189,7 +189,7 @@ describe('AgentOrchestrator context-window awareness', () => {
     const record = makeRecord({ id: 'g01-auth-error-01' });
 
     await withMockProvider(provider, MOCK_MODEL_LARGE, async () => {
-      const orch = getTestAgentOrchestrator();
+      const orch = (await getTestAgentOrchestrator());
       await orch.runAgent(record);
     });
 
@@ -250,7 +250,7 @@ describe('AgentOrchestrator context-window awareness', () => {
     const record = makeRecord({ id: 'g01-precompact-01', task: longTask });
 
     await withMockProvider(provider, MOCK_MODEL_TINY, async () => {
-      const orch = getTestAgentOrchestrator();
+      const orch = (await getTestAgentOrchestrator());
       await orch.runAgent(record);
     });
 
@@ -281,7 +281,7 @@ describe('AgentOrchestrator context-window awareness', () => {
     };
 
     await withMockProvider(provider, MOCK_MODEL_LARGE, async () => {
-      const orch = getTestAgentOrchestrator();
+      const orch = (await getTestAgentOrchestrator());
       // @ts-expect-error, duck-typed mock for FeatureFlagManager
       orch.setFeatureFlagManager(mockFlagManager);
       await orch.runAgent(record);

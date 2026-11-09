@@ -1,9 +1,10 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '../../runtime/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
@@ -11,7 +12,7 @@ import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-c
 test('real graph close cancels scheduled governor work while a sibling owner keeps sampling', async () => {
   const roots: string[] = [], runtimes: RuntimeServices[] = [];
   const restore: (() => void)[] = [];
-  function runtime(): RuntimeServices {
+  async function runtime(): Promise<RuntimeServices> {
     const root = makeProjectTempDir('agent-fixture-native-lifetime');
     roots.push(root);
     const home = join(root, 'home'), work = join(root, 'work');
@@ -19,8 +20,8 @@ test('real graph close cancels scheduled governor work while a sibling owner kee
     const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: work, homeDir: home,
       configDir: join(home, 'config') });
     seedProviderMetadataCacheFixture({ configManager, homeDirectory: home, workingDirectory: work });
-    const services = createRuntimeServices({ configManager, workingDir: work, homeDirectory: home,
-      runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), modelDiscovery: 'skip' });
+    const services = (await createPreparedAgentRuntimeServices({ configManager, workingDir: work, homeDirectory: home,
+      runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), modelDiscovery: 'skip' }));
     runtimes.push(services);
     return services;
   }
@@ -51,7 +52,7 @@ test('real graph close cancels scheduled governor work while a sibling owner kee
     return calls;
   }
   try {
-    const first = runtime(), sibling = runtime();
+    const first = (await runtime()), sibling = (await runtime());
     const firstCalls = observe(first.memoryGovernor), siblingCalls = observe(sibling.memoryGovernor);
     await sampled(() => firstCalls.samples > 0 && siblingCalls.samples > 0);
     await first.close();

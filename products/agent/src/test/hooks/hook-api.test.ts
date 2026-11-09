@@ -16,14 +16,16 @@ describe('HookApi', () => {
   let originalHooksFile: string;
   let tempDir: string;
   let hookWorkbench: HookWorkbench;
+  let dispatcher: Awaited<ReturnType<typeof getTestHookDispatcher>>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalHooksFile = configManager.get('tools.hooksFile') as string;
     tempDir = makeProjectTempDir('gv-hook-api');
     configManager.set('tools.hooksFile', join(tempDir, 'hooks.json'));
-    getTestHookDispatcher().clear();
+    dispatcher = await getTestHookDispatcher();
+    dispatcher.clear();
     hookWorkbench = new HookWorkbench(
-      getTestHookDispatcher(),
+      dispatcher,
       () => configManager.get('tools.hooksFile') as string,
     );
     previousPort = installJudgmentPort(readings.port);
@@ -32,14 +34,14 @@ describe('HookApi', () => {
   afterEach(() => {
     installJudgmentPort(previousPort);
     configManager.set('tools.hooksFile', originalHooksFile);
-    getTestHookDispatcher().clear();
+    dispatcher.clear();
   });
 
   test('wraps managed hook authoring and contract inspection behind a stable api', async () => {
     const api = createHookApi({
       dispatcher: {
-        listHooks: () => getTestHookDispatcher().listHooks(),
-        listChains: () => getTestHookDispatcher().getChains(),
+        listHooks: () => dispatcher.listHooks(),
+        listChains: () => dispatcher.getChains(),
       },
       workbench: hookWorkbench,
       listContracts: () => listHookPointContracts(),

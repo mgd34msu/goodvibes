@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * The `goodvibes-agent memory` CLI in BOTH modes:
  *  - daemon up: a real DaemonServer (bootDaemon-style, reserved port, never a real
@@ -20,7 +21,7 @@ import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/securit
 import { resolveCanonicalMemoryDbPath, MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { ConfigManager } from '../../config/index.ts';
 import { handleGoodVibesCliCommand, parseGoodVibesCli } from '../../cli/index.ts';
@@ -108,7 +109,7 @@ describe('memory CLI: daemon up routes over the wire', () => {
     mkdirSync(daemonHomeDir, { recursive: true });
     mkdirSync(daemonWorkingDir, { recursive: true });
     port = await reservePort();
-    daemonServices = createRuntimeServices({
+    daemonServices = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeStore: createRuntimeStore(),
@@ -118,7 +119,7 @@ describe('memory CLI: daemon up routes over the wire', () => {
       homeDirectory: daemonHomeDir,
       featureFlags: createFeatureFlagManager(),
       getConversationTitle: () => 'memory-cli-wire-daemon',
-    });
+    }));
     // Composition installs its own port. Replace it only after the graph exists,
     // with the explicit reading for this file's one semantic-search fixture.
     const privacyAnswer = privacyReadings(join(daemonHomeDir, '.goodvibes', 'tui', 'model-tiers.json'));

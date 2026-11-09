@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -10,7 +11,6 @@ import type { ToolResult } from '@goodvibes-jev/engine/platform/platform/types';
 import { SqliteDecisionLog, withDecisionLog, type JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { getSessionUntrustedContentLedger, resetSessionUntrustedContentLedgerForTests } from '../../trust/untrusted-content.ts';
@@ -30,7 +30,7 @@ async function composed(body: (context: { registry: ReturnType<typeof composeAge
   execFileSync('git', ['init', '-q'], { cwd: workspace, timeout: 30_000 });
   const previous = installJudgmentPort(undefined);
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: workspace, homeDir, configDir });
-  const services = createRuntimeServices({ modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), configManager, workingDir: workspace, homeDirectory: homeDir, getConversationTitle: () => 'boundary-test' });
+  const services = (await createPreparedAgentRuntimeServices({ modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), configManager, workingDir: workspace, homeDirectory: homeDir, getConversationTitle: () => 'boundary-test' }));
   installJudgmentPort(undefined);
   try {
     await services.memoryStore.init();
@@ -88,7 +88,7 @@ test.each([
   { name: 'accounts', args: { ...SAFE, action: undefined, purpose: SECRET } },
   { name: 'agent_local_registry', args: { action: 'create', cls: 'fact', summary: SECRET } },
   { name: 'agent_local_registry', args: { action: 'create', cls: 'fact', summary: 'Safe summary', extra: { nested: [SECRET] } } },
-])('bootstrap refuses protected malformed $name arguments before repair', async ({ name, args }) => composed(async ({ registry, accountFile, memoryCount }) => {
+])('bootstrap refuses protected malformed $name arguments before repair', async ({ name, args }) => (await composed(async ({ registry, accountFile, memoryCount }) => {
   const fake = securityPort({ derives: () => false }); installJudgmentPort(fake.port);
   const input: Record<string, unknown> = { ...args }; if (input.action === undefined) delete input.action;
   const pending = registry.execute('protected-malformed', name, input);
@@ -96,9 +96,9 @@ test.each([
   await expect(pending).rejects.toMatchObject({ problem: 'held' });
   expect(fake.requests).toHaveLength(0);
   expect(existsSync(accountFile)).toBe(false); expect(memoryCount()).toBe(0);
-}));
+})));
 
-test('bootstrap refuses protected source text or origin before account derivation judgment', async () => composed(async ({ runAccount, accountFile }) => {
+test('bootstrap refuses protected source text or origin before account derivation judgment', async () => (await composed(async ({ runAccount, accountFile }) => {
   for (const [index, [text, origin]] of [[`Unrelated page has ${SECRET}`, 'https://untrusted.example.test'], ['Unrelated public page', `https://untrusted.example.test/${SECRET}`]].entries()) {
     resetSessionUntrustedContentLedgerForTests(); source(text!, origin!);
     const fake = accountReadings(); using log = new SqliteDecisionLog(':memory:'); installJudgmentPort(withDecisionLog(fake.port, log));
@@ -107,17 +107,17 @@ test('bootstrap refuses protected source text or origin before account derivatio
     expect(result.error).toContain('protected values in untrusted context');
     expect(fake.derivations).toHaveLength(0); expect(existsSync(accountFile)).toBe(false);
   }
-}));
+})));
 
-test('bootstrap admitted ordinary account reaches actual derivation and persists once', async () => composed(async ({ runAccount, accountFile }) => {
+test('bootstrap admitted ordinary account reaches actual derivation and persists once', async () => (await composed(async ({ runAccount, accountFile }) => {
   source('An unrelated public page.');
   const fake = accountReadings(); using log = new SqliteDecisionLog(':memory:'); installJudgmentPort(withDecisionLog(fake.port, log));
   expect(await runAccount('ordinary-account')).toMatchObject({ success: true });
   expect(fake.derivations.some(request => Object.hasOwn(request.questions, 'derives'))).toBe(true);
   expect(existsSync(accountFile)).toBe(true);
-}));
+})));
 
-test('bootstrap abort during account judgment settles promptly and prevents late persistence or queued asks', async () => composed(async ({ runAccount, accountFile }) => {
+test('bootstrap abort during account judgment settles promptly and prevents late persistence or queued asks', async () => (await composed(async ({ runAccount, accountFile }) => {
   source('First unrelated public page.'); source('Second unrelated public page.', 'https://other.example.test');
   const fake = accountReadings(); using log = new SqliteDecisionLog(':memory:');
   let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; });
@@ -135,4 +135,4 @@ test('bootstrap abort during account judgment settles promptly and prevents late
   release(); const result = await work; await new Promise((resolve) => setTimeout(resolve, 20));
   expect(early).not.toBeNull(); expect(result.success).toBe(false); expect(JSON.stringify(result)).not.toContain(SECRET);
   expect(asks).toBe(before); expect(existsSync(accountFile)).toBe(false);
-}));
+})));

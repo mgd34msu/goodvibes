@@ -70,9 +70,9 @@ const MOCK_MODEL = {
 };
 
 describe('fleet plane adoption', () => {
-  test('an orchestrator-spawned agent appears on the fleet surface', () => {
+  test('an orchestrator-spawned agent appears on the fleet surface', async () => {
     resetTestRuntimeServices();
-    const runtime = getTestRuntimeServices();
+    const runtime = (await getTestRuntimeServices());
     // 'Stuck task' is AgentManager's own test hook: spawn() still registers
     // and tracks the record, it just skips invoking the executor (see
     // streaming.test.ts). That is exactly what this test needs, a real
@@ -91,7 +91,7 @@ describe('fleet plane adoption', () => {
 
   test('a configured background write finishes without manufacturing approval attention', async () => {
     resetTestRuntimeServices();
-    const runtime = getTestRuntimeServices();
+    const runtime = (await getTestRuntimeServices());
 
     const memoryDbPath = join(makeProjectTempDir('fleet-attention-db'), `fleet-attention-${randomUUID()}.db`);
     // The helper already adds a unique suffix. UUID digit runs can look like

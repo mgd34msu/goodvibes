@@ -40,10 +40,10 @@ function makeCommandContext(printed: string[]): CommandContext {
   } as unknown as CommandContext;
 }
 
-function makeInput(printed: string[]): InputHandler {
+async function makeInput(printed: string[]): Promise<InputHandler> {
   const sel = new SelectionManager();
   const history = new InfiniteBuffer();
-  const ih = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+  const ih = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
   ih.setContentWidth(40);
   const registry = new CommandRegistry();
   registry.register({ name: 'help', description: 'help', handler: async () => {} });
@@ -52,17 +52,17 @@ function makeInput(printed: string[]): InputHandler {
 }
 
 describe('feedInputTokens: the composer\'s free-text capture is NEVER guarded (product parity with the TUI\'s own unguarded composer)', () => {
-  test('a >8-char command string fed in one call is not truncated: no false-positive flood (regression coverage)', () => {
+  test('a >8-char command string fed in one call is not truncated: no false-positive flood (regression coverage)', async () => {
     const printed: string[] = [];
-    const ih = makeInput(printed);
+    const ih = (await makeInput(printed));
     ih.feed('/config display.stream');
     expect(ih.prompt).toBe('/config display.stream');
     expect(printed.some((line) => line.includes('flood'))).toBe(false);
   });
 
-  test('20 ordinary chat characters fed one at a time (rapid, same millisecond) are never guarded: plain text insertion is unconditionally exempt', () => {
+  test('20 ordinary chat characters fed one at a time (rapid, same millisecond) are never guarded: plain text insertion is unconditionally exempt', async () => {
     const printed: string[] = [];
-    const ih = makeInput(printed);
+    const ih = (await makeInput(printed));
     let realNow: typeof Date.now | undefined;
     try {
       let clock = 5_000_000;
@@ -93,9 +93,9 @@ describe('feedInputTokens: command-mode key-dispatch flood guard', () => {
     Date.now = realNow;
   });
 
-  test('a 20-key burst while commandMode is armed is guarded: at most 8 land, and the notice is honest (never silent)', () => {
+  test('a 20-key burst while commandMode is armed is guarded: at most 8 land, and the notice is honest (never silent)', async () => {
     const printed: string[] = [];
-    const ih = makeInput(printed);
+    const ih = (await makeInput(printed));
     ih.feed('/help'); // arms commandMode; autocomplete becomes active, never closes on 'up'/'down'
     expect(ih.commandMode).toBe(true);
 
@@ -111,9 +111,9 @@ describe('feedInputTokens: command-mode key-dispatch flood guard', () => {
     moveUpSpy.mockRestore();
   });
 
-  test('6 rapid command-mode keys under the threshold all dispatch: normal autocomplete navigation is unaffected', () => {
+  test('6 rapid command-mode keys under the threshold all dispatch: normal autocomplete navigation is unaffected', async () => {
     const printed: string[] = [];
-    const ih = makeInput(printed);
+    const ih = (await makeInput(printed));
     ih.feed('/help');
     const moveUpSpy = spyOn(AutocompleteEngine.prototype, 'moveUp');
     for (let i = 0; i < 6; i++) {
@@ -125,9 +125,9 @@ describe('feedInputTokens: command-mode key-dispatch flood guard', () => {
     moveUpSpy.mockRestore();
   });
 
-  test('key tokens outside commandMode (ordinary composer navigation) are never guarded: no new friction in the default interaction mode', () => {
+  test('key tokens outside commandMode (ordinary composer navigation) are never guarded: no new friction in the default interaction mode', async () => {
     const printed: string[] = [];
-    const ih = makeInput(printed);
+    const ih = (await makeInput(printed));
     ih.feed('hello world'); // plain chat text, commandMode stays false
     expect(ih.commandMode).toBe(false);
     for (let i = 0; i < 20; i++) {
@@ -137,9 +137,9 @@ describe('feedInputTokens: command-mode key-dispatch flood guard', () => {
     expect(printed.some((line) => line.includes('flood'))).toBe(false);
   });
 
-  test('the burst clears after a quiet gap and reports how many keystrokes it suppressed', () => {
+  test('the burst clears after a quiet gap and reports how many keystrokes it suppressed', async () => {
     const printed: string[] = [];
-    const ih = makeInput(printed);
+    const ih = (await makeInput(printed));
     ih.feed('/help');
     for (let i = 0; i < 15; i++) {
       clock = 4_000_000 + i;
@@ -154,9 +154,9 @@ describe('feedInputTokens: command-mode key-dispatch flood guard', () => {
 });
 
 describe('feedInputTokens: OS focus tokens', () => {
-  test('a focus-in/focus-out escape sequence updates the shared FocusTracker and never reaches the composer', () => {
+  test('a focus-in/focus-out escape sequence updates the shared FocusTracker and never reaches the composer', async () => {
     const printed: string[] = [];
-    const ih = makeInput(printed);
+    const ih = (await makeInput(printed));
     ih.feed('\x1b[O'); // focus-out (CSI ?1004h reporting)
     expect(ih.uiServices.platform.focusTracker.isFocused()).toBe(false);
     expect(ih.prompt).toBe(''); // never dispatched as text/keys

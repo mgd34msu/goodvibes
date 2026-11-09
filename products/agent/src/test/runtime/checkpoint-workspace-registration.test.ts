@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * Owner ruling (2026-07-10): automatic (turn-end/lifecycle) workspace
  * checkpoints run ONLY when the resolved workspace root is COVERED by the
@@ -17,7 +18,7 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { createEventEnvelope } from '@goodvibes-jev/engine/transport-core';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createShellPathService } from '@/runtime/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createWorkspaceRegistrationStore, registerWorkspaceForCheckpoints } from '../../config/workspace-registration.ts';
 import { WorkspaceCheckpointManager } from '@goodvibes-jev/engine/platform/platform/workspace';
@@ -68,7 +69,7 @@ async function buildServices(opts: { registered: boolean; workingDir?: string; h
   }
 
   const runtimeBus = new RuntimeEventBus();
-  const services = createRuntimeServices({
+  const services = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
     configManager: new ConfigManager({ surfaceRoot: 'agent', configDir, workingDir, homeDir }),
@@ -77,7 +78,7 @@ async function buildServices(opts: { registered: boolean; workingDir?: string; h
     workingDir,
     homeDirectory: homeDir,
     getConversationTitle: () => 'checkpoint-registration-test',
-  });
+  }));
   runtimes.push(services);
   return { services, runtimeBus, workingDir };
 }

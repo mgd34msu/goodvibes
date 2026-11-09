@@ -4,9 +4,9 @@ import { getTestScheduleManager, resetTestRuntimeServices } from '../helpers/run
 
 let scheduleManager: ScheduleManager;
 
-beforeEach(() => {
+beforeEach(async () => {
   resetTestRuntimeServices();
-  scheduleManager = getTestScheduleManager();
+  scheduleManager = (await getTestScheduleManager());
 });
 
 afterEach(() => {
@@ -19,8 +19,8 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('ScheduleManager', () => {
-  test('add returns entry with correct fields', () => {
-    const sm = getTestScheduleManager();
+  test('add returns entry with correct fields', async () => {
+    const sm = (await getTestScheduleManager());
     const entry = sm.add('health-check', '5m', 'echo ok');
     expect(entry.name).toBe('health-check');
     expect(entry.interval).toBe('5m');
@@ -28,8 +28,8 @@ describe('ScheduleManager', () => {
     expect(entry.enabled).toBe(true);
   });
 
-  test('add sets nextRun for parseable interval', () => {
-    const sm = getTestScheduleManager();
+  test('add sets nextRun for parseable interval', async () => {
+    const sm = (await getTestScheduleManager());
     const before = Date.now();
     const entry = sm.add('task', '1m', 'echo hi');
     const after = Date.now();
@@ -37,14 +37,14 @@ describe('ScheduleManager', () => {
     expect(entry.nextRun!).toBeLessThanOrEqual(after + 60_000);
   });
 
-  test('add with unparseable interval sets nextRun undefined', () => {
-    const sm = getTestScheduleManager();
+  test('add with unparseable interval sets nextRun undefined', async () => {
+    const sm = (await getTestScheduleManager());
     const entry = sm.add('task2', 'badinterval', 'echo x');
     expect(entry.nextRun).toBeUndefined();
   });
 
-  test('list returns added entries', () => {
-    const sm = getTestScheduleManager();
+  test('list returns added entries', async () => {
+    const sm = (await getTestScheduleManager());
     sm.add('a', '10s', 'cmd-a');
     sm.add('b', '2m', 'cmd-b');
     const list = sm.list();
@@ -52,8 +52,8 @@ describe('ScheduleManager', () => {
     expect(list.map((e) => e.name).sort()).toEqual(['a', 'b']);
   });
 
-  test('remove deletes entry and stops timer', () => {
-    const sm = getTestScheduleManager();
+  test('remove deletes entry and stops timer', async () => {
+    const sm = (await getTestScheduleManager());
     sm.add('temp', '30s', 'echo temp');
     expect(sm.list()).toHaveLength(1);
     const removed = sm.remove('temp');
@@ -61,13 +61,13 @@ describe('ScheduleManager', () => {
     expect(sm.list()).toHaveLength(0);
   });
 
-  test('remove returns false for unknown name', () => {
-    const sm = getTestScheduleManager();
+  test('remove returns false for unknown name', async () => {
+    const sm = (await getTestScheduleManager());
     expect(sm.remove('nonexistent')).toBe(false);
   });
 
-  test('disable sets enabled=false and clears nextRun', () => {
-    const sm = getTestScheduleManager();
+  test('disable sets enabled=false and clears nextRun', async () => {
+    const sm = (await getTestScheduleManager());
     sm.add('sched', '1m', 'echo sched');
     const disabled = sm.disable('sched');
     expect(disabled).toBe(true);
@@ -76,13 +76,13 @@ describe('ScheduleManager', () => {
     expect(entry.nextRun).toBeUndefined();
   });
 
-  test('disable returns false for unknown name', () => {
-    const sm = getTestScheduleManager();
+  test('disable returns false for unknown name', async () => {
+    const sm = (await getTestScheduleManager());
     expect(sm.disable('unknown')).toBe(false);
   });
 
-  test('enable re-enables a disabled schedule', () => {
-    const sm = getTestScheduleManager();
+  test('enable re-enables a disabled schedule', async () => {
+    const sm = (await getTestScheduleManager());
     sm.add('sched2', '1m', 'echo sched2');
     sm.disable('sched2');
     const enabled = sm.enable('sched2');
@@ -91,13 +91,13 @@ describe('ScheduleManager', () => {
     expect(entry.enabled).toBe(true);
   });
 
-  test('enable returns false for unknown name', () => {
-    const sm = getTestScheduleManager();
+  test('enable returns false for unknown name', async () => {
+    const sm = (await getTestScheduleManager());
     expect(sm.enable('unknown')).toBe(false);
   });
 
-  test('re-adding same name replaces existing entry', () => {
-    const sm = getTestScheduleManager();
+  test('re-adding same name replaces existing entry', async () => {
+    const sm = (await getTestScheduleManager());
     sm.add('dup', '5m', 'cmd-v1');
     const entry = sm.add('dup', '1h', 'cmd-v2');
     expect(entry.command).toBe('cmd-v2');
@@ -105,9 +105,9 @@ describe('ScheduleManager', () => {
     expect(sm.list()).toHaveLength(1);
   });
 
-  test('test helper reuses one schedule manager inside the same runtime graph', () => {
-    const sm1 = getTestScheduleManager();
-    const sm2 = getTestScheduleManager();
+  test('test helper reuses one schedule manager inside the same runtime graph', async () => {
+    const sm1 = (await getTestScheduleManager());
+    const sm2 = (await getTestScheduleManager());
     sm1.add('shared', '10s', 'echo shared');
     expect(sm2.list()).toHaveLength(1);
   });

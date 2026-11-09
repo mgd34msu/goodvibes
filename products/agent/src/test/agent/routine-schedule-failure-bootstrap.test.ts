@@ -39,7 +39,7 @@ test('Agent bootstrap installs the logged engine port consumed by schedule failu
     return Response.json({ model: body.model, answers, usage: { input_tokens: 1, output_tokens: 1 } });
   });
   try {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     await services.providerRegistry.ready();
     await services.providerRegistry.modelDiscoverySettled();
     services.configManager.set('judgment.endpoint', 'http://127.0.0.1:39991');

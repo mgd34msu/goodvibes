@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -9,7 +10,6 @@ import type { AgentEvent } from '@/runtime/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import { createHttpTransport } from '@/runtime/index.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -82,7 +82,7 @@ describe('HttpTransport', () => {
     mkdirSync(homeDir, { recursive: true });
     const configManager = new ConfigManager({ surfaceRoot: 'tui', configDir: join(homeDir, '.goodvibes', 'tui'), workingDir, homeDir });
     seedProviderMetadataCacheFixture({ configManager, homeDirectory: homeDir, workingDirectory: workingDir });
-    const runtimeServices = createRuntimeServices({
+    const runtimeServices = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeStore: createRuntimeStore(),
@@ -92,7 +92,7 @@ describe('HttpTransport', () => {
       homeDirectory: homeDir,
       featureFlags: createTransportFeatureFlags(),
       getConversationTitle: () => 'http-transport-test',
-    });
+    }));
     daemon = new DaemonServer({
       port,
       host: '127.0.0.1',

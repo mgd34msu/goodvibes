@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 /**
  * The forget path, exercised against the REAL owner-profile store and the real
@@ -42,7 +43,6 @@ import { dirname, join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createAgentProfileTool, registerAgentProfileTool } from '../../tools/agent-profile-tool.ts';
@@ -105,7 +105,7 @@ async function liveProfile(): Promise<LiveProfile> {
   configManager.set('profile.path', profilePath);
 
   seedProviderMetadataCacheFixture({ configManager, homeDirectory: root, workingDirectory: workingDir });
-  const services = await createRuntimeServices({
+  const services = await createPreparedAgentRuntimeServices({
     // This suite exercises profile persistence and gateway contracts, not remote model discovery.
     modelDiscovery: 'skip',
     configManager,

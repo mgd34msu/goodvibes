@@ -33,7 +33,7 @@ let previousPort: ReturnType<typeof installJudgmentPort>;
 beforeEach(async () => {
   // Construct the graph before installing the fixture reading: startup installs
   // its own judgment port, which would otherwise replace this synthetic answer.
-  getTestRuntimeServices();
+  (await getTestRuntimeServices());
   previousPort = installJudgmentPort(readings.port);
   expect(await redactSensitiveDataAsync(PUBLIC_FAILURE)).toBe(PUBLIC_FAILURE);
 });
@@ -56,7 +56,7 @@ describe('registerAgentRuntimeEvents: AGENT_FAILED child-failure envelope enrich
     expect(record.error).toBe(PUBLIC_FAILURE);
 
     const toolRegistry = new ToolRegistry();
-    toolRegistry.register(createAgentTool({ manager: agentManager, messageBus: agentMessageBus, configManager, contractRunner: getTestRuntimeServices().contractRunner, projectRoot: configDir, resolveSessionId: () => 'session-1' }));
+    toolRegistry.register(createAgentTool({ manager: agentManager, messageBus: agentMessageBus, configManager, contractRunner: (await getTestRuntimeServices()).contractRunner, projectRoot: configDir, resolveSessionId: () => 'session-1' }));
 
     const runtimeBus = new RuntimeEventBus();
     const domainDispatch = createDomainDispatch(createRuntimeStore());

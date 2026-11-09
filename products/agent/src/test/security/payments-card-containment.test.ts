@@ -277,10 +277,10 @@ describe('payments card containment (agent terminal)', () => {
     expect(host.concealedInput).toBeNull();
   });
 
-  test('the REAL InputHandler renders a concealed card number as bullets: the masking is wired, not just available', () => {
+  test('the REAL InputHandler renders a concealed card number as bullets: the masking is wired, not just available', async () => {
     const sel = new SelectionManager();
     const history = new InfiniteBuffer();
-    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
     input.setContentWidth(60);
 
     input.beginConcealedInput({ label: 'Card number', onSubmit: () => {} });
@@ -295,10 +295,10 @@ describe('payments card containment (agent terminal)', () => {
     expect(info.cursorCol).toBe(FAKE_CARD_NUMBER.length);
   });
 
-  test('the REAL InputHandler does NOT mask an ordinary prompt, and does not mask a plain address prompt', () => {
+  test('the REAL InputHandler does NOT mask an ordinary prompt, and does not mask a plain address prompt', async () => {
     const sel = new SelectionManager();
     const history = new InfiniteBuffer();
-    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
     input.setContentWidth(60);
 
     input.prompt = 'hello world';
@@ -310,10 +310,10 @@ describe('payments card containment (agent terminal)', () => {
     expect(input.getWrappedPromptInfo(60).visibleLines.join('\n')).toContain('Springfield');
   });
 
-  test('beginning a plain prompt cancels a pending concealed one: the two slots are never both live', () => {
+  test('beginning a plain prompt cancels a pending concealed one: the two slots are never both live', async () => {
     const sel = new SelectionManager();
     const history = new InfiniteBuffer();
-    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
 
     let concealedCancelled = false;
     input.beginConcealedInput({ label: 'CVV', onSubmit: () => {}, onCancel: () => { concealedCancelled = true; } });
@@ -324,10 +324,10 @@ describe('payments card containment (agent terminal)', () => {
     expect(input.plainLineInput).not.toBeNull();
   });
 
-  test('the REAL InputHandler routes a concealed submission to its requester and clears the buffer', () => {
+  test('the REAL InputHandler routes a concealed submission to its requester and clears the buffer', async () => {
     const sel = new SelectionManager();
     const history = new InfiniteBuffer();
-    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
 
     const observed: { delivered: string | null } = { delivered: null };
     input.beginConcealedInput({ label: 'CVV', onSubmit: (v) => { observed.delivered = v; } });
@@ -341,10 +341,10 @@ describe('payments card containment (agent terminal)', () => {
     expect(input.submitConcealedInput('ordinary message')).toBe(false);
   });
 
-  test('Escape cancels a pending card prompt through the real handler, clearing the buffer and unmasking', () => {
+  test('Escape cancels a pending card prompt through the real handler, clearing the buffer and unmasking', async () => {
     const sel = new SelectionManager();
     const history = new InfiniteBuffer();
-    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
     input.setContentWidth(60);
 
     let cancelled = false;
@@ -381,7 +381,7 @@ describe('payments card containment (agent terminal)', () => {
     // eaten as another command and the card prompt would never receive it.
     const sel = new SelectionManager();
     const history = new InfiniteBuffer();
-    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+    const input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
     input.setContentWidth(80);
 
     const printed: string[] = [];

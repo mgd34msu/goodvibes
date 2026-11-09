@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * Actual Agent composition acceptance for the bounded read/goodvibes_settings
  * adoption. These expose the ca12 read gaps; only the judgment I/O is
@@ -23,7 +24,7 @@ import { PermissionManager, createPermissionConfigReader, UserPermissionRuleStor
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { explainAgentToolPolicyInvocation } from '../../tools/agent-tool-policy-guard.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -99,18 +100,18 @@ function recordedPort(): JudgmentPort {
   return withDecisionLog(observed, log);
 }
 
-function fixture() {
+async function fixture() {
   const root = makeProjectTempDir('agent-read-settings-admission');
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');
   const configDir = join(home, '.goodvibes', 'agent');
   mkdirSync(workspace, { recursive: true }); mkdirSync(configDir, { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: workspace, timeout: 30_000 });
-  const runtime = createRuntimeServices({
+  const runtime = (await createPreparedAgentRuntimeServices({
     modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
     configManager: new ConfigManager({ surfaceRoot: 'agent', workingDir: workspace, homeDir: home, configDir }),
     workingDir: workspace, homeDirectory: home, getConversationTitle: () => 'read/settings acceptance',
-  });
+  }));
   runtimes.push(runtime);
   // Runtime construction owns the production installation; replace only its I/O.
   installJudgmentPort(recordedPort());
@@ -152,21 +153,21 @@ function expectNoReadAdmission(...withheld: string[]) {
 }
 
 test('immediate first Agent turn awaits owner readiness and reads once under automatic configuration', async () => {
-  const f = fixture(); f.write('ordinary.txt'); reportsMutation = false;
+  const f = (await fixture()); f.write('ordinary.txt'); reportsMutation = false;
   const result = await f.run('read', read('ordinary.txt'));
   expect(result.success).toBe(true); expect(result.output).toContain('SYNTHETIC ORDINARY FILE');
   expect(result.autonomousDecision).toBeUndefined(); expect(readBodies).toBe(1); expect(f.prompts()).toBe(0);
 });
 
 test('automatic admission reads a harmless hidden fixture without the obsolete name veto', async () => {
-  const f = fixture(); f.write('.ordinary-note'); reportsMutation = false;
+  const f = (await fixture()); f.write('.ordinary-note'); reportsMutation = false;
   const result = await f.run('read', read('.ordinary-note'));
   expect(result.autonomousDecision).toBeUndefined();
   expect(result.success).toBe(true); expect(result.output).toContain('SYNTHETIC ORDINARY FILE'); expect(readBodies).toBe(1);
 });
 
 test('local read preserves every requested path without semantic approval', async () => {
-  const f = fixture(); f.write('one.txt'); f.write('two.txt'); reportsMutation = false;
+  const f = (await fixture()); f.write('one.txt'); f.write('two.txt'); reportsMutation = false;
   const result = await f.run('read', { files: [{ path: 'one.txt' }, { path: 'two.txt' }] });
   expect(result.success).toBe(true);
   expect(result.output).toContain('one.txt'); expect(result.output).toContain('two.txt');
@@ -174,14 +175,14 @@ test('local read preserves every requested path without semantic approval', asyn
 });
 
 test.each(['reject', 'defer_0'] as const)('a scripted %s is not consulted for configured local reads', async outcome => {
-  const f = fixture(); f.write('ordinary.txt'); selected = outcome;
+  const f = (await fixture()); f.write('ordinary.txt'); selected = outcome;
   const readResult = await f.run('read', read('ordinary.txt'));
   expect(readResult.success).toBe(true);
   expect(readBodies).toBe(1); expectNoReadAdmission(); expect(f.prompts()).toBe(0);
 });
 
 test('an explicit configured read denial prevents backend execution', async () => {
-  const f = fixture(); f.write('ordinary.txt');
+  const f = (await fixture()); f.write('ordinary.txt');
   f.runtime.configManager.set('permissions.mode', 'custom');
   f.runtime.configManager.set('permissions.tools.read', 'deny');
   expect((await f.run('read', read('ordinary.txt'))).success).toBe(false);
@@ -189,13 +190,13 @@ test('an explicit configured read denial prevents backend execution', async () =
 });
 
 test('target contract: unadmitted direct Agent read cannot reach the backend', async () => {
-  const f = fixture(); f.write('ordinary.txt');
+  const f = (await fixture()); f.write('ordinary.txt');
   const result = await f.registry.execute('direct-read', 'read', read('ordinary.txt'));
   expect(result.success).toBe(false); expect(readBodies).toBe(0);
 });
 
 test('target contract: a genuine admission for another prepared read cannot authorize this read', async () => {
-  const f = fixture(); f.write('one.txt'); f.write('two.txt'); reportsMutation = false;
+  const f = (await fixture()); f.write('one.txt'); f.write('two.txt'); reportsMutation = false;
   const first = await f.prepare('first', 'read', read('one.txt'));
   const second = await f.prepare('second', 'read', read('two.txt'));
   const admitted = await f.manager.admitAutonomous('first', first.name, first.args, { sourceOf: f.sourceOf,
@@ -207,7 +208,7 @@ test('target contract: a genuine admission for another prepared read cannot auth
 });
 
 test('authority change-and-restore during the final hook invalidates the old admission', async () => {
-  const f = fixture(); f.write('ordinary.txt'); reportsMutation = false;
+  const f = (await fixture()); f.write('ordinary.txt'); reportsMutation = false;
   f.deps.hookDispatcher = { fire: async () => {
     f.runtime.configManager.set('permissions.mode', 'plan');
     f.runtime.configManager.set('permissions.mode', 'prompt');
@@ -218,7 +219,7 @@ test('authority change-and-restore during the final hook invalidates the old adm
 });
 
 test('control: genuine prepared execution is one-shot', async () => {
-  const f = fixture(); f.write('ordinary.txt'); reportsMutation = false;
+  const f = (await fixture()); f.write('ordinary.txt'); reportsMutation = false;
   const prepared = await f.prepare('once', 'read', read('ordinary.txt'));
   const admitted = await f.manager.admitAutonomous('once', prepared.name, prepared.args, { sourceOf: f.sourceOf,
     schemaRevision: prepared.schemaRevision, preparationDecisionIds: prepared.judgmentDecisionIds,
@@ -229,7 +230,7 @@ test('control: genuine prepared execution is one-shot', async () => {
 });
 
 test('local read batches retain every requested file without an implicit cap', async () => {
-  const f = fixture(); reportsMutation = false;
+  const f = (await fixture()); reportsMutation = false;
   const files = Array.from({ length: 11 }, (_, index) => ({ path: `ordinary-${index}.txt` }));
   for (const { path } of files) f.write(path, `contents of ${path}`);
   const result = await f.run('read', { files });
@@ -239,13 +240,13 @@ test('local read batches retain every requested file without an implicit cap', a
 });
 
 test.each(['yes', 'uncertain'] as const)('a scripted %s secrets observation does not gate a local read', async evidence => {
-  const f = fixture(); f.write('ordinary-report.txt', 'SYNTHETIC CLASSIFICATION FIXTURE'); reportsMutation = false; secrets = evidence;
+  const f = (await fixture()); f.write('ordinary-report.txt', 'SYNTHETIC CLASSIFICATION FIXTURE'); reportsMutation = false; secrets = evidence;
   const result = await f.run('read', read('ordinary-report.txt'));
   expect(result.success).toBe(true); expect(readBodies).toBe(1); expectNoReadAdmission(); expect(f.prompts()).toBe(0);
 });
 
 test('automatic admission can read ordinary notes in a platform-looking directory without a second intent guess', async () => {
-  const f = fixture(); reportsMutation = false;
+  const f = (await fixture()); reportsMutation = false;
   mkdirSync(join(f.workspace, 'goodvibes-notes'));
   f.write('goodvibes-notes/travel.txt', 'SYNTHETIC TRAVEL NOTES');
   f.source.goal = 'Read my synthetic travel notes';
@@ -255,7 +256,7 @@ test('automatic admission can read ordinary notes in a platform-looking director
 });
 
 test('platform source requested in the original host goal is admitted once', async () => {
-  const f = fixture(); f.write('source.ts', 'export const fixture = true;'); reportsMutation = false;
+  const f = (await fixture()); f.write('source.ts', 'export const fixture = true;'); reportsMutation = false;
   platform = 'yes'; platformRequested = 'yes'; f.source.goal = 'Investigate the implementation failure in the assistant source';
   const result = await f.run('read', read('source.ts'));
   expect(result.success).toBe(true); expect(readBodies).toBe(1); expect(f.prompts()).toBe(0);
@@ -263,20 +264,20 @@ test('platform source requested in the original host goal is admitted once', asy
 });
 
 test.each(['no', 'uncertain'] as const)('local source read does not require a %s semantic scope judgment', async request => {
-  const f = fixture(); f.write('source.ts'); reportsMutation = false; platform = 'yes'; platformRequested = request;
+  const f = (await fixture()); f.write('source.ts'); reportsMutation = false; platform = 'yes'; platformRequested = request;
   f.source.goal = 'Log into my email account';
   const result = await f.run('read', read('source.ts'));
   expect(result.success).toBe(true); expect(readBodies).toBe(1); expectNoReadAdmission(); expect(f.prompts()).toBe(0);
 });
 
 test('uncertain platform identity does not gate a configured local read', async () => {
-  const f = fixture(); f.write('source.ts'); reportsMutation = false; platform = 'uncertain';
+  const f = (await fixture()); f.write('source.ts'); reportsMutation = false; platform = 'uncertain';
   const result = await f.run('read', read('source.ts'));
   expect(result.success).toBe(true); expect(readBodies).toBe(1); expectNoReadAdmission();
 });
 
 test.each(['revoke', 'cancel', 'replace-file'] as const)('read %s after an extraction await withholds its output', async change => {
-  const f = fixture(); f.write('source.ts', 'export const PRIVATE_FIXTURE = true;'); reportsMutation = false;
+  const f = (await fixture()); f.write('source.ts', 'export const PRIVATE_FIXTURE = true;'); reportsMutation = false;
   const abort = new AbortController(); f.deps.turnSignal = abort.signal; let reached = false;
   const extraction = spyOn(CodeIntelligence.prototype, 'getOutline').mockImplementation(async () => {
     reached = true; await Promise.resolve();
@@ -300,7 +301,7 @@ test('a first turn cancelled while the actual rule owner initializes performs no
     const operation = waiting.then(() => originalInit.call(this)); pending.push(operation); return operation;
   });
   restoreOthers.push(() => init.mockRestore());
-  const f = fixture(); f.write('ordinary.txt'); reportsMutation = false;
+  const f = (await fixture()); f.write('ordinary.txt'); reportsMutation = false;
   const abort = new AbortController(); f.deps.turnSignal = abort.signal;
   const operation = f.run('read', read('ordinary.txt')).catch(() => undefined);
   try {
@@ -314,7 +315,7 @@ test('a first turn cancelled while the actual rule owner initializes performs no
 });
 
 test.each(['arguments', 'source'] as const)('protected %s remain local without semantic transmission', async location => {
-  const f = fixture(); f.write('ordinary.txt'); reportsMutation = false;
+  const f = (await fixture()); f.write('ordinary.txt'); reportsMutation = false;
   if (location === 'source') f.source.goal = 'Read this using password=synthetic-private';
   const args = location === 'arguments' ? read('password=synthetic-private') : read('ordinary.txt');
   const result = await f.run('read', args).catch(() => ({ success: false }));
@@ -324,7 +325,7 @@ test.each(['arguments', 'source'] as const)('protected %s remain local without s
 });
 
 test('changed original source during the final admission hook cannot execute', async () => {
-  const f = fixture(); f.write('ordinary.txt'); reportsMutation = false;
+  const f = (await fixture()); f.write('ordinary.txt'); reportsMutation = false;
   f.deps.hookDispatcher = { fire: async () => {
     f.source.goal = 'A different current task';
     return { ok: true, decision: 'allow' };
@@ -334,7 +335,7 @@ test('changed original source during the final admission hook cannot execute', a
 });
 
 test.each(['secret', 'platform'] as const)('an in-root alias reads its exact %s target under current configuration', async kind => {
-  const f = fixture(); reportsMutation = false;
+  const f = (await fixture()); reportsMutation = false;
   const target = kind === 'secret' ? '.env' : 'platform-implementation.ts';
   f.write(target, 'SYNTHETIC TARGET ONLY');
   symlinkSync(target, join(f.workspace, 'innocent-alias.txt'));
@@ -345,7 +346,7 @@ test.each(['secret', 'platform'] as const)('an in-root alias reads its exact %s 
 });
 
 test('a requested platform read through an alias returns the actual target', async () => {
-  const f = fixture(); reportsMutation = false; platformRequested = 'yes';
+  const f = (await fixture()); reportsMutation = false; platformRequested = 'yes';
   f.write('platform-implementation.ts', 'SYNTHETIC PLATFORM SOURCE');
   symlinkSync('platform-implementation.ts', join(f.workspace, 'alias.txt'));
   platformTargets.add(join(f.workspace, 'platform-implementation.ts'));
@@ -356,7 +357,7 @@ test('a requested platform read through an alias returns the actual target', asy
 });
 
 test('an alias outside the admitted project is refused before semantic evidence or bytes', async () => {
-  const f = fixture(); reportsMutation = false;
+  const f = (await fixture()); reportsMutation = false;
   const outside = join(f.workspace, '..', 'outside-fixture.txt');
   writeFileSync(outside, 'SYNTHETIC OUTSIDE PROJECT'); symlinkSync(outside, join(f.workspace, 'alias.txt'));
   await f.run('read', read('alias.txt')).catch(() => undefined);
@@ -364,7 +365,7 @@ test('an alias outside the admitted project is refused before semantic evidence 
 });
 
 test('the actual Agent registry rejects a different genuine manager for the same prepared handle', async () => {
-  const f = fixture(); reportsMutation = false; f.write('ordinary.txt');
+  const f = (await fixture()); reportsMutation = false; f.write('ordinary.txt');
   const prepared = await f.prepare('wrong-owner', 'read', read('ordinary.txt'));
   const foreign = new PermissionManager(undefined, createPermissionConfigReader(f.runtime.configManager), new PolicyRuntimeState());
   const admission = await foreign.admitAutonomous('wrong-owner', prepared.name, prepared.args, {
@@ -387,7 +388,7 @@ test('read explanation states pending admission and checks only mechanical shape
 
 
 test.each(['autoApprove', 'allow-all'] as const)('the composed Agent honors %s for sibling reads and applies live revocation', async mode => {
-  const f = fixture(); reportsMutation = false;
+  const f = (await fixture()); reportsMutation = false;
   const outside = join(f.workspace, '..', 'outside-fixture.txt');
   writeFileSync(outside, 'SYNTHETIC OUTSIDE PROJECT'); symlinkSync(outside, join(f.workspace, 'external-alias.txt'));
   f.source.goal = 'Read the sibling outside-fixture.txt file';

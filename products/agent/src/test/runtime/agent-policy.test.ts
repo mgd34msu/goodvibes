@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { mockFetch } from '../helpers/typed-fetch-mock.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -6,7 +7,6 @@ import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import {
   AGENT_BLOCKED_MAIN_CONVERSATION_TOOL_NAMES,
   AGENT_READ_ONLY_TOOL_MODES,
@@ -55,9 +55,9 @@ describe('Agent user-first autonomy policy', () => {
     root = '';
   });
 
-  function makeRuntimeServices() {
+  async function makeRuntimeServices() {
     root = makeProjectTempDir('gv-agent-policy');
-    return createRuntimeServices({
+    return (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
@@ -71,7 +71,7 @@ describe('Agent user-first autonomy policy', () => {
       workingDir: root,
       homeDirectory: root,
       getConversationTitle: () => 'Agent policy test',
-    });
+    }));
   }
 
   test('model tool policy allows visible agent orchestration and local implementation tools', () => {
@@ -91,7 +91,7 @@ describe('Agent user-first autonomy policy', () => {
     // arrives from `sessions.inputs.list` on the adopted daemon, not a
     // register this process wrote into itself, so the wire is what this
     // drives.
-    const services = makeRuntimeServices();
+    const services = (await makeRuntimeServices());
     const sessionId = 'session-agent-policy';
     services.hostedSessions.adopt(sessionId);
 

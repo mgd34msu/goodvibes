@@ -7,12 +7,12 @@ describe('PeerClient', () => {
     resetTestRuntimeServices();
   });
 
-  afterEach(() => {
-    getTestAgentManager().clear();
+  afterEach(async () => {
+    (await getTestAgentManager()).clear();
   });
 
   test('groups pairing, peer, work, and runner domains over in-process runtime services', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     services.distributedRuntime.pairRequests.clear();
     services.distributedRuntime.peers.clear();
     services.distributedRuntime.work.clear();
@@ -81,7 +81,7 @@ describe('PeerClient', () => {
   });
 
   test('surfaces runner contracts, artifacts, and peer work actions', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     services.distributedRuntime.pairRequests.clear();
     services.distributedRuntime.peers.clear();
     services.distributedRuntime.work.clear();
@@ -96,7 +96,7 @@ describe('PeerClient', () => {
       remoteSupervisor: services.remoteSupervisor,
     });
 
-    const agent = getTestAgentManager().spawn({
+    const agent = (await getTestAgentManager()).spawn({
       mode: 'spawn',
       task: 'peer-client artifact capture',
       template: 'engineer',

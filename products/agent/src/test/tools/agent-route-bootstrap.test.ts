@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
@@ -7,7 +8,6 @@ import { judgmentPort } from '@goodvibes-jev/engine/errors';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { registerAgentTools } from '../../runtime/bootstrap-agent-tools.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
@@ -21,7 +21,7 @@ test.each(['route', 'agent_harness'] as const)('actual Agent bootstrap registers
   execFileSync('git', ['init', '-q'], { cwd: root });
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, '.goodvibes', 'agent') });
   seedProviderMetadataCacheFixture({ configManager, homeDirectory: root, workingDirectory: root });
-  const services = createRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: root, modelDiscovery: 'skip' });
+  const services = (await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: root, modelDiscovery: 'skip' }));
   try {
     await services.providerRegistry.ready();
     await services.providerRegistry.modelDiscoverySettled();

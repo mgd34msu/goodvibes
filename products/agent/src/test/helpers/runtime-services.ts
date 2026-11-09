@@ -3,12 +3,14 @@
  *
  * CONTRACT: Importing this helper auto-registers a beforeEach that calls
  * resetAllTestServiceState(), so every test file gets a fresh singleton set
- * without needing to call reset manually. Files that need custom reset logic
+ * without needing to call reset manually. Runtime-backed getters are async:
+ * acquisition activates the exact configured project before composing a graph.
+ * Files that need custom reset logic
  * can still call resetAllTestServiceState() or individual reset functions
  * in their own beforeEach, bun:test runs all registered beforeEach hooks.
  */
 import { seedProviderMetadataCacheFixture } from './provider-metadata-cache-fixture.ts';
-import { beforeEach } from 'bun:test';
+import { afterAll, beforeEach } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -35,6 +37,7 @@ import { RuntimeEventBus } from '@/runtime/index.ts';
 import { RemoteRunnerRegistry } from '@/runtime/index.ts';
 import { RemoteSupervisor } from '@/runtime/index.ts';
 import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { prepareConfiguredProjectContext } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { createShellPathService } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { TaskScheduler } from '@goodvibes-jev/engine/platform/platform/scheduler';
@@ -65,6 +68,9 @@ type IntelligenceTestRoots = {
 let testRoots: IntelligenceTestRoots | null = null;
 
 let runtimeServices: RuntimeServices | null = null;
+let runtimePreparation: Promise<RuntimeServices> | null = null;
+let runtimeGeneration = 0;
+const pendingRuntimePreparations = new Set<Promise<RuntimeServices>>();
 let runtimeCounter = 0;
 let toolLLM: ToolLLM | null = null;
 let toolLLMRuntimeServices: RuntimeServices | null = null;
@@ -163,83 +169,95 @@ function seedRuntimeProviderTestModels(services: RuntimeServices): void {
 }
 
 export function resetTestRuntimeServices(): void {
+  runtimeGeneration += 1;
+  runtimePreparation = null;
   runtimeServices = null;
   toolLLM = null;
   toolLLMRuntimeServices = null;
   autoHealer = null;
 }
 
-export function getTestRuntimeServices(): RuntimeServices {
-  if (!runtimeServices) {
-    const { workingDir, configDir } = nextRuntimeRoots();
-    const configManager = new ConfigManager({ surfaceRoot: 'agent', configDir, workingDir, homeDir: workingDir });
-    seedProviderMetadataCacheFixture({ configManager, workingDirectory: workingDir, homeDirectory: workingDir });
-    runtimeServices = createRuntimeServices({
-      // Opt out: this process does not outlive the unawaited sweep.
-      modelDiscovery: 'skip',
-      configManager,
-      runtimeBus: new RuntimeEventBus(),
-      runtimeStore: createRuntimeStore(),
-      workingDir,
-      homeDirectory: workingDir,
-      getConversationTitle: () => 'test-runtime',
+export async function getTestRuntimeServices(): Promise<RuntimeServices> {
+  if (runtimeServices) return runtimeServices;
+  if (runtimePreparation) return runtimePreparation;
+  const generation = runtimeGeneration;
+  const { workingDir, configDir } = nextRuntimeRoots();
+  const configManager = new ConfigManager({ surfaceRoot: 'agent', configDir, workingDir, homeDir: workingDir });
+  seedProviderMetadataCacheFixture({ configManager, workingDirectory: workingDir, homeDirectory: workingDir });
+  const preparation = (async () => {
+    await prepareConfiguredProjectContext(configManager, workingDir, 'knowledge-agent.sqlite', { activate: true });
+    if (generation !== runtimeGeneration) throw new Error('Test runtime preparation was reset');
+    // The real constructor remains synchronous; nothing can publish a retired
+    // preparation while the original activation is in flight.
+    const services = createRuntimeServices({
+      modelDiscovery: 'skip', configManager,
+      runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
+      workingDir, homeDirectory: workingDir, getConversationTitle: () => 'test-runtime',
     });
-    seedRuntimeProviderTestModels(runtimeServices);
-    applyExecutorIfPresent(runtimeServices);
+    seedRuntimeProviderTestModels(services);
+    applyExecutorIfPresent(services);
+    runtimeServices = services;
+    return services;
+  })();
+  runtimePreparation = preparation;
+  pendingRuntimePreparations.add(preparation);
+  try { return await preparation; }
+  finally {
+    pendingRuntimePreparations.delete(preparation);
+    if (runtimePreparation === preparation) runtimePreparation = null;
   }
-  return runtimeServices;
 }
 
-export function getTestArchetypeLoader(): ArchetypeLoader {
-  return getTestRuntimeServices().archetypeLoader;
+export async function getTestArchetypeLoader(): Promise<ArchetypeLoader> {
+  return (await getTestRuntimeServices()).archetypeLoader;
 }
 
-export function getTestAgentMessageBus(): AgentMessageBus {
-  return getTestRuntimeServices().agentMessageBus;
+export async function getTestAgentMessageBus(): Promise<AgentMessageBus> {
+  return (await getTestRuntimeServices()).agentMessageBus;
 }
 
-export function getTestAgentOrchestrator(): AgentOrchestrator {
-  return getTestRuntimeServices().agentOrchestrator;
+export async function getTestAgentOrchestrator(): Promise<AgentOrchestrator> {
+  return (await getTestRuntimeServices()).agentOrchestrator;
 }
 
-export function getTestAgentManager(): AgentManager {
-  return getTestRuntimeServices().agentManager;
+export async function getTestAgentManager(): Promise<AgentManager> {
+  return (await getTestRuntimeServices()).agentManager;
 }
 
-export function getTestRouteBindings(): RouteBindingManager {
-  return getTestRuntimeServices().routeBindings;
+export async function getTestRouteBindings(): Promise<RouteBindingManager> {
+  return (await getTestRuntimeServices()).routeBindings;
 }
 
-export function getTestConfigManager(): RuntimeServices['configManager'] {
-  return getTestRuntimeServices().configManager;
+export async function getTestConfigManager(): Promise<RuntimeServices['configManager']> {
+  return (await getTestRuntimeServices()).configManager;
 }
 
-export function getTestProviderRegistry(): RuntimeServices['providerRegistry'] {
-  return getTestRuntimeServices().providerRegistry;
+export async function getTestProviderRegistry(): Promise<RuntimeServices['providerRegistry']> {
+  return (await getTestRuntimeServices()).providerRegistry;
 }
 
-export function getTestBookmarkManager(): RuntimeServices['bookmarkManager'] {
-  return getTestRuntimeServices().bookmarkManager;
+export async function getTestBookmarkManager(): Promise<RuntimeServices['bookmarkManager']> {
+  return (await getTestRuntimeServices()).bookmarkManager;
 }
 
-export function getTestSessionManager(): RuntimeServices['sessionManager'] {
-  return getTestRuntimeServices().sessionManager;
+export async function getTestSessionManager(): Promise<RuntimeServices['sessionManager']> {
+  return (await getTestRuntimeServices()).sessionManager;
 }
 
-export function getTestSessionOrchestration(): RuntimeServices['sessionOrchestration'] {
-  return getTestRuntimeServices().sessionOrchestration;
+export async function getTestSessionOrchestration(): Promise<RuntimeServices['sessionOrchestration']> {
+  return (await getTestRuntimeServices()).sessionOrchestration;
 }
 
-export function getTestReplayEngine(): RuntimeServices['replayEngine'] {
-  return getTestRuntimeServices().replayEngine;
+export async function getTestReplayEngine(): Promise<RuntimeServices['replayEngine']> {
+  return (await getTestRuntimeServices()).replayEngine;
 }
 
-export function getTestServiceRegistry(): RuntimeServices['serviceRegistry'] {
-  return getTestRuntimeServices().serviceRegistry;
+export async function getTestServiceRegistry(): Promise<RuntimeServices['serviceRegistry']> {
+  return (await getTestRuntimeServices()).serviceRegistry;
 }
 
-export function getTestSubscriptionManager(): RuntimeServices['subscriptionManager'] {
-  return getTestRuntimeServices().subscriptionManager;
+export async function getTestSubscriptionManager(): Promise<RuntimeServices['subscriptionManager']> {
+  return (await getTestRuntimeServices()).subscriptionManager;
 }
 
 /**
@@ -248,94 +266,95 @@ export function getTestSubscriptionManager(): RuntimeServices['subscriptionManag
  * has none of these methods, so a test that wants ensureSession/submitMessage/
  * listSessions wants this.
  */
-export function getTestSessionBroker(): SharedSessionBroker {
-  return getTestRuntimeServices().automationSessionRegister;
+export async function getTestSessionBroker(): Promise<SharedSessionBroker> {
+  return (await getTestRuntimeServices()).automationSessionRegister;
 }
 
 /** The inbound continuation-dispatch seam this surface binds its runner onto. */
-export function getTestSessionDispatch(): RuntimeServices['sessionBroker'] {
-  return getTestRuntimeServices().sessionBroker;
+export async function getTestSessionDispatch(): Promise<RuntimeServices['sessionBroker']> {
+  return (await getTestRuntimeServices()).sessionBroker;
 }
 
 /** The sessions the composed graph believes this process is hosting. */
-export function getTestHostedSessions(): RuntimeServices['hostedSessions'] {
-  return getTestRuntimeServices().hostedSessions;
+export async function getTestHostedSessions(): Promise<RuntimeServices['hostedSessions']> {
+  return (await getTestRuntimeServices()).hostedSessions;
 }
 
-export function getTestApprovalBroker(): ApprovalBroker {
-  return getTestRuntimeServices().approvalBroker;
+export async function getTestApprovalBroker(): Promise<ApprovalBroker> {
+  return (await getTestRuntimeServices()).approvalBroker;
 }
 
-export function getTestAutomationManager(): AutomationManager {
-  return getTestRuntimeServices().automationManager;
+export async function getTestAutomationManager(): Promise<AutomationManager> {
+  return (await getTestRuntimeServices()).automationManager;
 }
 
-export function getTestChannelPolicyManager(): ChannelPolicyManager {
-  return getTestRuntimeServices().channelPolicy;
+export async function getTestChannelPolicyManager(): Promise<ChannelPolicyManager> {
+  return (await getTestRuntimeServices()).channelPolicy;
 }
 
-export function getTestFileUndoManager(): FileUndoManager {
-  return getTestRuntimeServices().fileUndoManager;
+export async function getTestFileUndoManager(): Promise<FileUndoManager> {
+  return (await getTestRuntimeServices()).fileUndoManager;
 }
 
-export function getTestModeManager(): ModeManager {
-  return getTestRuntimeServices().modeManager;
+export async function getTestModeManager(): Promise<ModeManager> {
+  return (await getTestRuntimeServices()).modeManager;
 }
 
-export function getTestWorkflowManager(): WorkflowManager {
-  return getTestRuntimeServices().workflow.workflowManager;
+export async function getTestWorkflowManager(): Promise<WorkflowManager> {
+  return (await getTestRuntimeServices()).workflow.workflowManager;
 }
 
-export function getTestTriggerManager(): TriggerManager {
-  return getTestRuntimeServices().workflow.triggerManager;
+export async function getTestTriggerManager(): Promise<TriggerManager> {
+  return (await getTestRuntimeServices()).workflow.triggerManager;
 }
 
-export function getTestScheduleManager(): ScheduleManager {
-  return getTestRuntimeServices().workflow.scheduleManager;
+export async function getTestScheduleManager(): Promise<ScheduleManager> {
+  return (await getTestRuntimeServices()).workflow.scheduleManager;
 }
 
-export function getTestGatewayMethodCatalog(): GatewayMethodCatalog {
-  return getTestRuntimeServices().gatewayMethods;
+export async function getTestGatewayMethodCatalog(): Promise<GatewayMethodCatalog> {
+  return (await getTestRuntimeServices()).gatewayMethods;
 }
 
-export function getTestHookDispatcher(): HookDispatcher {
-  return getTestRuntimeServices().hookDispatcher;
+export async function getTestHookDispatcher(): Promise<HookDispatcher> {
+  return (await getTestRuntimeServices()).hookDispatcher;
 }
 
-export function getTestHookWorkbench(): HookWorkbench {
-  return getTestRuntimeServices().hookWorkbench;
+export async function getTestHookWorkbench(): Promise<HookWorkbench> {
+  return (await getTestRuntimeServices()).hookWorkbench;
 }
 
-export function getTestPluginManager(): PluginManager {
-  return getTestRuntimeServices().pluginManager;
+export async function getTestPluginManager(): Promise<PluginManager> {
+  return (await getTestRuntimeServices()).pluginManager;
 }
 
-export function getTestMemoryEmbeddingRegistry(): MemoryEmbeddingProviderRegistry {
-  return getTestRuntimeServices().memoryEmbeddingRegistry;
+export async function getTestMemoryEmbeddingRegistry(): Promise<MemoryEmbeddingProviderRegistry> {
+  return (await getTestRuntimeServices()).memoryEmbeddingRegistry;
 }
 
-export function getTestVoiceProviderRegistry(): VoiceProviderRegistry {
-  return getTestRuntimeServices().voiceProviders;
+export async function getTestVoiceProviderRegistry(): Promise<VoiceProviderRegistry> {
+  return (await getTestRuntimeServices()).voiceProviders;
 }
 
-export function getTestMediaProviderRegistry(): MediaProviderRegistry {
-  return getTestRuntimeServices().mediaProviders;
+export async function getTestMediaProviderRegistry(): Promise<MediaProviderRegistry> {
+  return (await getTestRuntimeServices()).mediaProviders;
 }
 
-export function getTestWebSearchProviderRegistry(): WebSearchProviderRegistry {
-  return getTestRuntimeServices().webSearchProviders;
+export async function getTestWebSearchProviderRegistry(): Promise<WebSearchProviderRegistry> {
+  return (await getTestRuntimeServices()).webSearchProviders;
 }
 
-export function getTestRemoteRunnerRegistry(): RemoteRunnerRegistry {
-  return getTestRuntimeServices().remoteRunnerRegistry;
+export async function getTestRemoteRunnerRegistry(): Promise<RemoteRunnerRegistry> {
+  return (await getTestRuntimeServices()).remoteRunnerRegistry;
 }
 
-export function getTestRemoteSupervisor(): RemoteSupervisor {
-  return getTestRuntimeServices().remoteSupervisor;
+export async function getTestRemoteSupervisor(): Promise<RemoteSupervisor> {
+  return (await getTestRuntimeServices()).remoteSupervisor;
 }
 
-export function getTestToolLLM(): ToolLLM {
-  const services = getTestRuntimeServices();
+export async function getTestToolLLM(): Promise<ToolLLM> {
+  const services = (await getTestRuntimeServices());
+  if (services !== runtimeServices) throw new Error('Test runtime acquisition was reset');
   if (!toolLLM || toolLLMRuntimeServices !== services) {
     toolLLM = new ToolLLM({
       configManager: services.configManager,
@@ -351,8 +370,11 @@ export function resetTestToolLLM(): void {
   toolLLMRuntimeServices = null;
 }
 
-export function getTestAutoHealer(): AutoHealer {
-  autoHealer ??= new AutoHealer(getTestConfigManager(), getTestToolLLM());
+export async function getTestAutoHealer(): Promise<AutoHealer> {
+  const services = await getTestRuntimeServices();
+  const llm = await getTestToolLLM();
+  if (services !== runtimeServices || toolLLMRuntimeServices !== services) throw new Error('Test runtime acquisition was reset');
+  autoHealer ??= new AutoHealer(services.configManager, llm);
   return autoHealer;
 }
 
@@ -393,8 +415,8 @@ export function resetTestCodeIntelligence(): void {
   lspService = null;
 }
 
-export function getTestProcessManager(): ProcessManager {
-  return getTestRuntimeServices().processManager;
+export async function getTestProcessManager(): Promise<ProcessManager> {
+  return (await getTestRuntimeServices()).processManager;
 }
 
 export function resetTestProcessManager(): void {
@@ -495,6 +517,13 @@ export function resetAllTestServiceState(): void {
 // Files can still register additional beforeEach hooks, all registered hooks run.
 beforeEach(() => {
   resetAllTestServiceState();
+});
+
+// Reset fences publication, while this set retains already-started native IO
+// until the actual test lifetime drains before the preload removes its roots.
+afterAll(async () => {
+  resetTestRuntimeServices();
+  await Promise.allSettled([...pendingRuntimePreparations]);
 });
 
 export function applyTestAgentExecutor(executor: AgentExecutor | null): void {

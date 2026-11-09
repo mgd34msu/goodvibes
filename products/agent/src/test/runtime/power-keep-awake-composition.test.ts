@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * power-keep-awake-composition.test.ts
  *
@@ -28,7 +29,7 @@ import { join } from 'node:path';
 import { ConfigManager } from '../../config/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createHostPowerSeam } from '@goodvibes-jev/engine/platform/platform/power';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -47,7 +48,7 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
     root = '';
   });
 
-  function makeServices(): RuntimeServices {
+  async function makeServices(): Promise<RuntimeServices> {
     root = makeProjectTempDir('goodvibes-agent-power-composition');
     const workingDir = join(root, 'workspace');
     const homeDir = join(root, 'home');
@@ -56,7 +57,7 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
     mkdirSync(homeDir, { recursive: true });
     mkdirSync(configDir, { recursive: true });
     const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir, homeDir, configDir });
-    const services = createRuntimeServices({
+    const services = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
@@ -64,13 +65,13 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
       configManager,
       workingDir,
       homeDirectory: homeDir,
-    });
+    }));
     runtimes.push(services);
     return services;
   }
 
   test('a config write (mirroring the settings modal\'s setDynamic call) flips the real PowerManager state, with no bespoke call site', async () => {
-    const services = makeServices();
+    const services = (await makeServices());
     try {
       expect(services.powerManager.getState().keepAwake.enabled).toBe(false);
 
@@ -109,7 +110,7 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
     }
   });
 
-  test('a test-constructed runtime (no powerSeam) defaults to the NON-spawning unavailable seam', () => {
+  test('a test-constructed runtime (no powerSeam) defaults to the NON-spawning unavailable seam', async () => {
     // platform 1.9.0 moved seam selection to an explicit opt-in: createRuntimeServices
     // now defaults an ABSENT powerSeam to the platform's "unavailable" no-spawn seam,
     // so a test-constructed runtime never spawns systemd-inhibit inhibitors or a
@@ -117,7 +118,7 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
     // composed PowerManager must report the honest 'unavailable (...)' platform,
     // yet keep-awake state still flips (the live-apply tests above), because the
     // PowerManager tracks the enabled intent independently of seam availability.
-    const services = makeServices();
+    const services = (await makeServices());
     try {
       expect(services.powerManager.getState().platform.startsWith('unavailable')).toBe(true);
     } finally {
@@ -143,7 +144,7 @@ describe('power.keepAwake local live-apply (config-subscription path)', () => {
   });
 
   test('an external settings.json edit (no in-process call at all) also reaches the PowerManager, via watchConfigFiles + subscribeConfig', async () => {
-    const services = makeServices();
+    const services = (await makeServices());
     try {
       expect(services.powerManager.getState().keepAwake.enabled).toBe(false);
 

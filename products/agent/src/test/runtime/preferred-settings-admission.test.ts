@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { ordinaryResearchOwner, cleanupResearchScreeningFixtures } from '../helpers/research-screening.ts';
 import type { UserPermissionRuleStore } from '@goodvibes-jev/engine/platform/platform/permissions';
@@ -34,7 +35,7 @@ import { withTurnSurface } from '@goodvibes-jev/engine/platform/platform/securit
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { launchSettingsHttpHost } from '../helpers/settings-http-host.ts';
@@ -130,11 +131,11 @@ async function fixture(remote?: 'normal' | 'lost-response', readOnly = false, co
     configManager.set('controlPlane.host', endpoint.hostname); configManager.set('controlPlane.port', Number(endpoint.port));
     configManager.set('daemon.connectedHost.enabled', true);
   }
-  const runtime = createRuntimeServices({
+  const runtime = (await createPreparedAgentRuntimeServices({
     modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
     configManager,
     workingDir: workspace, homeDirectory: home, getConversationTitle: () => 'read/settings acceptance',
-  });
+  }));
   runtimes.push(runtime);
   // Runtime construction owns the production installation; replace only its I/O.
   installJudgmentPort(recordedPort());

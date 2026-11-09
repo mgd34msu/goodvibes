@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * voice-setup-and-memory-governance-composition.test.ts
  *
@@ -43,7 +44,7 @@ import type { MemoryGovernorSnapshot } from '@goodvibes-jev/engine/platform/plat
 import { ConfigManager } from '../../config/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 describe('voice-setup + memory-governance composition', () => {
@@ -54,7 +55,7 @@ describe('voice-setup + memory-governance composition', () => {
     root = '';
   });
 
-  function makeServices(): RuntimeServices {
+  async function makeServices(): Promise<RuntimeServices> {
     root = makeProjectTempDir('goodvibes-agent-voice-memory-composition');
     const workingDir = join(root, 'workspace');
     const homeDir = join(root, 'home');
@@ -63,7 +64,7 @@ describe('voice-setup + memory-governance composition', () => {
     mkdirSync(homeDir, { recursive: true });
     mkdirSync(configDir, { recursive: true });
     const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir, homeDir, configDir });
-    return createRuntimeServices({
+    return (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
@@ -71,7 +72,7 @@ describe('voice-setup + memory-governance composition', () => {
       configManager,
       workingDir,
       homeDirectory: homeDir,
-    });
+    }));
   }
 
   function cleanup(services: RuntimeServices): void {
@@ -80,8 +81,8 @@ describe('voice-setup + memory-governance composition', () => {
     services.configManager.stopWatchingConfigFiles();
   }
 
-  test('services.voiceSetup is present and its status() reflects the real (fresh, not-provisioned) managed runtime', () => {
-    const services = makeServices();
+  test('services.voiceSetup is present and its status() reflects the real (fresh, not-provisioned) managed runtime', async () => {
+    const services = (await makeServices());
     try {
       expect(services.voiceSetup).toBeDefined();
       const status = services.voiceSetup.status();
@@ -96,7 +97,7 @@ describe('voice-setup + memory-governance composition', () => {
   });
 
   test('voice.local.status is invokable over the gateway and answers with the SAME live status voiceSetup serves directly', async () => {
-    const services = makeServices();
+    const services = (await makeServices());
     try {
       const direct = services.voiceSetup.status();
       const viaGateway = await buildDaemonGatewayCatalog(services).invoke('voice.local.status', {
@@ -108,8 +109,8 @@ describe('voice-setup + memory-governance composition', () => {
     }
   });
 
-  test('services.voiceSetup carries the wake-word artifact service, and reports honestly on a host that has never provisioned', () => {
-    const services = makeServices();
+  test('services.voiceSetup carries the wake-word artifact service, and reports honestly on a host that has never provisioned', async () => {
+    const services = (await makeServices());
     try {
       // The same service, one instance: the wake artifacts live under the managed
       // voice root's `wake` subdirectory, so /voice wake status and the
@@ -131,7 +132,7 @@ describe('voice-setup + memory-governance composition', () => {
   });
 
   test('the three wake verbs are registered on the gateway, and voice.wake.status answers with the SAME live state', async () => {
-    const services = makeServices();
+    const services = (await makeServices());
     try {
       const direct = services.voiceSetup.wakeStatus();
       const viaGateway = await buildDaemonGatewayCatalog(services).invoke('voice.wake.status', { context: {} });
@@ -147,7 +148,7 @@ describe('voice-setup + memory-governance composition', () => {
   });
 
   test('voice.local.install is invokable over the gateway (registered, not cataloged-but-unhandled)', async () => {
-    const services = makeServices();
+    const services = (await makeServices());
     try {
       // Does not actually assert on a completed install (that downloads real
       // files over the network), only that the gateway found and ran a real
@@ -161,8 +162,8 @@ describe('voice-setup + memory-governance composition', () => {
     }
   });
 
-  test('the MemoryGovernor is composed, STARTED by default, and its registered members are this fork\'s real caches and jobs', () => {
-    const services = makeServices();
+  test('the MemoryGovernor is composed, STARTED by default, and its registered members are this fork\'s real caches and jobs', async () => {
+    const services = (await makeServices());
     try {
       // Present: the real platform class instances, not stand-ins.
       expect(services.memoryGovernor).toBeDefined();
@@ -202,7 +203,7 @@ describe('voice-setup + memory-governance composition', () => {
   });
 
   test('ops.memory.get serves the genuine live governor snapshot over the gateway', async () => {
-    const services = makeServices();
+    const services = (await makeServices());
     try {
       const viaGateway = await buildDaemonGatewayCatalog(services).invoke('ops.memory.get', { context: {} }) as MemoryGovernorSnapshot;
       // Real values from the real sampler, a live process has a nonzero RSS.

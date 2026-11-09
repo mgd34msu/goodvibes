@@ -56,9 +56,9 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeAgentHarness(options: { readonly guarded?: boolean } = {}) {
+async function makeAgentHarness(options: { readonly guarded?: boolean } = {}) {
   resetTestRuntimeServices();
-  const services = getTestRuntimeServices();
+  const services = (await getTestRuntimeServices());
   const { configManager, agentManager: manager, agentMessageBus: messageBus, contractRunner } = services;
   const agentTool = createAgentTool({
     manager, messageBus, configManager, contractRunner,
@@ -70,12 +70,12 @@ function makeAgentHarness(options: { readonly guarded?: boolean } = {}) {
 }
 
 /** Recorded fixture answers; the actual Agent registry, admission and config owners execute. */
-function settingsGuardRuntime() {
+async function settingsGuardRuntime() {
   // The imported helper's beforeEach belongs to its first importing test file.
   // Own a fresh graph here even when that file ran earlier in the suite.
   // Keep this owner for every call within the fixture, including reject → act.
   resetTestRuntimeServices();
-  const services = getTestRuntimeServices();
+  const services = (await getTestRuntimeServices());
   const log = new SqliteDecisionLog(':memory:');
   let selected: 'act' | 'reject' = 'act';
   const answers = fakePort((wireName, question) => {
@@ -532,7 +532,7 @@ function expectPresent<T>(value: T | null | undefined, description: string): T {
 describe('spawn mode', () => {
 
   test('Agent runtime guard allows visible local spawn work', async () => {
-    const guarded = makeAgentHarness({ guarded: true });
+    const guarded = (await makeAgentHarness({ guarded: true }));
     const result = await guarded.agentTool.execute({
       mode: 'spawn',
       task: 'Build the feature',
@@ -549,7 +549,7 @@ describe('spawn mode', () => {
   });
 
   test('Agent runtime guard allows visible batch-spawn fanout', async () => {
-    const guarded = makeAgentHarness({ guarded: true });
+    const guarded = (await makeAgentHarness({ guarded: true }));
     const result = await guarded.agentTool.execute({
       mode: 'batch-spawn',
       reviewMode: 'none',
@@ -566,8 +566,8 @@ describe('spawn mode', () => {
     expect(guarded.manager.list()).toHaveLength(2);
   });
 
-  test('Agent runtime guard advertises visible autonomy modes', () => {
-    const guarded = makeAgentHarness({ guarded: true });
+  test('Agent runtime guard advertises visible autonomy modes', async () => {
+    const guarded = (await makeAgentHarness({ guarded: true }));
     const mode = expectPresent(
       guarded.agentTool.definition.parameters.properties as Record<string, unknown> | undefined,
       'guarded agent schema properties',
@@ -588,7 +588,7 @@ describe('spawn mode', () => {
   });
 
   test('Agent runtime guard allows local agent cancellation mode', async () => {
-    const guarded = makeAgentHarness({ guarded: true });
+    const guarded = (await makeAgentHarness({ guarded: true }));
     guarded.manager.setExecutor({ runAgent: async (record) => {
       const signal = guarded.manager.getCancellationSignal(record.id);
       await new Promise<void>((resolve) => {
@@ -622,7 +622,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard blocks direct coding mutation and local workflow tools', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     for (const name of AGENT_BLOCKED_MAIN_CONVERSATION_TOOL_NAMES) registry.register(makeNoopTool(name));
 
@@ -644,7 +644,7 @@ describe('spawn mode', () => {
     const registry = new ToolRegistry();
     registry.register(makeNoopTool('exec'));
     const definition = structuredClone(registry.getToolDefinitions()[0]);
-    registry.register(makeAgentHarness().agentTool);
+    registry.register((await makeAgentHarness()).agentTool);
     installAgentToolPolicyGuard(registry);
     expect(registry.getToolDefinitions()[0]).toEqual(definition);
     for (const input of [
@@ -663,7 +663,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard preserves remote catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeModeTool('remote', ['create-pool', 'pools', 'assign', 'unassign', 'contracts', 'artifacts', 'review', 'import-artifact']));
 
@@ -686,7 +686,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard preserves channel catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeModeTool('channel', [
       'accounts',
@@ -728,7 +728,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard preserves MCP catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeModeTool('mcp', [
       'servers',
@@ -761,7 +761,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard preserves fetch catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeFetchModeTool());
 
@@ -802,7 +802,7 @@ describe('spawn mode', () => {
     const registry = new ToolRegistry();
     registry.register(makeReadTool());
     const definition = structuredClone(registry.getToolDefinitions()[0]);
-    registry.register(makeAgentHarness().agentTool);
+    registry.register((await makeAgentHarness()).agentTool);
     installAgentToolPolicyGuard(registry);
     expect(registry.getToolDefinitions()[0]).toEqual(definition);
     for (const args of [
@@ -820,7 +820,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard preserves state catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeStateModeTool());
 
@@ -872,7 +872,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard keeps the settings tool usable instead of blocking it', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeSettingsTool());
 
@@ -891,7 +891,7 @@ describe('spawn mode', () => {
     expect(properties.confirm).toBeDefined();
     expect(properties[AGENT_SETTINGS_CONFIRMATION_PROPERTY]).toBeDefined();
 
-    const f = settingsGuardRuntime();
+    const f = (await settingsGuardRuntime());
     try {
       const before = f.config.get('display.theme');
       const value = before === 'nord' ? 'vaporwave' : 'nord';
@@ -905,7 +905,7 @@ describe('spawn mode', () => {
   });
 
   test('recorded settings fixtures own fresh services when their source IDs repeat', async () => {
-    const first = settingsGuardRuntime();
+    const first = (await settingsGuardRuntime());
     const before = first.config.get('display.theme');
     const value = before === 'nord' ? 'vaporwave' : 'nord';
     const args = { mode: 'set', key: 'display.theme', value, confirm: true };
@@ -914,7 +914,7 @@ describe('spawn mode', () => {
       expect(first.config.get('display.theme')).toBe(value);
     } finally { first.close(); }
 
-    const second = settingsGuardRuntime();
+    const second = (await settingsGuardRuntime());
     try {
       // run() starts at the same turn/call IDs in each fixture. A reused owner
       // must retain its consumed-source refusal, so only a fresh owner can act.
@@ -929,7 +929,7 @@ describe('spawn mode', () => {
   });
 
   test('Agent runtime guard preserves configured settings denial despite caller request text', async () => {
-    const f = settingsGuardRuntime();
+    const f = (await settingsGuardRuntime());
     try {
       const before = f.config.get('behavior.autoApprove');
       const args = { mode: 'set', key: 'behavior.autoApprove', value: !before, confirm: true,
@@ -951,7 +951,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard routes copied runtime context tool to Agent capabilities', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeContextTool());
 
@@ -1003,7 +1003,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard keeps inspect scaffold dry-run-only from the model surface', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeInspectTool());
 
@@ -1033,7 +1033,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard preserves control catalog and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeControlTool());
 
@@ -1052,7 +1052,7 @@ describe('spawn mode', () => {
   test('Agent runtime guard preserves shared analysis modes and provider options', async () => {
     const registry = new ToolRegistry(); registry.register(makeAnalyzeTool());
     const definition = structuredClone(registry.getToolDefinitions()[0]);
-    registry.register(makeAgentHarness().agentTool);
+    registry.register((await makeAgentHarness()).agentTool);
     installAgentToolPolicyGuard(registry);
     expect(registry.getToolDefinitions()[0]).toEqual(definition);
     for (const mode of ['security', 'upgrade', 'semantic_diff']) {
@@ -1064,7 +1064,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard preserves registry content within registry-owned paths', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeRegistryTool());
 
@@ -1109,7 +1109,7 @@ describe('spawn mode', () => {
   test('Agent runtime guard preserves shared search options', async () => {
     const registry = new ToolRegistry(); registry.register(makeFindTool());
     const definition = structuredClone(registry.getToolDefinitions()[0]);
-    registry.register(makeAgentHarness().agentTool);
+    registry.register((await makeAgentHarness()).agentTool);
     installAgentToolPolicyGuard(registry);
     expect(registry.getToolDefinitions()[0]).toEqual(definition);
     for (const args of [
@@ -1128,7 +1128,7 @@ describe('spawn mode', () => {
   test('Agent runtime guard preserves caller-selected web research options', async () => {
     const registry = new ToolRegistry(); registry.register(makeWebSearchTool());
     const definition = structuredClone(registry.getToolDefinitions()[0]);
-    registry.register(makeAgentHarness().agentTool);
+    registry.register((await makeAgentHarness()).agentTool);
     installAgentToolPolicyGuard(registry);
     expect(registry.getToolDefinitions()[0]).toEqual(definition);
     for (const args of [
@@ -1147,7 +1147,7 @@ describe('spawn mode', () => {
 
   test('Agent runtime guard preserves durable catalogs and constrains unadmitted calls', async () => {
     const registry = new ToolRegistry();
-    const guarded = makeAgentHarness();
+    const guarded = (await makeAgentHarness());
     registry.register(guarded.agentTool);
     registry.register(makeDurableModeTool('task', ['create', 'list', 'show', 'status', 'depend', 'cancel', 'handoff', 'handoffs'], [
       'title',

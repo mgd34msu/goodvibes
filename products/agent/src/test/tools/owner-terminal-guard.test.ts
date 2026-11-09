@@ -49,8 +49,8 @@ afterEach(async () => {
 const RULE = 'the owner\'s terminal is untouchable';
 
 /** The same local composition bootstrap-core.ts builds for a live Agent turn. */
-function localTurnTools(): { registry: ToolRegistry; workingDirectory: string } {
-  const services = getTestRuntimeServices();
+async function localTurnTools(): Promise<{ registry: ToolRegistry; workingDirectory: string }> {
+  const services = (await getTestRuntimeServices());
   runtimes.push(services);
   const { toolRegistry: registry } = composeAgentToolRegistry({
     services,
@@ -109,7 +109,7 @@ describe('a local agent turn and the owner\'s tmux', () => {
   });
 
   test('terminal commands are not vetoed by a separate Jev permission check', async () => {
-    const { registry, workingDirectory } = localTurnTools();
+    const { registry, workingDirectory } = (await localTurnTools());
 
     const marker = join(workingDirectory, 'foreign-terminal-ran');
     // A private socket with no server: even if enforcement regresses, the
@@ -126,7 +126,7 @@ describe('a local agent turn and the owner\'s tmux', () => {
   });
 
   test('reading tmux state is not touching it, and still runs', async () => {
-    const { registry, workingDirectory } = localTurnTools();
+    const { registry, workingDirectory } = (await localTurnTools());
 
     // The marker proves the command actually reached the shell:
     // `tmux list-sessions` fails on a host with no tmux server (and on one with
@@ -143,7 +143,7 @@ describe('a local agent turn and the owner\'s tmux', () => {
   });
 
   test('driving the platform\'s OWN session stays allowed', async () => {
-    const { registry, workingDirectory } = localTurnTools();
+    const { registry, workingDirectory } = (await localTurnTools());
 
     const marker = join(workingDirectory, 'owned-terminal-ran');
     const outcome = await runCommand(registry,

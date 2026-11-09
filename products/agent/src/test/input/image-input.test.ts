@@ -24,10 +24,10 @@ function asImageTestAccess(input: InputHandler): InputHandlerImageTestAccess {
   return input as unknown as InputHandlerImageTestAccess;
 }
 
-function makeInput(): InputHandler {
+async function makeInput(): Promise<InputHandler> {
   const sel = new SelectionManager();
   const history = new InfiniteBuffer();
-  return new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+  return new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
 }
 
 function createConfigManager(): ConfigManager {
@@ -44,8 +44,8 @@ function createConfigManager(): ConfigManager {
 // ---------------------------------------------------------------------------
 
 describe('registerPaste base64 image detection', () => {
-  test('detects PNG base64 prefix (iVBORw0KGgo)', () => {
-    const ih = makeInput();
+  test('detects PNG base64 prefix (iVBORw0KGgo)', async () => {
+    const ih = (await makeInput());
     const pngData = 'iVBORw0KGgo' + 'A'.repeat(200);
     const marker = ih.registerPaste(pngData);
     expect(marker).toMatch(/^\[IMAGE: img1, clipboard, \d+KB\]$/);
@@ -56,8 +56,8 @@ describe('registerPaste base64 image detection', () => {
     expect(entry.data).toBe(pngData);
   });
 
-  test('detects JPEG base64 prefix (/9j/)', () => {
-    const ih = makeInput();
+  test('detects JPEG base64 prefix (/9j/)', async () => {
+    const ih = (await makeInput());
     const jpegData = '/9j/' + 'A'.repeat(200);
     const marker = ih.registerPaste(jpegData);
     expect(marker).toMatch(/^\[IMAGE: img1, clipboard, \d+KB\]$/);
@@ -66,8 +66,8 @@ describe('registerPaste base64 image detection', () => {
     expect(entry.mediaType).toBe('image/jpeg');
   });
 
-  test('detects WebP base64 prefix (UklGR)', () => {
-    const ih = makeInput();
+  test('detects WebP base64 prefix (UklGR)', async () => {
+    const ih = (await makeInput());
     const webpData = 'UklGR' + 'A'.repeat(200);
     const marker = ih.registerPaste(webpData);
     expect(marker).toMatch(/^\[IMAGE: img1, clipboard, \d+KB\]$/);
@@ -76,8 +76,8 @@ describe('registerPaste base64 image detection', () => {
     expect(entry.mediaType).toBe('image/webp');
   });
 
-  test('detects GIF base64 prefix (R0lGOD)', () => {
-    const ih = makeInput();
+  test('detects GIF base64 prefix (R0lGOD)', async () => {
+    const ih = (await makeInput());
     const gifData = 'R0lGOD' + 'A'.repeat(200);
     const marker = ih.registerPaste(gifData);
     expect(marker).toMatch(/^\[IMAGE: img1, clipboard, \d+KB\]$/);
@@ -86,8 +86,8 @@ describe('registerPaste base64 image detection', () => {
     expect(entry.mediaType).toBe('image/gif');
   });
 
-  test('short base64-looking strings are not treated as images', () => {
-    const ih = makeInput();
+  test('short base64-looking strings are not treated as images', async () => {
+    const ih = (await makeInput());
     const shortData = 'iVBORw0KGgo' + 'A'.repeat(10);
     const result = ih.registerPaste(shortData);
     // Too short, returned as-is (not a marker)
@@ -95,15 +95,15 @@ describe('registerPaste base64 image detection', () => {
     expect(ih.getImageAttachments().size).toBe(0);
   });
 
-  test('plain text paste returns text directly when <= 8 lines', () => {
-    const ih = makeInput();
+  test('plain text paste returns text directly when <= 8 lines', async () => {
+    const ih = (await makeInput());
     const result = ih.registerPaste('hello world');
     expect(result).toBe('hello world');
     expect(ih.getImageAttachments().size).toBe(0);
   });
 
-  test('IDs increment per paste', () => {
-    const ih = makeInput();
+  test('IDs increment per paste', async () => {
+    const ih = (await makeInput());
     const pngData = 'iVBORw0KGgo' + 'A'.repeat(200);
     const m1 = ih.registerPaste(pngData);
     const m2 = ih.registerPaste(pngData);
@@ -200,15 +200,15 @@ describe('handleClipboardPaste', () => {
 // ---------------------------------------------------------------------------
 
 describe('expandPrompt', () => {
-  test('with no images returns plain string', () => {
-    const ih = makeInput();
+  test('with no images returns plain string', async () => {
+    const ih = (await makeInput());
     const result = asImageTestAccess(ih).expandPrompt('hello world');
     expect(typeof result).toBe('string');
     expect(result).toBe('hello world');
   });
 
-  test('with TEXT marker expands to content string', () => {
-    const ih = makeInput();
+  test('with TEXT marker expands to content string', async () => {
+    const ih = (await makeInput());
     // Manually inject into pasteRegistry
     asImageTestAccess(ih).pasteRegistry.set('p1', 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9');
     const result = asImageTestAccess(ih).expandPrompt('before [TEXT: p1, 9 lines] after');
@@ -217,8 +217,8 @@ describe('expandPrompt', () => {
     expect(result).toContain('line9');
   });
 
-  test('with IMAGE marker returns ContentPart[]', () => {
-    const ih = makeInput();
+  test('with IMAGE marker returns ContentPart[]', async () => {
+    const ih = (await makeInput());
     const pngData = 'iVBORw0KGgo' + 'A'.repeat(200);
     const marker = ih.registerPaste(pngData);
     // marker = "[IMAGE: img1, clipboard, NKB]"
@@ -233,8 +233,8 @@ describe('expandPrompt', () => {
     expect(imageParts[0].data).toBe(pngData);
   });
 
-  test('expandPrompt maps image IDs from markers to registry (not positional)', () => {
-    const ih = makeInput();
+  test('expandPrompt maps image IDs from markers to registry (not positional)', async () => {
+    const ih = (await makeInput());
     const pngData = 'iVBORw0KGgo' + 'A'.repeat(200);
     const gifData = 'R0lGOD' + 'A'.repeat(200);
     const m1 = ih.registerPaste(pngData);
@@ -322,10 +322,10 @@ describe('Orchestrator capability check for non-multimodal models', () => {
       },
     });
     orch.setCoreServices({
-      providerRegistry: getTestProviderRegistry(),
+      providerRegistry: (await getTestProviderRegistry()),
       configManager,
     });
-    const providerRegistry = getTestProviderRegistry();
+    const providerRegistry = (await getTestProviderRegistry());
 
     // Inject a non-multimodal model into provider registry for this test
     const originalGetCurrentModel = providerRegistry.getCurrentModel.bind(providerRegistry);

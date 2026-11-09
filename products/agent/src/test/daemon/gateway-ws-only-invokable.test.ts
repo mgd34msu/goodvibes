@@ -28,7 +28,7 @@
  * `pluginManager.init({ gatewayMethods })`, so a loaded plugin can register
  * verbs into it, and those same two probes are what pick them up.
  */
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 /**
@@ -64,7 +64,8 @@ const DAEMON_SERVED_METHOD_IDS = [
 ] as const;
 
 describe('this process serves no gateway verb', () => {
-  const services = getTestRuntimeServices();
+  let services: Awaited<ReturnType<typeof getTestRuntimeServices>>;
+  beforeAll(async () => { services = await getTestRuntimeServices(); });
 
   for (const methodId of DAEMON_SERVED_METHOD_IDS) {
     test(`${methodId} has no handler here, the daemon serves it`, () => {
@@ -96,7 +97,8 @@ describe('this process serves no gateway verb', () => {
 });
 
 describe('the catalog is kept for the consumers that are actually live', () => {
-  const services = getTestRuntimeServices();
+  let services: Awaited<ReturnType<typeof getTestRuntimeServices>>;
+  beforeAll(async () => { services = await getTestRuntimeServices(); });
 
   test('occasions and profile verbs are unhandled here, so those tools use the connected host', () => {
     // The daemon owns the owner-profile Markdown file. One file, one writer:

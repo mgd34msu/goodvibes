@@ -65,16 +65,16 @@ function readings(fits: Readonly<Record<string, number>>) {
   });
 }
 const options = () => ({ sourceOwner: ordinaryResearchOwner() });
-let watcherRuntime: ReturnType<typeof getTestRuntimeServices> | undefined;
+let watcherRuntime: Awaited<ReturnType<typeof getTestRuntimeServices>> | undefined;
 
-function watcherReadModelFixture(state: WatcherRecord['state'], outputPreview: string) {
+async function watcherReadModelFixture(state: WatcherRecord['state'], outputPreview: string) {
   const watcher = {
     id: 'fixture-watcher', kind: 'manual', label: 'Synthetic watcher', state,
     source: { id: 'fixture-source', kind: 'watcher', label: 'Synthetic source', enabled: true,
       createdAt: 1, updatedAt: 1, metadata: {} },
     metadata: { outputPreview },
   } satisfies WatcherRecord;
-  const services = getTestRuntimeServices(), dispatch = createDomainDispatch(services.runtimeStore);
+  const services = (await getTestRuntimeServices()), dispatch = createDomainDispatch(services.runtimeStore);
   watcherRuntime = services;
   const publish = () => { dispatch.syncWatcher(watcher); };
   publish();
@@ -235,12 +235,12 @@ describe('canonical semantic record catalogs', () => {
     expect(fake.requests).toHaveLength(0);
   });
 
-  test('watcher startup counts use native facts without reading producer prose', () => {
+  test('watcher startup counts use native facts without reading producer prose', async () => {
     const fake = readings({}); installJudgmentPort(fake.port);
     const f = fixture(), baseline = autonomyQueueCatalogStatus(f.context);
     expect(baseline.methodReadiness).toBe('pending');
     expect(Number(baseline.blocked)).toBeGreaterThanOrEqual(4);
-    const { watcher, readModel, readModels, publish } = watcherReadModelFixture('running', 'Synthetic watcher output');
+    const { watcher, readModel, readModels, publish } = (await watcherReadModelFixture('running', 'Synthetic watcher output'));
     const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
     expect(autonomyQueueCatalogStatus(context).active).toBe(Number(baseline.active) + 1);
     watcher.state = 'failed'; publish();
@@ -253,7 +253,7 @@ describe('canonical semantic record catalogs', () => {
   });
 
   test('literal queue reads await complete watcher privacy and retain producer source through publication', async () => {
-    const f = fixture(), { watcher, readModel, readModels, publish } = watcherReadModelFixture('running', 'Complete synthetic watcher output');
+    const f = fixture(), { watcher, readModel, readModels, publish } = (await watcherReadModelFixture('running', 'Complete synthetic watcher output'));
     const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
     const fake = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'other', 0.999) : noulAnswer(0.001));
     installJudgmentPort(fake.port);
@@ -269,7 +269,7 @@ describe('canonical semantic record catalogs', () => {
   });
 
   test('a watcher changing during whole DTO privacy cannot publish an old literal queue', async () => {
-    const f = fixture(), { watcher, readModel, readModels, publish } = watcherReadModelFixture('running', 'Initial synthetic watcher output');
+    const f = fixture(), { watcher, readModel, readModels, publish } = (await watcherReadModelFixture('running', 'Initial synthetic watcher output'));
     const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
     const fake = fakePort((_name, question) => question.type === 'choice' ? choiceAnswer(question, 'other', 0.999) : noulAnswer(0.001));
     let changed = false;
@@ -289,7 +289,7 @@ describe('canonical semantic record catalogs', () => {
 
   for (const replacement of ['source', 'getSnapshot', 'getSnapshot-accessor']) {
     test(`native watcher ${replacement} replacement during privacy holds publication without calling the replacement`, async () => {
-      const f = fixture(), { readModel, readModels } = watcherReadModelFixture('running', 'Synthetic native watcher output');
+      const f = fixture(), { readModel, readModels } = (await watcherReadModelFixture('running', 'Synthetic native watcher output'));
       const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
       const snapshot = readModel.getSnapshot(), fake = readings({});
       let changed = false, touched = 0, published = 0;
@@ -309,7 +309,7 @@ describe('canonical semantic record catalogs', () => {
   }
 
   test('native watcher snapshot accessors hold before reading a getter or asking privacy', async () => {
-    const f = fixture(), { readModel, readModels } = watcherReadModelFixture('running', 'Synthetic native watcher output');
+    const f = fixture(), { readModel, readModels } = (await watcherReadModelFixture('running', 'Synthetic native watcher output'));
     const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
     let touched = 0;
     Object.defineProperty(readModel, 'getSnapshot', { get() { touched++; return () => ({}); } });
@@ -319,7 +319,7 @@ describe('canonical semantic record catalogs', () => {
   });
 
   test('native watcher unsupported state stays unknown after privacy without a semantic status fallback', async () => {
-    const f = fixture(), { watcher, readModel, readModels, publish } = watcherReadModelFixture('running', 'Synthetic native watcher output');
+    const f = fixture(), { watcher, readModel, readModels, publish } = (await watcherReadModelFixture('running', 'Synthetic native watcher output'));
     Object.defineProperty(watcher, 'state', { value: 'The watcher is currently running according to this prose.',
       writable: true, enumerable: true, configurable: true });
     publish();
@@ -332,7 +332,7 @@ describe('canonical semantic record catalogs', () => {
   });
 
   test('native watcher snapshot protects undisplayed metadata before publishing its actual state and usable preview', async () => {
-    const f = fixture(), { watcher, readModel, readModels, publish } = watcherReadModelFixture('running', 'Synthetic native watcher preview');
+    const f = fixture(), { watcher, readModel, readModels, publish } = (await watcherReadModelFixture('running', 'Synthetic native watcher preview'));
     Object.defineProperty(watcher.source.metadata, 'undisplayed', { value: 'Synthetic undisplayed native source evidence', enumerable: false });
     publish();
     const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
@@ -346,7 +346,7 @@ describe('canonical semantic record catalogs', () => {
   });
 
   test('native watcher cancellation after a noncooperating privacy answer prevents publication', async () => {
-    const f = fixture(), { readModel, readModels } = watcherReadModelFixture('running', 'Synthetic native watcher output');
+    const f = fixture(), { readModel, readModels } = (await watcherReadModelFixture('running', 'Synthetic native watcher output'));
     const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
     const controller = new AbortController(), fake = readings({});
     let published = 0;
@@ -359,7 +359,7 @@ describe('canonical semantic record catalogs', () => {
   });
 
   test('native watcher store notifications retain a changed-and-restored snapshot during privacy', async () => {
-    const f = fixture(), { watcher, readModel, readModels, publish } = watcherReadModelFixture('running', 'Original native watcher output');
+    const f = fixture(), { watcher, readModel, readModels, publish } = (await watcherReadModelFixture('running', 'Original native watcher output'));
     const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
     const fake = readings({}); let changed = false, published = 0;
     installJudgmentPort({ ...fake.port, async ask(request) {
@@ -377,7 +377,7 @@ describe('canonical semantic record catalogs', () => {
   });
 
   test('native watcher publication retains a real recorded manager admission across permission revocation', async () => {
-    const f = fixture(), { readModel, readModels } = watcherReadModelFixture('running', 'Synthetic native watcher output');
+    const f = fixture(), { readModel, readModels } = (await watcherReadModelFixture('running', 'Synthetic native watcher output'));
     const context: CommandContext = { ...f.context, platform: { ...f.context.platform, readModels } };
     let mode: PermissionMode = 'prompt', entered = false, revoked = false, published = 0;
     const directory = '/synthetic/native-watcher-read';

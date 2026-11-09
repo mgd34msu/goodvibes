@@ -29,14 +29,19 @@
  * a CLIENT graph. It says nothing about what the daemon-grade view actually
  * constructed, which is what this file covers.
  */
-import { describe, expect, test } from 'bun:test';
+import { beforeAll, describe, expect, test } from 'bun:test';
 import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 describe('binding-rollover wiring is reachable on this fork\'s composed graph', () => {
-  const services = getTestRuntimeServices();
+  let services: Awaited<ReturnType<typeof getTestRuntimeServices>>;
+  let view: ReturnType<typeof services.asDaemonGradeView>;
+  beforeAll(async () => {
+    services = await getTestRuntimeServices();
+    view = services.asDaemonGradeView();
+  });
   // What the platform is actually handed. `services.sessionBroker` is the client
   // dispatch seam and carries none of these methods by design.
-  const view = services.asDaemonGradeView();
+
 
   test('the view carries the three members the facade wires the rollover through', () => {
     expect(view.sessionBroker).toBeTruthy();

@@ -31,10 +31,10 @@ const CTRL_V = '\x16';
 /** The byte a terminal sends for Ctrl+Z. */
 const CTRL_Z = '\x1a';
 
-function makeInput(): InputHandler {
+async function makeInput(): Promise<InputHandler> {
   const handler = new InputHandler(
     () => {}, new SelectionManager(), () => 0, () => 20,
-    () => new InfiniteBuffer(), () => {}, () => {}, createDefaultUiRuntimeServices(),
+    () => new InfiniteBuffer(), () => {}, () => {}, (await createDefaultUiRuntimeServices()),
   );
   handler.setContentWidth(80);
   // The composer must never reach for the machine's real clipboard in a test.
@@ -51,8 +51,8 @@ describe('Ctrl+V with an image on the clipboard', () => {
     textOnClipboard = '';
   });
 
-  test('the image marker survives the keystroke and is visible in the composer', () => {
-    const input = makeInput();
+  test('the image marker survives the keystroke and is visible in the composer', async () => {
+    const input = (await makeInput());
     expect(input.prompt).toBe('');
 
     input.feed(CTRL_V);
@@ -63,8 +63,8 @@ describe('Ctrl+V with an image on the clipboard', () => {
     expect(input.cursorPos).toBe(input.prompt.length);
   });
 
-  test('the pasted image is held as a real attachment, not just marker text', () => {
-    const input = makeInput();
+  test('the pasted image is held as a real attachment, not just marker text', async () => {
+    const input = (await makeInput());
     input.feed(CTRL_V);
 
     const attachments = input.getImageAttachments();
@@ -74,8 +74,8 @@ describe('Ctrl+V with an image on the clipboard', () => {
     expect(stored?.data).toBe(clipboardImage.data);
   });
 
-  test('the attachment reaches the outgoing message as an image part', () => {
-    const input = makeInput();
+  test('the attachment reaches the outgoing message as an image part', async () => {
+    const input = (await makeInput());
     input.feed(CTRL_V);
     // Type a question alongside the image, the way someone actually would.
     input.feed('what is this?');
@@ -95,8 +95,8 @@ describe('Ctrl+V with an image on the clipboard', () => {
     expect(text).not.toContain('[IMAGE:');
   });
 
-  test('pasting twice attaches both images', () => {
-    const input = makeInput();
+  test('pasting twice attaches both images', async () => {
+    const input = (await makeInput());
     input.feed(CTRL_V);
     input.feed(' and ');
     input.feed(CTRL_V);
@@ -106,8 +106,8 @@ describe('Ctrl+V with an image on the clipboard', () => {
     expect(parts.filter(p => p.type === 'image').length).toBe(2);
   });
 
-  test('cursor position is preserved so typing continues after the marker', () => {
-    const input = makeInput();
+  test('cursor position is preserved so typing continues after the marker', async () => {
+    const input = (await makeInput());
     input.feed('look: ');
     const beforePaste = input.cursorPos;
     input.feed(CTRL_V);
@@ -126,17 +126,17 @@ describe('Ctrl+V with no image on the clipboard', () => {
     textOnClipboard = '';
   });
 
-  test('falls back to clipboard text', () => {
+  test('falls back to clipboard text', async () => {
     textOnClipboard = 'pasted words';
-    const input = makeInput();
+    const input = (await makeInput());
     input.feed(CTRL_V);
 
     expect(input.prompt).toBe('pasted words');
     expect(input.getImageAttachments().size).toBe(0);
   });
 
-  test('an empty clipboard leaves the composer untouched', () => {
-    const input = makeInput();
+  test('an empty clipboard leaves the composer untouched', async () => {
+    const input = (await makeInput());
     input.feed('typed already');
     input.feed(CTRL_V);
 
@@ -150,9 +150,9 @@ describe('the same copy-back path for undo', () => {
     textOnClipboard = '';
   });
 
-  test('Ctrl+Z after a paste actually removes what was pasted', () => {
+  test('Ctrl+Z after a paste actually removes what was pasted', async () => {
     textOnClipboard = 'some pasted text';
-    const input = makeInput();
+    const input = (await makeInput());
     input.feed('keep this ');
     input.feed(CTRL_V);
     expect(input.prompt).toBe('keep this some pasted text');

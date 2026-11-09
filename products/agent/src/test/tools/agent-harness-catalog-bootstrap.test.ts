@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { afterAll, expect, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -9,7 +10,6 @@ import { fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { bindAgentResearchSourceOwner } from '../../agent/protected-research-report.ts';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
 import { registerAgentTools } from '../../runtime/bootstrap-agent-tools.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { cleanupResearchScreeningFixtures, researchScreeningFixture } from '../helpers/research-screening.ts';
@@ -20,7 +20,7 @@ test('actual default Agent registration fits full protected schema bounds before
   const root = makeProjectTempDir('agent-catalog-bootstrap');
   execFileSync('git', ['init', '-q'], { cwd: root });
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, '.goodvibes', 'agent') });
-  const services = createRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: root, modelDiscovery: 'skip' });
+  const services = (await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: root, modelDiscovery: 'skip' }));
   const screening = researchScreeningFixture();
   const screen = screening.owner.screen.bind(screening.owner);
   const screeningStatus = spyOn(screening.owner, 'screen').mockImplementation(async handle => {

@@ -1,10 +1,11 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -44,7 +45,7 @@ function makeRoot(): string {
 }
 
 describe('provider registry launch tolerance', () => {
-  test('runtime services launch without local OpenAI credentials', () => {
+  test('runtime services launch without local OpenAI credentials', async () => {
     for (const envVar of launchToleranceEnvVars) {
       delete process.env[envVar];
     }
@@ -56,7 +57,7 @@ describe('provider registry launch tolerance', () => {
       homeDir: root,
       configDir: join(root, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT),
     });
-    const services = createRuntimeServices({
+    const services = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
@@ -64,7 +65,7 @@ describe('provider registry launch tolerance', () => {
       configManager,
       workingDir: root,
       homeDirectory: root,
-    });
+    }));
     runtimes.push(services);
     const provider = services.providerRegistry.get('openai');
 

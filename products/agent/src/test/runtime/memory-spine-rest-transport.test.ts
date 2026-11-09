@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * The memory-spine REST transport (memory-spine-rest-transport.ts) against a REAL
  * daemon, a live DaemonServer bound to a reserved ephemeral port (port 0), never
@@ -21,7 +22,7 @@ import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/securit
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
 import type { MemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { createMemorySpineRestTransport, type MemorySpineRestTransportOptions } from '../../runtime/memory-spine-rest-transport.ts';
 import type { SessionRegistrationConnection } from '../../runtime/session-spine-rest-transport.ts';
@@ -85,7 +86,7 @@ describe('memory-spine REST transport against a real daemon', () => {
     mkdirSync(workingDir, { recursive: true });
     mkdirSync(homeDir, { recursive: true });
     port = await reservePort();
-    daemonServices = createRuntimeServices({
+    daemonServices = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeStore: createRuntimeStore(),
@@ -95,7 +96,7 @@ describe('memory-spine REST transport against a real daemon', () => {
       homeDirectory: homeDir,
       featureFlags: createFeatureFlagManager(),
       getConversationTitle: () => 'memory-spine-transport-test',
-    });
+    }));
     // Composition installs its own port. Replace it only after the graph exists,
     // with the explicit reading for this file's one semantic-search fixture.
     const readings = fakePort((name, _question, state) => {

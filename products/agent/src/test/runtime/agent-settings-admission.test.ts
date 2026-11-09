@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * SETTINGS effect-owner acceptance on the isolated settings slice.
  * Recorded judgment I/O is synthetic; Agent composition, registry, manager,
@@ -21,7 +22,7 @@ import { withTurnSurface } from '@goodvibes-jev/engine/platform/platform/securit
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { launchSettingsHttpHost } from '../helpers/settings-http-host.ts';
@@ -109,11 +110,11 @@ async function fixture(remote?: 'normal' | 'lost-response', readOnly = false) {
   // Seed the synthetic starting state before the real client floor arms its
   // file watcher. No admission-generation exemption or watcher disable is used.
   if (!readOnly) { configManager.set('permissions.mode', 'prompt'); configManager.set('display.theme', 'vaporwave'); }
-  const runtime = createRuntimeServices({
+  const runtime = (await createPreparedAgentRuntimeServices({
     modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
     configManager,
     workingDir: workspace, homeDirectory: home, getConversationTitle: () => 'read/settings acceptance',
-  });
+  }));
   runtimes.push(runtime);
   // Runtime construction owns the production installation; replace only its I/O.
   installJudgmentPort(recordedPort());

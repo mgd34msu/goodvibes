@@ -1,10 +1,11 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '../../config/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 describe('Agent memory storage path', () => {
@@ -15,11 +16,11 @@ describe('Agent memory storage path', () => {
     root = '';
   });
 
-  function makeRuntimeServices(): {
+  async function makeRuntimeServices(): Promise<{
     readonly services: RuntimeServices;
     readonly workingDir: string;
     readonly homeDir: string;
-  } {
+  }> {
     root = makeProjectTempDir('goodvibes-agent-memory-path');
     const workingDir = join(root, 'workspace');
     const homeDir = join(root, 'home');
@@ -32,7 +33,7 @@ describe('Agent memory storage path', () => {
       configDir: join(homeDir, '.goodvibes', 'agent'),
     });
     return {
-      services: createRuntimeServices({
+      services: (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
         runtimeBus: new RuntimeEventBus(),
@@ -40,14 +41,14 @@ describe('Agent memory storage path', () => {
         configManager,
         workingDir,
         homeDirectory: homeDir,
-      }),
+      })),
       workingDir,
       homeDir,
     };
   }
 
   test('runtime memory store is Agent-home owned instead of workspace owned', async () => {
-    const { services, workingDir, homeDir } = makeRuntimeServices();
+    const { services, workingDir, homeDir } = (await makeRuntimeServices());
     // The agent opens the ONE canonical cross-surface store under the
     // Agent home (~/.goodvibes/shared/memory.sqlite) rather than a private per-surface
     // agent/memory.sqlite, a fact learned here must recall in the TUI and vice-versa.

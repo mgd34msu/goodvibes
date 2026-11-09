@@ -32,7 +32,7 @@ describe('DirectTransport', () => {
   });
 
   test('exposes operator and peer clients over one in-process transport', async () => {
-    const runtimeServices = getTestRuntimeServices();
+    const runtimeServices = (await getTestRuntimeServices());
     runtimeServices.distributedRuntime.pairRequests.clear();
     runtimeServices.distributedRuntime.peers.clear();
     runtimeServices.distributedRuntime.work.clear();
@@ -104,7 +104,7 @@ describe('DirectTransport', () => {
   });
 
   test('can be created from the narrowed foundation boundary', async () => {
-    const runtimeServices = getTestRuntimeServices();
+    const runtimeServices = (await getTestRuntimeServices());
     const services = createDirectTransportServices(runtimeServices.asDaemonGradeView());
 
     const transport = createDirectTransportFromServices(services);
@@ -125,8 +125,8 @@ describe('DirectTransport', () => {
     expect(transport.operator.sessions.get(session.id)?.title).toBe('Direct Transport From Services');
   });
 
-  test('exposes a generic direct client adapter for shared runtime client surfaces', () => {
-    const runtimeServices = getTestRuntimeServices();
+  test('exposes a generic direct client adapter for shared runtime client surfaces', async () => {
+    const runtimeServices = (await getTestRuntimeServices());
     const services = createDirectTransportServices(runtimeServices.asDaemonGradeView());
     const operator = createOperatorClient(services.operator);
     const peer = createPeerClient(services.peer);

@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * The agent's own memory-spine wiring (services.ts's memorySpineClient +
  * memorySpineTransport, and the reconcileMemorySpineAdoption policy bootstrap.ts
@@ -25,7 +26,7 @@ import { DaemonServer } from '@goodvibes-jev/engine/platform/platform/daemon';
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createFeatureFlagManager } from '@/runtime/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { reconcileMemorySpineAdoption } from '../../runtime/memory-spine-adoption.ts';
 import { createSpineConnectionResolver } from '../../runtime/session-spine-rest-transport.ts';
@@ -57,8 +58,8 @@ function createUserAuth(homeDir: string): UserAuthManager {
   });
 }
 
-function buildAgentServices(homeDir: string, workingDir: string): RuntimeServices {
-  return createRuntimeServices({
+async function buildAgentServices(homeDir: string, workingDir: string): Promise<RuntimeServices> {
+  return (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
     runtimeStore: createRuntimeStore(),
@@ -68,7 +69,7 @@ function buildAgentServices(homeDir: string, workingDir: string): RuntimeService
     homeDirectory: homeDir,
     featureFlags: createFeatureFlagManager(),
     getConversationTitle: () => 'memory-spine-agent-wiring-test',
-  });
+  }));
 }
 
 /** A reachability probe against a REAL connection, reusing the same probe the agent uses in production. */
@@ -89,7 +90,7 @@ describe('agent memory-spine wiring', () => {
     const agentWorkingDir = join(agentRoot, 'agent-workspace');
     mkdirSync(agentHomeDir, { recursive: true });
     mkdirSync(agentWorkingDir, { recursive: true });
-    agentServices = buildAgentServices(agentHomeDir, agentWorkingDir);
+    agentServices = (await buildAgentServices(agentHomeDir, agentWorkingDir));
     await agentServices.memoryStore.init();
     // NEVER rely on the default controlPlane port (3421) to mean "unreachable",
     // this is a real developer machine and a real goodvibes daemon may genuinely be
@@ -135,7 +136,7 @@ describe('agent memory-spine wiring', () => {
       mkdirSync(daemonHomeDir, { recursive: true });
       mkdirSync(daemonWorkingDir, { recursive: true });
       port = await reservePort();
-      daemonServices = createRuntimeServices({
+      daemonServices = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
         runtimeStore: createRuntimeStore(),
@@ -145,7 +146,7 @@ describe('agent memory-spine wiring', () => {
         homeDirectory: daemonHomeDir,
         featureFlags: createFeatureFlagManager(),
         getConversationTitle: () => 'memory-spine-daemon-side',
-      });
+      }));
       daemon = new DaemonServer({ port, host: '127.0.0.1', runtimeServices: daemonServices.asDaemonGradeView(), userAuth: createUserAuth(daemonHomeDir) });
       daemon.enable({ daemon: true }, TEST_TOKEN);
       await daemon.start();

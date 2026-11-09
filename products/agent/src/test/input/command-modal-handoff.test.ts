@@ -328,7 +328,7 @@ describe('command modal handoff', () => {
         () => history,
         () => {},
         () => {},
-        createDefaultUiRuntimeServices(),
+        (await createDefaultUiRuntimeServices()),
       );
       input.setContentWidth(80);
 

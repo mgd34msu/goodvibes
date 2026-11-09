@@ -8,23 +8,23 @@ beforeEach(() => {
 });
 
 describe('runtime ownership', () => {
-  test('test runtime exposes one message bus per runtime graph', () => {
-    const a = getTestAgentMessageBus();
-    const b = getTestAgentMessageBus();
+  test('test runtime exposes one message bus per runtime graph', async () => {
+    const a = (await getTestAgentMessageBus());
+    const b = (await getTestAgentMessageBus());
     expect(a).toBe(b);
   });
 
-  test('resetting the test runtime creates a fresh message bus', () => {
-    const a = getTestAgentMessageBus();
+  test('resetting the test runtime creates a fresh message bus', async () => {
+    const a = (await getTestAgentMessageBus());
     resetTestRuntimeServices();
-    const b = getTestAgentMessageBus();
+    const b = (await getTestAgentMessageBus());
     expect(a).not.toBe(b);
   });
 });
 
 describe('send', () => {
-  test('send stores message for recipient', () => {
-    const bus = getTestAgentMessageBus();
+  test('send stores message for recipient', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.send('agent-a', 'agent-b', 'Hello from A');
     const msgs = bus.getMessages('agent-b');
     expect(msgs).toHaveLength(1);
@@ -33,8 +33,8 @@ describe('send', () => {
     expect(msgs[0].to).toBe('agent-b');
   });
 
-  test('send assigns unique ID and timestamp', () => {
-    const bus = getTestAgentMessageBus();
+  test('send assigns unique ID and timestamp', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.send('agent-a', 'agent-b', 'msg1');
     bus.send('agent-a', 'agent-b', 'msg2');
     const msgs = bus.getMessages('agent-b');
@@ -42,8 +42,8 @@ describe('send', () => {
     expect(typeof msgs[0].timestamp).toBe('number');
   });
 
-  test('send delivers to active subscriber', () => {
-    const bus = getTestAgentMessageBus();
+  test('send delivers to active subscriber', async () => {
+    const bus = (await getTestAgentMessageBus());
     const received: AgentMessage[] = [];
     bus.subscribe('agent-b', (m) => received.push(m));
     bus.send('agent-a', 'agent-b', 'Ping');
@@ -51,16 +51,16 @@ describe('send', () => {
     expect(received[0].content).toBe('Ping');
   });
 
-  test('send does not deliver to other agents subscribers', () => {
-    const bus = getTestAgentMessageBus();
+  test('send does not deliver to other agents subscribers', async () => {
+    const bus = (await getTestAgentMessageBus());
     const receivedC: AgentMessage[] = [];
     bus.subscribe('agent-c', (m) => receivedC.push(m));
     bus.send('agent-a', 'agent-b', 'Only for B');
     expect(receivedC).toHaveLength(0);
   });
 
-  test('multiple messages are stored in order', () => {
-    const bus = getTestAgentMessageBus();
+  test('multiple messages are stored in order', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.send('agent-a', 'agent-b', 'first');
     bus.send('agent-a', 'agent-b', 'second');
     bus.send('agent-a', 'agent-b', 'third');
@@ -69,8 +69,8 @@ describe('send', () => {
     expect(msgs.map((m) => m.content)).toEqual(['first', 'second', 'third']);
   });
 
-  test('enforces direct-route policy when both sender and recipient are registered', () => {
-    const bus = getTestAgentMessageBus();
+  test('enforces direct-route policy when both sender and recipient are registered', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.registerAgent({ agentId: 'engineer-1', role: 'engineer', contractId: 'wrfc-1' });
     bus.registerAgent({ agentId: 'reviewer-1', role: 'reviewer', contractId: 'wrfc-1' });
 
@@ -88,8 +88,8 @@ describe('send', () => {
     expect(msgs[0]?.toRole).toBe('engineer');
   });
 
-  test('blocks direct routes outside the registered communication policy', () => {
-    const bus = getTestAgentMessageBus();
+  test('blocks direct routes outside the registered communication policy', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.registerAgent({ agentId: 'reviewer-1', role: 'reviewer', contractId: 'wrfc-1' });
     bus.registerAgent({ agentId: 'general-1', role: 'general', cohort: 'team-1' });
 
@@ -107,8 +107,8 @@ describe('send', () => {
 // ---------------------------------------------------------------------------
 
 describe('broadcast', () => {
-  test('broadcast stores under wildcard', () => {
-    const bus = getTestAgentMessageBus();
+  test('broadcast stores under wildcard', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.broadcast('agent-a', 'All hands');
     // All agents see broadcasts via getMessages
     const msgs = bus.getMessages('agent-b');
@@ -116,8 +116,8 @@ describe('broadcast', () => {
     expect(msgs.find((m) => m.content === 'All hands')?.to).toBe('*');
   });
 
-  test('broadcast delivers to all subscribers', () => {
-    const bus = getTestAgentMessageBus();
+  test('broadcast delivers to all subscribers', async () => {
+    const bus = (await getTestAgentMessageBus());
     const receivedB: AgentMessage[] = [];
     const receivedC: AgentMessage[] = [];
     bus.subscribe('agent-b', (m) => receivedB.push(m));
@@ -128,15 +128,15 @@ describe('broadcast', () => {
     expect(receivedB[0].content).toBe('Announcement');
   });
 
-  test('broadcast included in getMessages for any agent', () => {
-    const bus = getTestAgentMessageBus();
+  test('broadcast included in getMessages for any agent', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.broadcast('agent-a', 'Global');
     expect(bus.getMessages('agent-x').map((m) => m.content)).toContain('Global');
     expect(bus.getMessages('agent-y').map((m) => m.content)).toContain('Global');
   });
 
-  test('blocks broadcast for registered roles outside broadcast policy', () => {
-    const bus = getTestAgentMessageBus();
+  test('blocks broadcast for registered roles outside broadcast policy', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.registerAgent({ agentId: 'reviewer-1', role: 'reviewer', contractId: 'wrfc-1' });
 
     const allowed = bus.broadcast('reviewer-1', 'Everyone listen up', {
@@ -153,8 +153,8 @@ describe('broadcast', () => {
 // ---------------------------------------------------------------------------
 
 describe('subscribe', () => {
-  test('subscribe returns unsubscribe function', () => {
-    const bus = getTestAgentMessageBus();
+  test('subscribe returns unsubscribe function', async () => {
+    const bus = (await getTestAgentMessageBus());
     const received: AgentMessage[] = [];
     const unsub = bus.subscribe('agent-b', (m) => received.push(m));
     bus.send('agent-a', 'agent-b', 'before unsub');
@@ -164,8 +164,8 @@ describe('subscribe', () => {
     expect(received[0].content).toBe('before unsub');
   });
 
-  test('multiple subscribers for same agent all receive messages', () => {
-    const bus = getTestAgentMessageBus();
+  test('multiple subscribers for same agent all receive messages', async () => {
+    const bus = (await getTestAgentMessageBus());
     const r1: AgentMessage[] = [];
     const r2: AgentMessage[] = [];
     bus.subscribe('agent-b', (m) => r1.push(m));
@@ -175,8 +175,8 @@ describe('subscribe', () => {
     expect(r2).toHaveLength(1);
   });
 
-  test('subscriber error does not crash the bus', () => {
-    const bus = getTestAgentMessageBus();
+  test('subscriber error does not crash the bus', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.subscribe('agent-b', () => {
       throw new Error('subscriber crash');
     });
@@ -189,13 +189,13 @@ describe('subscribe', () => {
 // ---------------------------------------------------------------------------
 
 describe('getMessages', () => {
-  test('returns empty array when no messages', () => {
-    const bus = getTestAgentMessageBus();
+  test('returns empty array when no messages', async () => {
+    const bus = (await getTestAgentMessageBus());
     expect(bus.getMessages('agent-nobody')).toEqual([]);
   });
 
-  test('returns direct messages and broadcasts combined', () => {
-    const bus = getTestAgentMessageBus();
+  test('returns direct messages and broadcasts combined', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.send('agent-a', 'agent-b', 'direct');
     bus.broadcast('agent-a', 'broadcast');
     const msgs = bus.getMessages('agent-b');
@@ -205,8 +205,8 @@ describe('getMessages', () => {
     ]);
   });
 
-  test('messages sorted by timestamp ascending', () => {
-    const bus = getTestAgentMessageBus();
+  test('messages sorted by timestamp ascending', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.send('agent-a', 'agent-b', 'msg1');
     bus.send('agent-a', 'agent-b', 'msg2');
     const msgs = bus.getMessages('agent-b');
@@ -219,8 +219,8 @@ describe('getMessages', () => {
 // ---------------------------------------------------------------------------
 
 describe('TTL and cleanup', () => {
-  test('expired messages are not returned', () => {
-    const bus = getTestAgentMessageBus();
+  test('expired messages are not returned', async () => {
+    const bus = (await getTestAgentMessageBus());
     // Send with 0 ms TTL, already expired by the time we read
     bus.send('agent-a', 'agent-b', 'expired', 0);
     const msgs = bus.getMessages('agent-b');
@@ -228,15 +228,15 @@ describe('TTL and cleanup', () => {
     expect(msgs.filter((m) => m.content === 'expired')).toHaveLength(0);
   });
 
-  test('non-expired messages survive cleanup', () => {
-    const bus = getTestAgentMessageBus();
+  test('non-expired messages survive cleanup', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.send('agent-a', 'agent-b', 'alive', 60_000);
     bus.cleanup();
     expect(bus.getMessages('agent-b').map((m) => m.content)).toEqual(['alive']);
   });
 
-  test('cleanup removes only expired messages', () => {
-    const bus = getTestAgentMessageBus();
+  test('cleanup removes only expired messages', async () => {
+    const bus = (await getTestAgentMessageBus());
     bus.send('agent-a', 'agent-b', 'expired', 0);
     bus.send('agent-a', 'agent-b', 'alive', 60_000);
     bus.cleanup();

@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -12,7 +13,6 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { MemoryEmbeddingProviderRegistry, MemoryRegistry, MemoryStore } from '@goodvibes-jev/engine/platform/platform/state';
 import { createLocalMemoryAccess } from '@goodvibes-jev/engine/platform/platform/runtime/memory-spine';
 import { createShellPathService, RuntimeEventBus } from '@/runtime/index.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { containsSecretLikeText, assertNoSecretLikeMemoryText } from '../../agent/memory-safety.ts';
@@ -144,11 +144,11 @@ describe('Agent memory issuer protection', () => {
     mkdirSync(configDir, { recursive: true });
     execFileSync('git', ['init', '-q'], { cwd: workspace, timeout: 30_000 });
     const previous = installJudgmentPort(undefined);
-    const services = createRuntimeServices({
+    const services = (await createPreparedAgentRuntimeServices({
       modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
       configManager: new ConfigManager({ surfaceRoot: 'agent', workingDir: workspace, homeDir, configDir }),
       workingDir: workspace, homeDirectory: homeDir, getConversationTitle: () => 'memory-issuer-bootstrap',
-    });
+    }));
     // Construction installs a production provider; the tested path must need none.
     installJudgmentPort(undefined);
     try {

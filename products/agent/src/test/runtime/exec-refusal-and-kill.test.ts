@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * exec-refusal-and-kill.test.ts
  *
@@ -40,7 +41,7 @@ import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
 import type { McpApi, McpToolSchema } from '@goodvibes-jev/engine/platform/platform/mcp';
 import { installAgentMcpCallRoute } from '../../tools/agent-mcp-call-route.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -97,7 +98,7 @@ afterEach(async () => {
  * the temp root, so nothing derived from it (daemon home included) can point
  * at the machine's real one.
  */
-function agentRuntime(prefix: string): { services: RuntimeServices; workspace: string } {
+async function agentRuntime(prefix: string): Promise<{ services: RuntimeServices; workspace: string }> {
   const root = makeProjectTempDir(prefix);
   const workspace = join(root, 'workspace');
   const homeDir = join(root, 'home');
@@ -107,7 +108,7 @@ function agentRuntime(prefix: string): { services: RuntimeServices; workspace: s
   // Its own git toplevel, so checkpoint state stays inside the temp root
   // instead of the enclosing checkout (same reason as helpers/runtime-services).
   execFileSync('git', ['init', '-q'], { cwd: workspace, timeout: 30_000 });
-  const services = createRuntimeServices({
+  const services = (await createPreparedAgentRuntimeServices({
     // Opt out: this process does not outlive the unawaited sweep.
     modelDiscovery: 'skip',
     runtimeBus: new RuntimeEventBus(),
@@ -116,7 +117,7 @@ function agentRuntime(prefix: string): { services: RuntimeServices; workspace: s
     workingDir: workspace,
     homeDirectory: homeDir,
     getConversationTitle: () => 'exec-refusal-and-kill',
-  });
+  }));
   runtimes.push(services);
   // Composition installs its production judgment port; replace only that I/O
   // boundary after construction so this regression stays offline.
@@ -167,8 +168,8 @@ type Pipeline = {
   run(call: ToolCall): Promise<ToolResult>;
 };
 
-function agentPipeline(prefix: string, permissionMode: 'allow-all' | 'plan'): Pipeline {
-  const { services, workspace } = agentRuntime(prefix);
+async function agentPipeline(prefix: string, permissionMode: 'allow-all' | 'plan'): Promise<Pipeline> {
+  const { services, workspace } = (await agentRuntime(prefix));
   // A mode that decides without asking: the ask path raises on the daemon.
   services.configManager.set('permissions.mode', permissionMode);
   const toolRegistry = composeAgentExecPipeline(services);
@@ -261,7 +262,7 @@ async function expectPipelineCanWrite(pipeline: Pipeline): Promise<void> {
 
 describe('a command refused through the agent exec pipeline', () => {
   test('an explicit exec denial prevents a background command from running', async () => {
-    const pipeline = agentPipeline('exec-refusal-policy', 'allow-all');
+    const pipeline = (await agentPipeline('exec-refusal-policy', 'allow-all'));
     await expectPipelineCanWrite(pipeline);
     pipeline.config.set('permissions.mode', 'custom');
     pipeline.config.set('permissions.tools.exec', 'deny');
@@ -284,7 +285,7 @@ describe('a command refused through the agent exec pipeline', () => {
   }, 20_000);
 
   test('an explicit exec denial prevents terminal commands from running', async () => {
-    const pipeline = agentPipeline('exec-refusal-owner-terminal', 'allow-all');
+    const pipeline = (await agentPipeline('exec-refusal-owner-terminal', 'allow-all'));
     await expectPipelineCanWrite(pipeline);
     pipeline.config.set('permissions.mode', 'custom');
     pipeline.config.set('permissions.tools.exec', 'deny');
@@ -303,7 +304,7 @@ describe('a command refused through the agent exec pipeline', () => {
   }, 20_000);
 
   test('in plan mode the agent permission layer refuses exec before it reaches the shell, with a structured denial', async () => {
-    const pipeline = agentPipeline('exec-refusal-permission', 'plan');
+    const pipeline = (await agentPipeline('exec-refusal-permission', 'plan'));
     const { victim, victimFile, marker } = scratch(pipeline.workspace);
 
     const result = await pipeline.run(execCall('refuse-plan-mode', {
@@ -322,7 +323,7 @@ describe('a command refused through the agent exec pipeline', () => {
 
 describe('a command killed through the agent exec pipeline', () => {
   test('a command past its timeout is killed: the process is gone, its later sentinel never appears, and the result says timed out', async () => {
-    const pipeline = agentPipeline('exec-kill-timeout', 'allow-all');
+    const pipeline = (await agentPipeline('exec-kill-timeout', 'allow-all'));
     const started = join(pipeline.workspace, 'started');
     const sentinel = join(pipeline.workspace, 'sentinel-after-sleep');
     // Unique on this host, so the /proc scan finds only this command's sleep.
@@ -345,7 +346,7 @@ describe('a command killed through the agent exec pipeline', () => {
   }, 20_000);
 
   test('cancelling the call through the per-call cancel seam kills the running command promptly', async () => {
-    const pipeline = agentPipeline('exec-kill-cancel', 'allow-all');
+    const pipeline = (await agentPipeline('exec-kill-cancel', 'allow-all'));
     const started = join(pipeline.workspace, 'started');
     const sentinel = join(pipeline.workspace, 'sentinel-after-sleep');
     const token = `6.${process.pid}${Date.now() % 100_000}`;
@@ -432,7 +433,7 @@ const DELEGATES_TO: Readonly<Record<string, string>> = {
 
 describe('the cancel signal reaches the tool through every agent wrapper chain', () => {
   test('each registered tool receives the call signal after every agent wrapper ran', async () => {
-    const { services, workspace } = agentRuntime('exec-cancel-every-chain');
+    const { services, workspace } = (await agentRuntime('exec-cancel-every-chain'));
     services.configManager.set('permissions.mode', 'allow-all');
     const { registry, received } = composeWithRecorders(services);
     const readPath = join(workspace, 'ordinary.txt');
@@ -480,7 +481,7 @@ describe('the cancel signal reaches the tool through every agent wrapper chain',
   }, 60_000);
 
   test('a direct valid SETTINGS call cannot reach its recorder through request text alone', async () => {
-    const { services } = agentRuntime('exec-cancel-direct-settings');
+    const { services } = (await agentRuntime('exec-cancel-direct-settings'));
     const { registry, received } = composeWithRecorders(services);
     const settings = registry.list().find(tool => tool.definition.name === 'goodvibes_settings');
     expect(settings).toBeDefined();
@@ -492,7 +493,7 @@ describe('the cancel signal reaches the tool through every agent wrapper chain',
   });
 
   test('a direct READ with a real ordinary path still cannot reach its recorder without admission', async () => {
-    const { services, workspace } = agentRuntime('exec-cancel-direct-read');
+    const { services, workspace } = (await agentRuntime('exec-cancel-direct-read'));
     services.configManager.set('permissions.mode', 'allow-all');
     const { registry, received } = composeWithRecorders(services);
     const path = join(workspace, 'ordinary.txt');
@@ -509,7 +510,7 @@ describe('the cancel signal reaches the tool through every agent wrapper chain',
   });
 
   test('an MCP call that never answers settles as cancelled as soon as its signal aborts', async () => {
-    const { services } = agentRuntime('exec-cancel-mcp-call');
+    const { services } = (await agentRuntime('exec-cancel-mcp-call'));
     services.configManager.set('permissions.mode', 'allow-all');
     let entered!: () => void;
     const callEntered = new Promise<void>(resolve => { entered = resolve; });

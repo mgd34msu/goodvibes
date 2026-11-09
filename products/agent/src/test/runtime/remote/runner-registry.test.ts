@@ -15,12 +15,12 @@ describe('RemoteRunnerRegistry', () => {
     resetTestRuntimeServices();
   });
 
-  afterEach(() => {
-    getTestAgentManager().clear();
+  afterEach(async () => {
+    (await getTestAgentManager()).clear();
   });
 
-  test('builds runner contracts from active ACP-backed agents', () => {
-    const manager = getTestAgentManager();
+  test('builds runner contracts from active ACP-backed agents', async () => {
+    const manager = (await getTestAgentManager());
     const agent = manager.spawn({ mode: 'spawn', task: 'Remote contract task', template: 'engineer', tools: ['read', 'edit'], outsideContract: true });
     const store = createRuntimeStore();
     store.setState((state) => ({
@@ -43,7 +43,7 @@ describe('RemoteRunnerRegistry', () => {
       },
     }));
 
-    const registry = new RemoteRunnerRegistry(getTestAgentManager());
+    const registry = new RemoteRunnerRegistry((await getTestAgentManager()));
     const contract = registry.upsertContractForAgent(agent.id, store);
     expect(contract).toEqual(expect.objectContaining({
       trustClass: 'self-hosted-acp',
@@ -55,7 +55,7 @@ describe('RemoteRunnerRegistry', () => {
   });
 
   test('captures, exports, and imports remote review artifacts', async () => {
-    const manager = getTestAgentManager();
+    const manager = (await getTestAgentManager());
     const agent = manager.spawn({
       mode: 'spawn',
       task: 'Capture remote artifact export',
@@ -102,8 +102,8 @@ describe('RemoteRunnerRegistry', () => {
     expect(imported.task.summary).toContain('Completed remote review flow');
   });
 
-  test('manages remote runner pools and preserves pool assignment on contracts', () => {
-    const manager = getTestAgentManager();
+  test('manages remote runner pools and preserves pool assignment on contracts', async () => {
+    const manager = (await getTestAgentManager());
     const agent = manager.spawn({ mode: 'spawn', task: 'Pool-ready runner', template: 'engineer', tools: ['read'], outsideContract: true });
     const registry = new RemoteRunnerRegistry(manager);
     registry.createPool({ id: 'ops', label: 'Ops Pool', preferredTemplate: 'engineer', maxRunners: 2 });

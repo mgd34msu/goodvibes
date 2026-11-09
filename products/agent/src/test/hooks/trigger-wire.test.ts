@@ -8,9 +8,9 @@ beforeEach(() => {
 });
 
 describe('HookDispatcher trigger wiring', () => {
-  test('setTriggerManager accepts and stores a trigger manager', () => {
+  test('setTriggerManager accepts and stores a trigger manager', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = getTestTriggerManager();
+    const tm = (await getTestTriggerManager());
     // Should not throw
     dispatcher.setTriggerManager(tm);
     dispatcher.setTriggerManager(null);
@@ -18,7 +18,7 @@ describe('HookDispatcher trigger wiring', () => {
 
   test('fire() with triggerManager fires matching triggers (no hooks registered)', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = getTestTriggerManager();
+    const tm = (await getTestTriggerManager());
     tm.add({ event: 'Post:tool:*', action: 'echo trigger-fired' });
     dispatcher.setTriggerManager(tm);
 
@@ -38,7 +38,7 @@ describe('HookDispatcher trigger wiring', () => {
 
   test('fire() with triggerManager does not fire disabled triggers', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = getTestTriggerManager();
+    const tm = (await getTestTriggerManager());
     const trigger = tm.add({ event: 'Post:tool:*', action: 'echo disabled' });
     tm.disable(trigger.id);
     dispatcher.setTriggerManager(tm);
@@ -58,7 +58,7 @@ describe('HookDispatcher trigger wiring', () => {
 
   test('fire() result is unaffected by triggers (triggers are fire-and-forget)', async () => {
     const dispatcher = new HookDispatcher();
-    const tm = getTestTriggerManager();
+    const tm = (await getTestTriggerManager());
     tm.add({ event: 'Post:tool:*', action: 'echo side-effect' });
     dispatcher.setTriggerManager(tm);
 

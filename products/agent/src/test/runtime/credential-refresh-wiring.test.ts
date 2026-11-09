@@ -8,7 +8,7 @@ import { getTestRuntimeServices } from '../helpers/runtime-services.ts';
 
 describe('credential refresh-on-change wiring', () => {
   test('a secrets write triggers providerRegistry.refreshProviderCredentials', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const registry = services.providerRegistry as { refreshProviderCredentials: () => Promise<void> };
     const original = registry.refreshProviderCredentials.bind(services.providerRegistry);
     let refreshes = 0;

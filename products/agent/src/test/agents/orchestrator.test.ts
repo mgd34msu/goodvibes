@@ -99,7 +99,7 @@ function registerRuntimeModel(
 /**
  * Return the actual ProviderRegistry instance that the proxy delegates to.
  */
-let testProviderRegistry: ReturnType<typeof getTestRuntimeServices>['providerRegistry'] | null = null;
+let testProviderRegistry: Awaited<ReturnType<typeof getTestRuntimeServices>>['providerRegistry'] | null = null;
 
 function getActualRegistry() {
   if (!testProviderRegistry) {
@@ -136,7 +136,7 @@ describe('AgentOrchestrator', () => {
   let projectIndexRoot: string;
   const repoRoot = join(import.meta.dir, '..', '..', '..');
   const originalCwd = process.cwd();
-  let orchestratorRuntime: ReturnType<typeof getTestRuntimeServices>;
+  let orchestratorRuntime: Awaited<ReturnType<typeof getTestRuntimeServices>>;
   let memoryStore: MemoryStore;
   let memoryRegistry: MemoryRegistry;
   let fileCache: FileStateCache;
@@ -172,7 +172,7 @@ describe('AgentOrchestrator', () => {
   beforeEach(async () => {
     process.chdir(repoRoot);
     resetTestRuntimeServices();
-    orchestratorRuntime = getTestRuntimeServices();
+    orchestratorRuntime = (await getTestRuntimeServices());
     // Runtime construction installs its provider-backed port; replace it only
     // afterwards with explicit readings for these runner integration cases.
     forgetFailureReadings();

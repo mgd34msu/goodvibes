@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -6,7 +7,6 @@ import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { KnowledgeSemanticService, KnowledgeStore } from '@goodvibes-jev/engine/platform/platform/knowledge';
 import { RuntimeEventBus } from '../../runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeShutdown } from '../../runtime/bootstrap-shutdown.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
@@ -34,8 +34,8 @@ test.each(['HomeGraph', 'rewind'] as const)('Agent close waits for %s last while
   const previousToken = process.env.GOODVIBES_CONNECTED_HOST_TOKEN;
   process.env.GOODVIBES_CONNECTED_HOST_TOKEN = 'synthetic-native-close-token';
   seedProviderMetadataCacheFixture({ configManager, homeDirectory: home, workingDirectory: work });
-  const services = createRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
-    workingDir: work, homeDirectory: home, modelDiscovery: 'skip' });
+  const services = (await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
+    workingDir: work, homeDirectory: home, modelDiscovery: 'skip' }));
   const entered = Promise.withResolvers<AbortSignal>(); const releaseHomeGraph = Promise.withResolvers<void>();
   const nativeSelfImprove = KnowledgeSemanticService.prototype.selfImprove;
   const background = spyOn(KnowledgeSemanticService.prototype, 'selfImprove').mockImplementation(async function(this: KnowledgeSemanticService, input = {}, options = {}) {

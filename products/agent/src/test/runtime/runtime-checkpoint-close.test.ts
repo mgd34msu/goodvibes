@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -7,7 +8,6 @@ import { acquireCrossProcessLock, WorkspaceCheckpointManager } from '@goodvibes-
 import { createEventEnvelope } from '@goodvibes-jev/engine/transport-core';
 import { createSessionSurface, RuntimeEventBus } from '../../runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 
@@ -22,8 +22,8 @@ test('Agent close drains native checkpoint initialization before closing its cli
   const configManager = new ConfigManager({ surfaceRoot: 'agent', configDir: join(home, 'config'), workingDir: work, homeDir: home });
   seedProviderMetadataCacheFixture({ configManager, homeDirectory: home, workingDirectory: work });
   const runtimeBus = new RuntimeEventBus();
-  const services = createRuntimeServices({ configManager, runtimeBus, runtimeStore: createRuntimeStore(),
-    workingDir: work, homeDirectory: home, modelDiscovery: 'skip' });
+  const services = (await createPreparedAgentRuntimeServices({ configManager, runtimeBus, runtimeStore: createRuntimeStore(),
+    workingDir: work, homeDirectory: home, modelDiscovery: 'skip' }));
   const checkpointManager = services.workspaceCheckpointManager;
   expect(checkpointManager).toBeInstanceOf(WorkspaceCheckpointManager);
   expect(services.surface.checkpointsDir).toBe(surface.checkpointsDir);

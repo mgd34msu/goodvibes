@@ -22,8 +22,8 @@ import {
 } from '@/runtime/index.ts';
 import { getTestRuntimeServices, resetTestRuntimeServices } from '../helpers/runtime-services.ts';
 
-function resetPeerFoundationState(): void {
-  const services = getTestRuntimeServices();
+async function resetPeerFoundationState(): Promise<void> {
+  const services = (await getTestRuntimeServices());
   services.distributedRuntime.pairRequests.clear();
   services.distributedRuntime.peers.clear();
   services.distributedRuntime.work.clear();
@@ -50,8 +50,8 @@ describe('foundation surface stability gate', () => {
   });
 
   test('foundation surfaces support one coherent in-process consumer workflow', async () => {
-    const runtimeServices = getTestRuntimeServices();
-    resetPeerFoundationState();
+    const runtimeServices = (await getTestRuntimeServices());
+    (await resetPeerFoundationState());
     const note = '# Foundation Surface Note\n\nThis note proves the in-process knowledge API remains consumable.\n';
     const rejected: string[] = [];
     let fixtureSourceId = '';

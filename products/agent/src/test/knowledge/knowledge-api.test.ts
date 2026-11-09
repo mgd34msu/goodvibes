@@ -13,7 +13,7 @@ describe('KnowledgeApi', () => {
   });
 
   test('groups status, connector, and query surfaces over the knowledge runtime', async () => {
-    const runtimeServices = getTestRuntimeServices();
+    const runtimeServices = (await getTestRuntimeServices());
     installJudgmentPort(nativeMemoryWorkPrivacy(memoryReadingsPort().port).port);
     const api = createKnowledgeApi(runtimeServices.knowledgeService, {
       memoryRegistry: runtimeServices.memoryRegistry,
@@ -61,7 +61,7 @@ describe('KnowledgeApi', () => {
   });
 
   test('surfaces ingest, packets, projections, jobs, and consolidation through grouped domains', async () => {
-    const runtimeServices = getTestRuntimeServices();
+    const runtimeServices = (await getTestRuntimeServices());
     installJudgmentPort(nativeMemoryWorkPrivacy(memoryReadingsPort().port).port);
     const api = createKnowledgeApi(runtimeServices.knowledgeService);
     const artifact = await runtimeServices.artifactStore.create({

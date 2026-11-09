@@ -20,7 +20,7 @@ import { installAgentToolPolicyGuard } from '../../tools/agent-tool-policy-guard
 import { installToolExecutionSafetyGuard } from '../../tools/tool-execution-safety.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
-function registerTools(registry: ToolRegistry): string {
+async function registerTools(registry: ToolRegistry): Promise<string> {
   const services = createTestManagers();
   const workingDirectory = makeProjectTempDir('gv-tool-registry');
   const agentManager = new AgentManager({
@@ -39,7 +39,7 @@ function registerTools(registry: ToolRegistry): string {
     modeManager: new ModeManager(),
     processManager: new ProcessManager(),
     agentManager,
-    contractRunner: getTestRuntimeServices().contractRunner,
+    contractRunner: (await getTestRuntimeServices()).contractRunner,
     projectRoot: workingDirectory,
     agentMessageBus,
     configManager: services.configManager,
@@ -64,9 +64,9 @@ function registerTools(registry: ToolRegistry): string {
 
 describe('registerAllTools', () => {
 
-  test('compacted model-visible tool descriptions stay within the prompt budget', () => {
+  test('compacted model-visible tool descriptions stay within the prompt budget', async () => {
     const registry = new ToolRegistry();
-    registerTools(registry);
+    (await registerTools(registry));
     compactRegisteredToolDefinitions(registry);
     for (const tool of registry.list()) {
       expect(tool.definition.description.length).toBeLessThanOrEqual(56);
@@ -76,7 +76,7 @@ describe('registerAllTools', () => {
 
   test('Agent-guarded platform tools all return structured results instead of throwing', async () => {
     const registry = new ToolRegistry();
-    registerTools(registry);
+    (await registerTools(registry));
     installAgentToolPolicyGuard(registry);
     installToolExecutionSafetyGuard(registry);
 
@@ -119,7 +119,7 @@ describe('registerAllTools', () => {
 
   test('post-edit diagnostics (platform 1.6.1 diagnostics.postEdit) reach the write tool result untouched', async () => {
     const registry = new ToolRegistry();
-    const workingDirectory = registerTools(registry);
+    const workingDirectory = (await registerTools(registry));
     // Install the SAME guard layers production bootstrap installs
     // (installAgentToolPolicyGuard, installToolExecutionSafetyGuard),
     // neither wraps the write tool's execute function, but this proves that

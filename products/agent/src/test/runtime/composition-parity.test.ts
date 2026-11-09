@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 /**
  * composition-parity.test.ts
@@ -28,7 +29,6 @@ import { ConfigManager } from '../../config/index.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import {
-  createRuntimeServices,
   shouldRefreshModels,
   type ModelDiscoveryMode,
   type RuntimeServices,
@@ -73,8 +73,8 @@ describe('composition parity: append-only sweep + live config watch', () => {
     return { workingDir, homeDir, configDir };
   }
 
-  function makeServices(configManager: ConfigManager, workingDir: string, homeDir: string): RuntimeServices {
-    const services = createRuntimeServices({
+  async function makeServices(configManager: ConfigManager, workingDir: string, homeDir: string): Promise<RuntimeServices> {
+    const services = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
@@ -82,12 +82,12 @@ describe('composition parity: append-only sweep + live config watch', () => {
       configManager,
       workingDir,
       homeDirectory: homeDir,
-    });
+    }));
     runtimes.push(services);
     return services;
   }
 
-  test('runStartupAppendOnlySweep runs at composition with full roots, reclaiming the real on-disk activity.md', () => {
+  test('runStartupAppendOnlySweep runs at composition with full roots, reclaiming the real on-disk activity.md', async () => {
     const { workingDir, homeDir, configDir } = makeRoots();
     const logDir = join(workingDir, '.goodvibes', 'logs');
     mkdirSync(logDir, { recursive: true });
@@ -100,7 +100,7 @@ describe('composition parity: append-only sweep + live config watch', () => {
     const configManager = metadataConfig({ surfaceRoot: 'agent', workingDir, homeDir, configDir });
     configManager.set('atRest.retentionMaxTotalMb', 1);
 
-    const services = makeServices(configManager, workingDir, homeDir);
+    const services = (await makeServices(configManager, workingDir, homeDir));
     try {
       // The sweep is synchronous inside createRuntimeServices, no wait needed.
       expect(existsSync(activityLogPath)).toBe(false);
@@ -110,7 +110,7 @@ describe('composition parity: append-only sweep + live config watch', () => {
     }
   });
 
-  test('runStartupAppendOnlySweep leaves a fresh, under-cap activity.md alone (the sweep is real retention, not a wipe)', () => {
+  test('runStartupAppendOnlySweep leaves a fresh, under-cap activity.md alone (the sweep is real retention, not a wipe)', async () => {
     const { workingDir, homeDir, configDir } = makeRoots();
     const logDir = join(workingDir, '.goodvibes', 'logs');
     mkdirSync(logDir, { recursive: true });
@@ -119,7 +119,7 @@ describe('composition parity: append-only sweep + live config watch', () => {
 
     const configManager = metadataConfig({ surfaceRoot: 'agent', workingDir, homeDir, configDir });
     // Default caps (30 days / 512MB): a few bytes, just written, survives.
-    const services = makeServices(configManager, workingDir, homeDir);
+    const services = (await makeServices(configManager, workingDir, homeDir));
     try {
       expect(existsSync(activityLogPath)).toBe(true);
       expect(readFileSync(activityLogPath, 'utf-8')).toBe('small');
@@ -132,7 +132,7 @@ describe('composition parity: append-only sweep + live config watch', () => {
   test('configManager.watchConfigFiles() is live at composition: an external settings.json edit applies without an explicit reload', async () => {
     const { workingDir, homeDir, configDir } = makeRoots();
     const configManager = metadataConfig({ surfaceRoot: 'agent', workingDir, homeDir, configDir });
-    const services = makeServices(configManager, workingDir, homeDir);
+    const services = (await makeServices(configManager, workingDir, homeDir));
     try {
       expect(configManager.get('power.keepAwake')).toBe(false);
 
@@ -178,7 +178,7 @@ describe('composition parity: live model discovery refreshes by default, and cal
     return existsSync(join(configDir, 'provider-models'));
   }
 
-  test('createRuntimeServices without the opt-in starts no discovery sweep', () => {
+  test('createRuntimeServices without the opt-in starts no discovery sweep', async () => {
     root = makeProjectTempDir('goodvibes-agent-model-discovery');
     const workingDir = join(root, 'workspace');
     const homeDir = join(root, 'home');
@@ -186,7 +186,7 @@ describe('composition parity: live model discovery refreshes by default, and cal
     mkdirSync(workingDir, { recursive: true });
     mkdirSync(configDir, { recursive: true });
 
-    runtimes.push(createRuntimeServices({
+    runtimes.push((await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
@@ -194,7 +194,7 @@ describe('composition parity: live model discovery refreshes by default, and cal
       configManager: metadataConfig({ workingDir, homeDir, surfaceRoot: 'agent' }),
       workingDir,
       homeDirectory: homeDir,
-    }));
+    })));
 
     expect(hasProviderModelsCache(configDir)).toBe(false);
 
@@ -225,27 +225,27 @@ describe('composition parity: live model discovery refreshes by default, and cal
       // endpoints and writes provider-models/*.json from an unawaited promise.
     } as typeof real;
     try {
-      const build = (mode: ModelDiscoveryMode | undefined): void => {
+      const build = async (mode: ModelDiscoveryMode | undefined): Promise<void> => {
         const homeDir = makeProjectTempDir('gv-discovery');
         const workingDir = join(homeDir, 'workspace');
         mkdirSync(workingDir, { recursive: true });
-        runtimes.push(createRuntimeServices({
+        runtimes.push((await createPreparedAgentRuntimeServices({
           ...(mode === undefined ? {} : { modelDiscovery: mode }),
           runtimeBus: new RuntimeEventBus(),
           runtimeStore: createRuntimeStore(),
           configManager: metadataConfig({ workingDir, homeDir, surfaceRoot: 'agent' }),
           workingDir,
           homeDirectory: homeDir,
-        }));
+        })));
       };
 
-      build('skip');
+      (await build('skip'));
       expect(calls).toHaveLength(0);
 
       // The same construction with the shipped default DOES start it. Without
       // this half, the assertion above would pass on a runtime that had stopped
       // discovering models entirely.
-      build(undefined);
+      (await build(undefined));
       expect(calls).toHaveLength(1);
     } finally {
       try { await closeRuntimes(); }
@@ -263,13 +263,13 @@ describe('composition parity: the trigger family is composed, not just importabl
     root = '';
   });
 
-  function build(): RuntimeServices {
+  async function build(): Promise<RuntimeServices> {
     root = makeProjectTempDir('goodvibes-agent-triggers');
     const workingDir = join(root, 'workspace');
     const homeDir = join(root, 'home');
     mkdirSync(workingDir, { recursive: true });
     mkdirSync(join(homeDir, '.goodvibes', 'agent'), { recursive: true });
-    const services = createRuntimeServices({
+    const services = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       runtimeBus: new RuntimeEventBus(),
@@ -277,13 +277,13 @@ describe('composition parity: the trigger family is composed, not just importabl
       configManager: metadataConfig({ workingDir, homeDir, surfaceRoot: 'agent' }),
       workingDir,
       homeDirectory: homeDir,
-    });
+    }));
     runtimes.push(services);
     return services;
   }
 
   test('it honours the shipped-off default and refuses by name', async () => {
-    const services = build();
+    const services = (await build());
     // watchers.triggers.enabled defaults false: the family exists but declines
     // to do anything, and says which key turns it on.
     await expect(services.triggerManager.create({
@@ -295,8 +295,8 @@ describe('composition parity: the trigger family is composed, not just importabl
     expect(services.triggerManager.list()).toEqual([]);
   });
 
-  test('start() and shutdown() are safe to call on the composed manager', () => {
-    const services = build();
+  test('start() and shutdown() are safe to call on the composed manager', async () => {
+    const services = (await build());
     expect(() => {
       services.triggerManager.start();
       services.triggerManager.shutdown();

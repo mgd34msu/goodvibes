@@ -22,13 +22,13 @@ async function waitFor<T>(fn: () => T | undefined | null, timeoutMs = 500, inter
 }
 
 describe('operator client', () => {
-  let runtimeServices: ReturnType<typeof getTestRuntimeServices>;
+  let runtimeServices: Awaited<ReturnType<typeof getTestRuntimeServices>>;
   let operatorServices: ReturnType<typeof createOperatorClientServices>;
   let client: ReturnType<typeof createOperatorClient>;
 
   beforeEach(async () => {
     resetTestRuntimeServices();
-    runtimeServices = getTestRuntimeServices();
+    runtimeServices = (await getTestRuntimeServices());
     operatorServices = createOperatorClientServices(runtimeServices.asDaemonGradeView(), {
       getControlPlaneRecentEvents: () => [{
         id: 'evt-1',

@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * home-single-writer.test.ts, one live agent per home.
  *
@@ -20,7 +21,7 @@ import { dirname, join } from 'node:path';
 import { bootstrap as runtimeComposition } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -65,10 +66,10 @@ async function liveForeignProcess(): Promise<{ pid: number; identity: string }> 
 }
 
 /** Boot the agent's real service composition rooted at this home. */
-function bootAgentAt(home: string): RuntimeServices {
+async function bootAgentAt(home: string): Promise<RuntimeServices> {
   const workingDir = join(home, 'work');
   mkdirSync(workingDir, { recursive: true });
-  const services = createRuntimeServices({
+  const services = (await createPreparedAgentRuntimeServices({
     modelDiscovery: 'skip',
     configManager: new ConfigManager({
       surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
@@ -81,7 +82,7 @@ function bootAgentAt(home: string): RuntimeServices {
     workingDir,
     homeDirectory: home,
     getConversationTitle: () => 'home-single-writer',
-  });
+  }));
   built.push(services);
   return services;
 }
@@ -136,7 +137,7 @@ describe('a second agent booted onto a live agent\'s home', () => {
 
     let refusal: unknown;
     try {
-      bootAgentAt(home);
+      (await bootAgentAt(home));
     } catch (error) {
       refusal = error;
     }
@@ -149,10 +150,10 @@ describe('a second agent booted onto a live agent\'s home', () => {
     expect(error.message).toContain(String(holder.pid));
   });
 
-  test('a home nothing holds is claimed, and the record names THIS process', () => {
+  test('a home nothing holds is claimed, and the record names THIS process', async () => {
     const home = makeProjectTempDir('agent-home-free');
 
-    const services = bootAgentAt(home);
+    const services = (await bootAgentAt(home));
 
     const claimPath = runtimeComposition.surfaceHomeClaimPath(home, GOODVIBES_AGENT_SURFACE_ROOT);
     const record = JSON.parse(readFileSync(claimPath, 'utf-8')) as { pid: number };

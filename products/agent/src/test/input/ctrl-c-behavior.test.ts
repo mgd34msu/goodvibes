@@ -10,7 +10,7 @@ type InputHandlerTestAccess = {
   };
 };
 
-function makeInput() {
+async function makeInput() {
   const selection = new SelectionManager();
   const history = new InfiniteBuffer();
   const renders: string[] = [];
@@ -24,15 +24,15 @@ function makeInput() {
     () => history,
     () => {},
     () => {},
-    createDefaultUiRuntimeServices(),
+    (await createDefaultUiRuntimeServices()),
   );
   input.setContentWidth(80);
   return { input, renders };
 }
 
 describe('Ctrl+C behavior', () => {
-  test('clears prompt content even when panel workspace has focus', () => {
-    const { input, renders } = makeInput();
+  test('clears prompt content even when panel workspace has focus', async () => {
+    const { input, renders } = (await makeInput());
     input.prompt = 'pending text';
     input.cursorPos = input.prompt.length;
     input.indicatorFocused = true;
@@ -44,8 +44,8 @@ describe('Ctrl+C behavior', () => {
     expect(renders.at(-1)).toBe('');
   });
 
-  test('clears prompt content even while a modal is active', () => {
-    const { input, renders } = makeInput();
+  test('clears prompt content even while a modal is active', async () => {
+    const { input, renders } = (await makeInput());
     input.prompt = 'clear me';
     input.cursorPos = input.prompt.length;
     input.helpOverlayActive = true;
@@ -59,8 +59,8 @@ describe('Ctrl+C behavior', () => {
     expect(renders.at(-1)).toBe('');
   });
 
-  test('cancels generation globally when prompt is empty', () => {
-    const { input } = makeInput();
+  test('cancels generation globally when prompt is empty', async () => {
+    const { input } = (await makeInput());
     const cancelGeneration = mock(() => {});
     (input as unknown as InputHandlerTestAccess).commandContext = { cancelGeneration };
     input.indicatorFocused = true;

@@ -7,10 +7,10 @@ import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
 describe('Cursor mapping through word-wrap', () => {
   let input: InputHandler;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     const sel = new SelectionManager();
     const history = new InfiniteBuffer();
-    input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+    input = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
     input.setContentWidth(20);
   });
 

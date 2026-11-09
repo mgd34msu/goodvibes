@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * Push AND pull, and one thing said once, proved through the real daemon.
  *
@@ -42,7 +43,7 @@
  * asserting that a client answers its own question.
  */
 
-import { afterAll, describe, expect, spyOn, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, spyOn, test } from 'bun:test';
 import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { withDecisionLog } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
@@ -51,7 +52,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { makeLongLivedProjectTempDir } from '../helpers/project-temp.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { authoredPrivacyAnswer, errorSpan, errorText } from '../helpers/authored-diagnostic-readings.ts';
@@ -76,7 +77,7 @@ const roots: string[] = [];
 const runtimes: RuntimeServices[] = [];
 const restoreReadings: Array<() => void> = [];
 
-function harness(): Harness {
+async function harness(): Promise<Harness> {
   const root = makeLongLivedProjectTempDir('gv-agent-occasions-push');
   roots.push(root);
   const daemonHome = join(root, '.goodvibes', 'daemon');
@@ -118,7 +119,7 @@ function harness(): Harness {
   configManager.set('occasions.activeHours', '00:00-00:00');
 
   const said: string[] = [];
-  const services = createRuntimeServices({
+  const services = (await createPreparedAgentRuntimeServices({
     modelDiscovery: 'skip',
     configManager,
     runtimeBus: new RuntimeEventBus(),
@@ -126,7 +127,7 @@ function harness(): Harness {
     workingDir: root,
     homeDirectory: root,
     getConversationTitle: () => 'occasions-push-test',
-  });
+  }));
   runtimes.push(services);
   const readDiagnostic = authoredPrivacyAnswer({ parts: [
     [errorText('No agent conversation sender is '), errorSpan('sender'), errorText(', so a message addressed to the agent has nowhere to land. The agent product registers one through ChannelDeliveryRouter.agentDelivery.register().')],
@@ -172,7 +173,8 @@ afterAll(() => {
 });
 
 describe('the seeded profile is this runtime\'s own, never the real home', () => {
-  const h = harness();
+  let h: Harness;
+  beforeAll(async () => { h = await harness(); });
 
   test('the daemon resolved the profile inside the temp root, and the line parsed', async () => {
     // Asserted rather than assumed: this is what keeps the suite off the
@@ -193,7 +195,7 @@ describe('the seeded profile is this runtime\'s own, never the real home', () =>
 });
 
 test('an unavailable reading delivers nothing and cannot stamp away the later nudge', async () => {
-  const h = harness();
+  const h = (await harness());
   const undo = registerSender(h);
   try {
     await expect(h.invoke('occasions.sweep', {}, false)).rejects.toThrow(/occasion reading is unavailable/);
@@ -206,7 +208,8 @@ test('an unavailable reading delivers nothing and cannot stamp away the later nu
 });
 
 describe('sender registered: the push lands and the pull goes quiet', () => {
-  const h = harness();
+  let h: Harness;
+  beforeAll(async () => { h = await harness(); });
   let undo: (() => void) | null = null;
   let pushedMessage = '';
 
@@ -293,7 +296,8 @@ describe('sender registered: the push lands and the pull goes quiet', () => {
 });
 
 describe('no sender registered: the push is refused BY NAME and the pull still raises', () => {
-  const h = harness();
+  let h: Harness;
+  beforeAll(async () => { h = await harness(); });
 
   test('the sweep records the platform\'s named failure and lands nothing', async () => {
     expect(h.services.channelDeliveryRouter.agentDelivery.registered).toBe(false);
@@ -343,7 +347,8 @@ describe('no sender registered: the push is refused BY NAME and the pull still r
 });
 
 describe('sender registered but unable to land: this repo\'s own throw keeps the pull alive', () => {
-  const h = harness();
+  let h: Harness;
+  beforeAll(async () => { h = await harness(); });
 
   test('a sender with no conversation refuses, and the sweep records ITS reason', async () => {
     // The previous block covers the platform's refusal (nothing registered). This one

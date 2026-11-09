@@ -1,10 +1,10 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
 import { createAgentTool, ToolRegistry } from '@goodvibes-jev/engine/platform/platform/tools';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { installAgentToolPolicyGuard } from '../../tools/agent-tool-policy-guard.ts';
 import { installToolExecutionSafetyGuard } from '../../tools/tool-execution-safety.ts';
@@ -14,7 +14,7 @@ test('Agent policy exposes public contract reads and rejects retired WRFC modes'
   const root = makeProjectTempDir('agent-contract-policy');
   execFileSync('git', ['init', '-q'], { cwd: root });
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, '.goodvibes', 'agent') });
-  const services = createRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: root, modelDiscovery: 'skip' });
+  const services = (await createPreparedAgentRuntimeServices({ configManager, runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), workingDir: root, homeDirectory: root, modelDiscovery: 'skip' }));
   try {
     const registry = new ToolRegistry();
     registry.register(createAgentTool({ manager: services.agentManager, messageBus: services.agentMessageBus, configManager, contractRunner: services.contractRunner, projectRoot: root, resolveSessionId: () => 'contract-policy-test' }));

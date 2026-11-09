@@ -29,8 +29,8 @@ let services: RuntimeServices | undefined;
 // suite order can therefore reuse this cached module without its reset hook.
 // This file owns the fresh graph it disposes after each composition probe.
 beforeEach(resetTestRuntimeServices);
-function compose() {
-  services = getTestRuntimeServices();
+async function compose() {
+  services = (await getTestRuntimeServices());
   forgetLedgerArgRoles();
   const fixture = fakePort((wireName, question, state) => {
     const name = wireName.replace(/^(effect|risk|edge)__/, '');
@@ -54,7 +54,7 @@ afterEach(async () => {
 });
 
 test('real Agent services construct the shared ledger and actual history consumes its Jev kind and target', async () => {
-  const { runtime, requests } = compose();
+  const { runtime, requests } = (await compose());
   expect(runtime.executionLedger).toBeInstanceOf(AgentExecutionLedger);
   expect(CompatibilityLedger).toBe(AgentExecutionLedger);
   emitToolReceived(runtime.runtimeBus, ctx, { ...call, args: { recipient: 'public-fixture', pat: 'SYNTHETIC_AGENT_CREDENTIAL' } });
@@ -75,7 +75,7 @@ test('real Agent services construct the shared ledger and actual history consume
 });
 
 test('real Agent composition withholds declared credential input before model calls and preserves cancellation', async () => {
-  const { runtime, requests } = compose();
+  const { runtime, requests } = (await compose());
   emitToolReceived(runtime.runtimeBus, ctx, { ...call, args: { apiKey: 'SYNTHETIC_DECLARED_CREDENTIAL' } });
   emitToolCancelled(runtime.runtimeBus, ctx, { ...call, reason: 'protected call cancelled' });
   await runtime.executionLedger.settled();
@@ -85,7 +85,7 @@ test('real Agent composition withholds declared credential input before model ca
 });
 
 test('the real tool execution path combines the shared permission guard and ledger without an approval callback', async () => {
-  const { runtime, requests } = compose();
+  const { runtime, requests } = (await compose());
   let executions = 0;
   const registry = new ToolRegistry();
   registry.register({

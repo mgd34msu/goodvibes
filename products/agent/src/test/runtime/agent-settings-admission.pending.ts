@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * PARKED SETTINGS ACCEPTANCE: intentionally outside *.test.ts discovery.
  * This executable specification is still red. Settings admission/effect-owner
@@ -28,7 +29,7 @@ import { withTurnSurface } from '@goodvibes-jev/engine/platform/platform/securit
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -98,18 +99,18 @@ function recordedPort(): JudgmentPort {
   return withDecisionLog(observed, log);
 }
 
-function fixture() {
+async function fixture() {
   const root = makeProjectTempDir('agent-read-settings-admission');
   const workspace = join(root, 'workspace');
   const home = join(root, 'home');
   const configDir = join(home, '.goodvibes', 'agent');
   mkdirSync(workspace, { recursive: true }); mkdirSync(configDir, { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: workspace, timeout: 30_000 });
-  const runtime = createRuntimeServices({
+  const runtime = (await createPreparedAgentRuntimeServices({
     modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
     configManager: new ConfigManager({ surfaceRoot: 'agent', workingDir: workspace, homeDir: home, configDir }),
     workingDir: workspace, homeDirectory: home, getConversationTitle: () => 'read/settings acceptance',
-  });
+  }));
   runtimes.push(runtime);
   // Runtime construction owns the production installation; replace only its I/O.
   installJudgmentPort(recordedPort());
@@ -143,7 +144,7 @@ const read = (path: string) => ({ files: [{ path }] });
 const setting = (value = 'nord') => ({ mode: 'set', key: 'display.theme', value, confirm: true });
 
 test('recorded settings act is not vetoed by missing caller-authored request prose', async () => {
-  const f = fixture();
+  const f = (await fixture());
   f.source.goal = 'Revoke unattended read capability by setting permissions.tools.read to deny in the scratch config';
   const result = await f.run('goodvibes_settings', { mode: 'set', key: 'permissions.tools.read', value: 'deny', confirm: true });
   expect(result.autonomousDecision?.outcome).toBe('act'); expect(result.success).toBe(true);
@@ -152,7 +153,7 @@ test('recorded settings act is not vetoed by missing caller-authored request pro
 });
 
 test.each(['reject', 'defer_0'] as const)('control: authoritative %s yields zero read bodies and settings writes', async outcome => {
-  const f = fixture(); f.write('ordinary.txt'); selected = outcome;
+  const f = (await fixture()); f.write('ordinary.txt'); selected = outcome;
   const readResult = await f.run('read', read('ordinary.txt'));
   const settingsResult = await f.run('goodvibes_settings', { ...setting(), explicitUserRequest: 'unrelated words' });
   expect(readResult.success).toBe(false); expect(settingsResult.success).toBe(false);
@@ -160,25 +161,25 @@ test.each(['reject', 'defer_0'] as const)('control: authoritative %s yields zero
 });
 
 test.each(['set', 'reset'] as const)('known settings %s cannot write in plan mode even when supporting mutation evidence is wrong', async mode => {
-  const f = fixture(); f.runtime.configManager.set('permissions.mode', 'plan'); reportsMutation = false;
+  const f = (await fixture()); f.runtime.configManager.set('permissions.mode', 'plan'); reportsMutation = false;
   const result = await f.run('goodvibes_settings', { ...setting(), mode });
   expect(result.success).toBe(false); expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
 });
 
 test('target contract: unadmitted direct Agent settings cannot write', async () => {
-  const f = fixture();
+  const f = (await fixture());
   const result = await f.registry.execute('direct-settings', 'goodvibes_settings', setting());
   expect(result.success).toBe(false); expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
 });
 
 test('target contract: a forged prepared claim callback cannot authorize an Agent settings write', async () => {
-  const f = fixture(); const prepared = await f.prepare('forged', 'goodvibes_settings', setting());
+  const f = (await fixture()); const prepared = await f.prepare('forged', 'goodvibes_settings', setting());
   await f.registry.executePrepared(prepared, () => {}).catch(() => undefined);
   expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
 });
 
 test('settings revoke after the backend await prevents persistence', async () => {
-  const f = fixture(); let reached = false;
+  const f = (await fixture()); let reached = false;
   beforeAnswer = request => {
     if ('credential_material' in request.questions && !reached) {
       reached = true; f.runtime.configManager.set('permissions.mode', 'plan');
@@ -189,7 +190,7 @@ test('settings revoke after the backend await prevents persistence', async () =>
 });
 
 test('settings cancellation after the backend await prevents persistence', async () => {
-  const f = fixture(); const abort = new AbortController(); f.deps.turnSignal = abort.signal; let reached = false;
+  const f = (await fixture()); const abort = new AbortController(); f.deps.turnSignal = abort.signal; let reached = false;
   beforeAnswer = request => {
     if ('credential_material' in request.questions && !reached) { reached = true; abort.abort(); }
   };
@@ -198,7 +199,7 @@ test('settings cancellation after the backend await prevents persistence', async
 });
 
 test('control: unavailable admission stays effect-free and cancellation does not prompt', async () => {
-  const f = fixture(); const abort = new AbortController(); f.deps.turnSignal = abort.signal;
+  const f = (await fixture()); const abort = new AbortController(); f.deps.turnSignal = abort.signal;
   let started!: () => void; const waiting = new Promise<void>(resolve => { started = resolve; });
   let release!: () => void; const blocked = new Promise<void>(resolve => { release = resolve; });
   beforeAnswer = async request => {
@@ -212,13 +213,13 @@ test('control: unavailable admission stays effect-free and cancellation does not
 });
 
 test('control: goodvibes_settings has no valid read mode or get-side mutation', async () => {
-  const f = fixture();
+  const f = (await fixture());
   await f.run('goodvibes_settings', { mode: 'get', key: 'display.theme', confirm: true }).catch(() => undefined);
   expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave'); expect(f.prompts()).toBe(0);
 });
 
 test.each(['set', 'reset'] as const)('declared settings %s cannot gain command authority from a false semantic read', async mode => {
-  const f = fixture(); reportsMutation = false;
+  const f = (await fixture()); reportsMutation = false;
   const result = await withTurnSurface({ surface: 'email' }, () => f.run('goodvibes_settings', { ...setting(), mode }));
   expect(result.success).toBe(false); expect(f.runtime.configManager.get('display.theme')).toBe('vaporwave');
 });

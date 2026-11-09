@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
@@ -10,7 +11,6 @@ import { createDirectTransport } from '@/runtime/index.ts';
 import { createHttpTransport } from '@/runtime/index.ts';
 import { createRealtimeTransport } from '@/runtime/index.ts';
 import { createAuthenticatedWebSocket } from '../helpers/authenticated-websocket.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { UserAuthManager } from '@goodvibes-jev/engine/platform/platform/security';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
@@ -72,7 +72,7 @@ function createUserAuth(homeDir: string): UserAuthManager {
   });
 }
 
-function createRuntimeFixture(prefix: string) {
+async function createRuntimeFixture(prefix: string) {
   const tempRoot = makeProjectTempDir(`${prefix}`);
   const workingDir = join(tempRoot, 'workspace');
   const homeDir = join(tempRoot, 'home');
@@ -85,7 +85,7 @@ function createRuntimeFixture(prefix: string) {
     homeDir,
   });
   seedProviderMetadataCacheFixture({ configManager, homeDirectory: homeDir, workingDirectory: workingDir });
-  const runtimeServices = createRuntimeServices({
+  const runtimeServices = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
     runtimeStore: createRuntimeStore(),
@@ -95,7 +95,7 @@ function createRuntimeFixture(prefix: string) {
     homeDirectory: homeDir,
     featureFlags: createTransportFeatureFlags(),
     getConversationTitle: () => prefix,
-  });
+  }));
   runtimeServices.distributedRuntime.pairRequests.clear();
   runtimeServices.distributedRuntime.peers.clear();
   runtimeServices.distributedRuntime.work.clear();
@@ -114,7 +114,7 @@ function createRuntimeFixture(prefix: string) {
 }
 
 async function createDirectHarness(): Promise<TransportHarness> {
-  const fixture = createRuntimeFixture('gv-transport-parity-direct');
+  const fixture = (await createRuntimeFixture('gv-transport-parity-direct'));
   const transport = createDirectTransport(fixture.runtimeServices.asDaemonGradeView());
   return {
     kind: 'direct',
@@ -166,7 +166,7 @@ async function createDirectHarness(): Promise<TransportHarness> {
 }
 
 async function createRemoteHarness(kind: 'http' | 'realtime'): Promise<TransportHarness> {
-  const fixture = createRuntimeFixture(`gv-transport-parity-${kind}`);
+  const fixture = (await createRuntimeFixture(`gv-transport-parity-${kind}`));
   let boundPort: number | null = null;
   const serveFactory = ((options: Parameters<typeof Bun.serve>[0]) => {
     const server = Bun.serve({
@@ -258,9 +258,9 @@ afterEach(async () => {
 describe('transport parity gate', () => {
   test('common operator and peer workflows stay transport-compatible across direct, HTTP, and realtime surfaces', async () => {
     const harnesses = await Promise.all([
-      createDirectHarness(),
-      createRemoteHarness('http'),
-      createRemoteHarness('realtime'),
+      (await createDirectHarness()),
+      (await createRemoteHarness('http')),
+      (await createRemoteHarness('realtime')),
     ]);
     activeDisposers.push(...harnesses.map((harness) => harness.dispose));
 
@@ -289,9 +289,9 @@ describe('transport parity gate', () => {
 
   test('agent spawning events stay transport-compatible across direct, HTTP, and realtime surfaces', async () => {
     const harnesses = await Promise.all([
-      createDirectHarness(),
-      createRemoteHarness('http'),
-      createRemoteHarness('realtime'),
+      (await createDirectHarness()),
+      (await createRemoteHarness('http')),
+      (await createRemoteHarness('realtime')),
     ]);
     activeDisposers.push(...harnesses.map((harness) => harness.dispose));
 

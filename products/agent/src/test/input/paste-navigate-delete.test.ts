@@ -4,10 +4,10 @@ import { SelectionManager } from '@goodvibes-jev/engine/terminal-shell';
 import { InfiniteBuffer } from '@goodvibes-jev/engine/terminal-shell';
 import { createDefaultUiRuntimeServices } from '../helpers/ui-services.ts';
 
-function makeInput(contentWidth = 40): InputHandler {
+async function makeInput(contentWidth = 40): Promise<InputHandler> {
   const sel = new SelectionManager();
   const history = new InfiniteBuffer();
-  const ih = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, createDefaultUiRuntimeServices());
+  const ih = new InputHandler(() => {}, sel, () => 0, () => 20, () => history, () => {}, () => {}, (await createDefaultUiRuntimeServices()));
   ih.setContentWidth(contentWidth);
   return ih;
 }
@@ -62,8 +62,8 @@ function verifyCursor(ih: InputHandler, cw: number, label: string) {
 describe('Paste + Navigate + Delete/Backspace', () => {
   const CW = 40;
 
-  test('multiline paste with newlines, navigate up, backspace at each position', () => {
-    const ih = makeInput(CW);
+  test('multiline paste with newlines, navigate up, backspace at each position', async () => {
+    const ih = (await makeInput(CW));
     const paste = 'Line one of paste\nLine two of paste\nLine three of paste\nLine four';
     insertText(ih, paste);
 
@@ -85,8 +85,8 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     verifyCursor(ih, CW, 'after-backspaces');
   });
 
-  test('paste exceeding content width, navigate left through wrap, backspace', () => {
-    const ih = makeInput(30);
+  test('paste exceeding content width, navigate left through wrap, backspace', async () => {
+    const ih = (await makeInput(30));
     const paste = 'This is a long line that will definitely wrap around the content area multiple times';
     insertText(ih, paste);
 
@@ -106,8 +106,8 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     }
   });
 
-  test('paste multiline with lines exceeding width, navigate and delete', () => {
-    const ih = makeInput(25);
+  test('paste multiline with lines exceeding width, navigate and delete', async () => {
+    const ih = (await makeInput(25));
     const paste = 'Short\nThis line is longer than twenty five characters wide\nAnother short\nYet another long line that exceeds the width';
     insertText(ih, paste);
 
@@ -139,8 +139,8 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     verifyCursor(ih, 25, 'final-backspace');
   });
 
-  test('multiple pastes then navigate between them', () => {
-    const ih = makeInput(CW);
+  test('multiple pastes then navigate between them', async () => {
+    const ih = (await makeInput(CW));
 
     // First paste
     insertText(ih, 'First paste line one\nFirst paste line two');
@@ -169,8 +169,8 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     }
   });
 
-  test('backspace at newline joins lines', () => {
-    const ih = makeInput(CW);
+  test('backspace at newline joins lines', async () => {
+    const ih = (await makeInput(CW));
     insertText(ih, 'line one\nline two');
 
     // Navigate to start of "line two" (position 9)
@@ -185,8 +185,8 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     expect(ih.cursorPos).toBe(8);
   });
 
-  test('backspace at marker start removes entire marker', () => {
-    const ih = makeInput(CW);
+  test('backspace at marker start removes entire marker', async () => {
+    const ih = (await makeInput(CW));
     // Type some text before the marker
     insertText(ih, 'before ');
     // Register a multi-line paste with >8 lines (creates a TEXT marker)
@@ -216,8 +216,8 @@ describe('Paste + Navigate + Delete/Backspace', () => {
     expect(ih.prompt.length).toBe(promptWithMarker.length - markerLen);
   });
 
-  test('cursor position survives full edit cycle', () => {
-    const ih = makeInput(35);
+  test('cursor position survives full edit cycle', async () => {
+    const ih = (await makeInput(35));
 
     // Paste, navigate, type, delete, navigate, backspace
     insertText(ih, 'Hello world this is a test of the editing system');

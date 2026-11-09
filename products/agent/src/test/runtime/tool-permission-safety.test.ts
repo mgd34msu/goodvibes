@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /** Offline regression of the exact permission composition used by bootstrap. */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
@@ -13,7 +14,7 @@ import { JudgmentError, SqliteDecisionLog, withDecisionLog, type JudgmentPort } 
 import { choiceAnswer, fakePort, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
-import { createRuntimeServices, type RuntimeServices } from '../../runtime/services.ts';
+import { type RuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 
 import { installPermissionManagerSafetyGuard as sharedGuard } from '@goodvibes-jev/engine/platform/platform/gate/policy';
@@ -35,7 +36,7 @@ function deferred<T = void>() {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 }
-function runtime() {
+async function runtime() {
   previous = installJudgmentPort(undefined);
   const root = makeProjectTempDir('agent-shared-permission-');
   const workspace = join(root, 'workspace');
@@ -43,11 +44,11 @@ function runtime() {
   mkdirSync(workspace, { recursive: true });
   mkdirSync(homeDir, { recursive: true });
   execFileSync('git', ['init', '-q'], { cwd: workspace });
-  const services = createRuntimeServices({
+  const services = (await createPreparedAgentRuntimeServices({
     modelDiscovery: 'skip', workingDir: workspace, homeDirectory: homeDir,
     configManager: new ConfigManager({ surfaceRoot: 'agent', workingDir: workspace, homeDir, configDir: join(homeDir, 'config') }),
     runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(), getConversationTitle: () => 'offline permission fixture',
-  });
+  }));
   runtimes.push(services);
   services.configManager.set('permissions.mode', 'allow-all');
   installJudgmentPort(undefined); // Never use the graph's production provider.
@@ -95,7 +96,7 @@ describe('Agent adopts the shared permission gate without alternate authority', 
 
   for (const tool of ['read', 'fetch']) {
     for (const failure of ['unavailable', 'throwing'] as const) test(`${tool}: automatic configured admission does not depend on ${failure} judgment`, async () => {
-      const services = runtime();
+      const services = (await runtime());
       const error = failure === 'unavailable' ? new JudgmentError('unavailable', 'fixture unavailable') : new Error('fixture manager failed');
       const log = record({ model: 'jev-1.13.0', ask: async () => { throw error; } });
       const gate = pipeline(services);
@@ -106,7 +107,7 @@ describe('Agent adopts the shared permission gate without alternate authority', 
   }
 
   test('missing preparation judgment fails before executing a captured read', async () => {
-    const services = runtime();
+    const services = (await runtime());
     services.configManager.set('permissions.mode', 'safe-owner');
     const gate = pipeline(services);
     await expect(gate.run('read', { path: 'fixture.txt' })).rejects.toThrow('No judgment port');
@@ -150,7 +151,7 @@ describe('Agent adopts the shared permission gate without alternate authority', 
   }
 
   test.each(['revoke', 'cancel'] as const)('%s during the actual admission await prevents execution of a late approval', async mode => {
-    const services = runtime(); const entered = deferred(); const release = deferred();
+    const services = (await runtime()); const entered = deferred(); const release = deferred();
     record(approvalReadings().port); const controller = new AbortController(); const gate = pipeline(services, controller.signal);
     const admit = gate.manager.admitAutonomous.bind(gate.manager);
     const held = spyOn(gate.manager, 'admitAutonomous').mockImplementation(async (...args) => {
@@ -167,7 +168,7 @@ describe('Agent adopts the shared permission gate without alternate authority', 
   });
 
   test('automatic admission executes only the captured fake action without fabricated judgment provenance', async () => {
-    const services = runtime();
+    const services = (await runtime());
     const answers = approvalReadings();
     const log = record(answers.port);
     const gate = pipeline(services);

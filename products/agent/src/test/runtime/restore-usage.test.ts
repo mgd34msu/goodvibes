@@ -15,8 +15,8 @@ import { bindOrchestratorContextAccounting } from '../../runtime/context-account
 const cleanups: Array<() => void> = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0).reverse()) cleanup(); });
 
-function fixture() {
-  const services = getTestRuntimeServices();
+async function fixture() {
+  const services = (await getTestRuntimeServices());
   cleanups.push(() => { services.dispose(); resetTestRuntimeServices(); });
   const runtimeBus = new RuntimeEventBus();
   const runtimeStore = createRuntimeStore();
@@ -64,7 +64,7 @@ const validHistory = [
 
 describe('real bootstrap usage restoration', () => {
   test('malformed persisted usage resumes as unavailable, remains unknown after a live increment, and recovers on a valid restore and clear', async () => {
-    const f = fixture();
+    const f = (await fixture());
     f.save('invalid-usage', [{ role: 'assistant', content: 'transcript survives', usage: { inputTokens: 9, outputTokens: 2, cacheReadTokens: 'PRIVATE-BILLING-VALUE' } }]);
     await f.resume('invalid-usage');
     expect(f.conversation.getMessageSnapshot()[0]?.content).toBe('transcript survives');
@@ -100,7 +100,7 @@ describe('real bootstrap usage restoration', () => {
   });
 
   test('all malformed persisted usage shapes stay unavailable without losing the transcript', async () => {
-    const f = fixture();
+    const f = (await fixture());
     const values: unknown[] = [null, [], 'PRIVATE-USAGE', {}, { inputTokens: '9', outputTokens: 2 },
       { inputTokens: -1, outputTokens: 2 }, { inputTokens: 1.5, outputTokens: 2 },
       { inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 2 },
@@ -117,7 +117,7 @@ describe('real bootstrap usage restoration', () => {
   });
 
   test('aggregate overflow is unavailable rather than a partial sum', async () => {
-    const f = fixture();
+    const f = (await fixture());
     f.save('overflow', [
       { role: 'assistant', content: 'one', usage: { inputTokens: Number.MAX_SAFE_INTEGER, outputTokens: 0 } },
       { role: 'assistant', content: 'two', usage: { inputTokens: 1, outputTokens: 0 } },

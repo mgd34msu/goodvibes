@@ -58,7 +58,7 @@ interface RewindApplyResult {
 
 describe('rewind.plan/apply conversation scope (live conversationRewindPort, platform 1.6.1)', () => {
   test('rewind.plan reports the conversation store as available (a real port is wired) but nothing to drop for an unregistered session', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const result = await buildDaemonGatewayCatalog(services).invoke('rewind.plan', {
       methodId: 'rewind.plan',
       body: { sessionId: 'no-such-session-ever-registered', scope: 'conversation' },
@@ -74,7 +74,7 @@ describe('rewind.plan/apply conversation scope (live conversationRewindPort, pla
   });
 
   test('rewind.plan then rewind.apply truncates a real registered conversation to a recorded turn anchor', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const sessionId = `gateway-rewind-conversation-scope-${Date.now()}`;
     const conversation = new ConversationManager(() => 80);
 
@@ -125,7 +125,7 @@ describe('rewind.plan/apply conversation scope (live conversationRewindPort, pla
   });
 
   test('rewind.apply without confirm refuses rather than fabricating a truncation', async () => {
-    const services = getTestRuntimeServices();
+    const services = (await getTestRuntimeServices());
     const sessionId = `gateway-rewind-conversation-scope-refuse-${Date.now()}`;
     const conversation = new ConversationManager(() => 80);
 

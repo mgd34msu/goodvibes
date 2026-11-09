@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, spyOn, test } from 'bun:test';
 import * as childProcess from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -10,7 +11,6 @@ import { executeToolCalls, type ToolExecutionDeps } from '@goodvibes-jev/engine/
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 
 // Product-owned semantic fixture; real public admission/registry/PTY APIs carry
@@ -20,7 +20,7 @@ test('actual agent graph public terminal control preserves Jev ownership and lif
   const configManager = new ConfigManager({ surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, 'config') });
   configManager.set('sandbox.enabled', false); // Explicit temporary fixture, no product containment policy change.
   seedProviderMetadataCacheFixture({ configManager, workingDirectory: root, homeDirectory: root, surfaceRoot: 'agent' });
-  const services = createRuntimeServices({ configManager, workingDir: root, homeDirectory: root, modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore() });
+  const services = (await createPreparedAgentRuntimeServices({ configManager, workingDir: root, homeDirectory: root, modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore() }));
   let sawSandbox = false; let sawLocalhost = false; let localRequests = 0;
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch() { localRequests++; return new Response('owned-local-preview'); } });
   let humanAsks = 0; let phase: 'allow' | 'aba' | 'dispose' = 'allow'; let intercepted = false;

@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 /**
  * runtime-shutdown-probe.ts, the measurement half of
  * src/test/runtime/runtime-shutdown-timer-teardown.test.ts.
@@ -21,7 +22,6 @@ import { ConfigManager } from '@/config/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '@/config/surface.ts';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { createRuntimeStore } from '@/runtime/store/index.ts';
-import { createRuntimeServices } from '@/runtime/services.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
 /** What the parent test asserts on. */
@@ -120,7 +120,7 @@ async function main(): Promise<void> {
   const runtimeStore = createRuntimeStore();
 
   installTimerTracking();
-  const services = createRuntimeServices({
+  const services = (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
     configManager,
@@ -128,7 +128,7 @@ async function main(): Promise<void> {
     runtimeStore,
     workingDir: work,
     homeDirectory: home,
-  });
+  }));
 
   // Let composition FINISH before tearing it down. createRuntimeServices() is
   // synchronous, but some owners arm their timers from an async continuation

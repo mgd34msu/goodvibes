@@ -34,12 +34,12 @@ function createConfig(overrides: {
 describe('startExternalServices (Agent: adopt-only)', () => {
   let runtimeBus: RuntimeEventBus;
   let hookDispatcher: HookDispatcher;
-  let runtimeServices: ReturnType<typeof getTestRuntimeServices>;
+  let runtimeServices: Awaited<ReturnType<typeof getTestRuntimeServices>>;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     runtimeBus = new RuntimeEventBus();
     hookDispatcher = new HookDispatcher();
-    runtimeServices = getTestRuntimeServices();
+    runtimeServices = (await getTestRuntimeServices());
   });
 
   test('never spawns or embeds a daemon even when legacy flags are enabled', async () => {

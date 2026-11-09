@@ -11,7 +11,7 @@ test('native Agent lifecycle reports busy, actual owner questions, and resumed s
   const reporter = createHerdrSessionReporter({ environment: { HERDR_ENV: '1', HERDR_PANE_ID: 'w2:p3', HERDR_BIN_PATH: '/fixture/herdr', HERDR_SOCKET_PATH: '/fixture/herdr.sock' }, transport: async argv => { calls.push([...argv]); if (argv[0] === '--version') return 'herdr 0.9.3'; } });
   const runtime = { sessionId: 'Session Original' };
   const orchestrator = { isThinking: false, isBusy: false };
-  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => new InfiniteBuffer(), () => {}, () => {}, createDefaultUiRuntimeServices());
+  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => new InfiniteBuffer(), () => {}, () => {}, (await createDefaultUiRuntimeServices()));
   const snapshot = () => buildAgentHerdrSessionUpdate({ runtime, orchestrator, input, surface: { sessionsDir: '/owned/agent/sessions' }, workingDir: '/owned/project with spaces' });
   await reporter.update(snapshot());
   orchestrator.isThinking = true;
@@ -34,9 +34,9 @@ test('native Agent lifecycle reports busy, actual owner questions, and resumed s
   expect(JSON.stringify(calls)).not.toContain('Private');
 });
 
-test('recovery, daemon repair, and line requests report explicit waiting while unrelated picker navigation does not', () => {
+test('recovery, daemon repair, and line requests report explicit waiting while unrelated picker navigation does not', async () => {
   const base = { runtime: { sessionId: 'id' }, orchestrator: { isThinking: true, isBusy: false }, surface: { sessionsDir: '/sessions' }, workingDir: '/project' };
-  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => new InfiniteBuffer(), () => {}, () => {}, createDefaultUiRuntimeServices());
+  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => new InfiniteBuffer(), () => {}, () => {}, (await createDefaultUiRuntimeServices()));
   expect(buildAgentHerdrSessionUpdate({ ...base, orchestrator: { isThinking: false, isBusy: true } }).busy).toBe(true);
   input.selectionModal.open('Ordinary picker', []);
   expect(buildAgentHerdrSessionUpdate({ ...base, input }).waitingForOwner).toBe(false);
@@ -91,8 +91,8 @@ test('only current-session agent work, active contracts, and actual hooks keep a
   expect(buildAgentHerdrSessionUpdate({ ...base, fleetNodes: [{ kind: 'agent', state: 'awaiting-approval', sessionRef: { sessionId: 'other' } }] }).waitingForOwner).toBe(false);
 });
 
-test('native owner wait follows concrete settings, deletion, and custom modal questions, and clears after dismissal', () => {
-  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => new InfiniteBuffer(), () => {}, () => {}, createDefaultUiRuntimeServices());
+test('native owner wait follows concrete settings, deletion, and custom modal questions, and clears after dismissal', async () => {
+  const input = new InputHandler(() => {}, new SelectionManager(), () => 0, () => 20, () => new InfiniteBuffer(), () => {}, () => {}, (await createDefaultUiRuntimeServices()));
   expect(input.waitingForOwner).toBe(false);
   input.settingsModal.active = true;
   expect(input.waitingForOwner).toBe(false);

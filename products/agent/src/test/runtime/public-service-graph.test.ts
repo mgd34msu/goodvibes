@@ -1,9 +1,9 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@goodvibes-jev/engine/platform/platform/runtime/state';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createDomainDispatch, createRuntimeStore } from '../../runtime/store/index.ts';
 import { registerAgentRuntimeEvents } from '../../runtime/agent-runtime-events.ts';
 import { emitContractEvent } from '@goodvibes-jev/engine/platform/platform/contract';
@@ -17,10 +17,10 @@ test('the actual Agent graph exposes the published contract services and dispose
     surfaceRoot: 'agent', workingDir: root, homeDir: root, configDir: join(root, '.goodvibes', 'agent'),
   });
   const runtimeBus = new RuntimeEventBus();
-  const services = createRuntimeServices({
+  const services = (await createPreparedAgentRuntimeServices({
     configManager, runtimeBus, runtimeStore: createRuntimeStore(),
     workingDir: root, homeDirectory: root, modelDiscovery: 'skip',
-  });
+  }));
   try {
     expect(services.contractRunner.list({ includeTerminal: true })).toEqual([]);
     expect(services.contractIntake).toBeDefined();

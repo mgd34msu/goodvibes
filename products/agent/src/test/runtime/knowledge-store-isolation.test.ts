@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
@@ -13,7 +14,7 @@ import { makeProjectTempDir } from '../helpers/project-temp.ts';
 const roots: string[] = [];
 const runtimes: ReturnType<typeof createRuntimeServices>[] = [];
 
-function makeRuntime() {
+async function makeRuntime() {
   const root = makeProjectTempDir(`gv-knowledge-isolation-${Date.now()}-${Math.random().toString(16).slice(2)}`);
   const workingDir = join(root, 'workspace');
   const homeDir = join(root, 'home');
@@ -33,7 +34,7 @@ function makeRuntime() {
   seedProviderMetadataCacheFixture({ configManager, homeDirectory: homeDir, workingDirectory: workingDir });
   const runtime = {
     configManager,
-    services: createRuntimeServices({
+    services: (await createPreparedAgentRuntimeServices({
       // Opt out: this process does not outlive the unawaited sweep.
       modelDiscovery: 'skip',
       configManager,
@@ -41,7 +42,7 @@ function makeRuntime() {
       runtimeStore: createRuntimeStore(),
       workingDir,
       homeDirectory: homeDir,
-    }),
+    })),
   };
   runtimes.push(runtime.services);
   return runtime;
@@ -56,7 +57,7 @@ afterEach(() => {
 
 describe('runtime knowledge store isolation', () => {
   test('Agent Knowledge is the only runtime knowledge surface created by Agent', async () => {
-    const { configManager, services } = makeRuntime();
+    const { configManager, services } = (await makeRuntime());
     const controlPlaneDir = configManager.getControlPlaneConfigDir();
 
     expect(services.knowledgeService).toBe(services.agentKnowledgeService);
@@ -77,8 +78,8 @@ describe('runtime knowledge store isolation', () => {
     expect(aliasMap.nodes).toHaveLength(0);
   });
 
-  test('orchestrator and multimodal writeback use Agent Knowledge through every runtime alias', () => {
-    const { services } = makeRuntime();
+  test('orchestrator and multimodal writeback use Agent Knowledge through every runtime alias', async () => {
+    const { services } = (await makeRuntime());
     const orchestrator = services.agentOrchestrator as unknown as {
       readonly toolDeps?: {
         readonly knowledgeService?: object;
@@ -95,7 +96,7 @@ describe('runtime knowledge store isolation', () => {
   });
 
   test('immediate startup planning waits for real bootstrap writes and stores artifacts in Agent Knowledge only', async () => {
-    const { configManager, services } = makeRuntime();
+    const { configManager, services } = (await makeRuntime());
     const controlPlaneDir = configManager.getControlPlaneConfigDir();
     const agentDbPath = join(controlPlaneDir, 'knowledge-agent.sqlite');
 

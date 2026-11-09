@@ -1,3 +1,4 @@
+import { createPreparedAgentRuntimeServices } from '../helpers/prepared-runtime-services.ts';
 import { expect, test } from 'bun:test';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +10,6 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import { RuntimeEventBus } from '@/runtime/index.ts';
 import { composeAgentToolRegistry } from '../../runtime/agent-tool-registry.ts';
 import { composeAgentPermissionManager } from '../../runtime/bootstrap-core.ts';
-import { createRuntimeServices } from '../../runtime/services.ts';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 
@@ -20,8 +20,8 @@ test.each(['safe-owner', 'safe-jev', 'yolo'] as const)('%s publishes a non-mode 
   const config = new ConfigManager({ surfaceRoot: 'agent', workingDir: workspace, homeDir: home, configDir });
   config.set('permissions.mode', mode); config.set('display.theme', 'vaporwave');
   const previous = installJudgmentPort(undefined);
-  const runtime = createRuntimeServices({ modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
-    configManager: config, workingDir: workspace, homeDirectory: home, getConversationTitle: () => 'Settings mode fixture' });
+  const runtime = (await createPreparedAgentRuntimeServices({ modelDiscovery: 'skip', runtimeBus: new RuntimeEventBus(), runtimeStore: createRuntimeStore(),
+    configManager: config, workingDir: workspace, homeDirectory: home, getConversationTitle: () => 'Settings mode fixture' }));
   using log = new SqliteDecisionLog(':memory:');
   let prompts = 0;
   runtime.permissionPromptRef.requestPermission = async () => { prompts++; return { approved: false }; };

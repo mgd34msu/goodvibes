@@ -1,3 +1,4 @@
+import { createSemanticNodeIdentityIndex, type SemanticNodeSelector, type SemanticIssueSelector } from './store-semantic-node-selector.js';
 import { createSemanticFactIdentityIndex, SemanticIdentityHeldError, type SemanticFactSelector } from './store-semantic-fact-selector.js';
 import { savedGeneratedProjectionIdentity, projectionIdentityParams, KnowledgeProjectionIdentityHeldError, type GeneratedProjectionIdentity } from './store-generated-projection-selector.js';
 import { createKnowledgeRowRevisions, knowledgeRawRowForAdmission } from './store-row-revisions.js';
@@ -6,7 +7,7 @@ import { drainOwned, opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { KnowledgeRecordAdmissionHeldError, knowledgeEdgeSnapshotFromRows, knowledgeRecordGenerationFromRows, knowledgeRecordSnapshotFromRows, type KnowledgeRecordSnapshot } from './store-record-snapshot.js';
 import { sameKnowledgeRecord, captureKnowledgeStoreInput, copyKnowledgeRepresentation, prepareKnowledgeOwnedClocks } from './store-record-representation.js';
 import { captureOwnedJson, JudgmentInputError, snapshotJudgmentInput } from '../gate/judgment-input.js';
-import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13 } from './store-current-schema-validation.js';
+import { validateCurrentKnowledgeSchema, validateKnowledgeSchemaV12, validateKnowledgeSchemaV13, validateKnowledgeSchemaV14 } from './store-current-schema-validation.js';
 import { createKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
 import { createKnowledgeNodeActivationCache } from './store-node-activation-cache.js';
 import { createGeneratedProjectionIdentityIndex } from './store-generated-projection-selector.js';
@@ -28,7 +29,7 @@ import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } 
 import { createKnowledgeEdgeChanges, validateKnowledgeEdgeChanges, knowledgeEdgeChangesFromRows, type KnowledgeEdgeChangeSnapshot, type KnowledgeEdgeGenerationSnapshot } from './store-edge-generations.js';
 import { snapshotNodeInput } from './activation/projection.js';
 import { KnowledgeNodeActivationHeldError, type KnowledgeNodeActivationOptions } from './activation/types.js';
-import { resolveKnowledgeNodeObservation, retainKnowledgeNodeObservation } from './store-node-observation.js';
+import { prepareHomeGraphSnapshotGroupAcknowledgment, resolveKnowledgeNodeObservation, retainKnowledgeNodeObservation } from './store-node-observation.js';
 import { knowledgeNodeRestorationGuard, prepareNodeActivationPass, assertPreparedNodeWrites, preparedNodeWrite, preparedNodeWrites, markPreparedNodeWritten, type NodeMutationDraft, type KnowledgePreparedNodeWrites } from './store-node-activation.js';
 export type { KnowledgePreparedNodeWrites } from './store-node-activation.js';
 import { commitGuardedKnowledgeIssueReplacement } from './store-issue-replacement.js';
@@ -69,6 +70,9 @@ import {
   createSchema,
   KNOWLEDGE_SCHEMA_VERSION,
   mapSemanticEnrichmentStateRow,
+  mapNodeRow,
+  mapIssueRow,
+  mapRefinementTaskRow,
   nowMs,
   stableText,
   uniq,
@@ -150,6 +154,7 @@ import { loadKnowledgeStoreSnapshot } from './store-load.js';
 import {
   ensureKnowledgeSpaceMetadata,
   getExplicitKnowledgeSpaceId,
+  getKnowledgeSpaceId,
 } from './spaces.js';
 
 /**
@@ -182,6 +187,8 @@ interface NativeArtifactReferenceStore {
 const nativeArtifactReferenceStores = new WeakMap<KnowledgeStore, NativeArtifactReferenceStore>();
 const nativeArtifactReferenceRead = SQLiteStore.prototype.withArtifactReferenceReads;
 const nativeArtifactReferenceSubscribe = SQLiteStore.prototype.subscribeArtifactReferenceClean;
+const homeGraphSnapshotGroupWriters = new WeakMap<KnowledgeStore,
+  (original: KnowledgeNodeRecord, groups: readonly string[], assertCurrent: () => void) => Promise<KnowledgeNodeRecord>>();
 
 interface NativeNodePublication {
   readonly store: KnowledgeStore;
@@ -264,12 +271,14 @@ export class KnowledgeStore {
       if (record.metadata.semanticIdentityVersion === 1) assertKnowledgeWriteCurrent(() => declareNativeData?.('knowledge-semantic-identities-v1'));
     };
     this.declareSemanticSourceFormat = declareNativeData ? () => declareNativeData('knowledge-semantic-source-revisions-v2') : undefined;
-    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v14'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
+    this.sqlite = new SQLiteStore(this.dbPath, { coordinated: true, beforePersist: () => declareNativeData?.('knowledge-schema-v15'), ...(beforeInitialRead ? { beforeInitialRead } : {}) });
     nativePublicationApply(nativePublicationSet, nativeArtifactReferenceStores, [this, Object.freeze({
       sqlite: this.sqlite, path: this.dbPath,
       sqliteSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'sqlite')!),
       pathSlot: Object.freeze(Object.getOwnPropertyDescriptor(this, 'dbPath')!),
     })]);
+    nativePublicationApply(nativePublicationSet, homeGraphSnapshotGroupWriters, [this,
+      (original: KnowledgeNodeRecord, groups: readonly string[], assertCurrent: () => void) => this.#updateHomeGraphSnapshotGroups(original, groups, assertCurrent)]);
     nativePublicationApply(nativePublicationAdd, nativeNodePublicationOwners, [this]);
     void this.init().catch((error: unknown) => {
       logger.error('[knowledge-store] initialization failed', {
@@ -355,6 +364,83 @@ export class KnowledgeStore {
       this.ready = false;
     })();
     return this.closePromise;
+  }
+
+  /** Native snapshot bookkeeping only. No source/body/status is observed anew. */
+  async #updateHomeGraphSnapshotGroups(original: KnowledgeNodeRecord, groups: readonly string[], assertMembershipCurrent: () => void): Promise<KnowledgeNodeRecord> {
+    const core: NativeArtifactReferenceStore | undefined = nativePublicationApply(nativePublicationGet, nativeArtifactReferenceStores, [this]);
+    const assertOwner = () => {
+      if (!core || this.closed) throw new KnowledgeNodeActivationHeldError('stale');
+      for (const [name, original] of [['sqlite', core.sqliteSlot], ['dbPath', core.pathSlot]] as const) {
+        const actual = Object.getOwnPropertyDescriptor(this, name);
+        if (!actual || !('value' in actual) || actual.value !== original.value || actual.configurable !== original.configurable
+          || actual.writable !== original.writable || actual.enumerable !== original.enumerable) throw new KnowledgeNodeActivationHeldError('stale');
+      }
+    };
+    assertOwner(); assertKnowledgeWriteCurrent(assertMembershipCurrent); assertOwner();
+    await this.init();
+    assertOwner();
+    const captured = captureKnowledgeStoreInput(groups);
+    if (!Array.isArray(captured) || captured.length < 1 || captured.length > 2
+      || captured.some(group => group !== 'entities' && group !== 'helpers') || new Set(captured).size !== captured.length
+      || original.kind !== 'ha_entity') throw new KnowledgeNodeActivationHeldError('malformed');
+    const selectedGroups = Object.freeze([...captured].sort());
+    let before: KnowledgeRecordSnapshot | undefined;
+    this.assertRecordSnapshotFrame(() => {
+      if (this.closed || this.nodes.get(original.id) !== original) throw new KnowledgeNodeActivationHeldError('stale');
+      before = this.getRecordSnapshot('node', original.id);
+      if (!before.raw || !before.generation || !sameKnowledgeRecord(original, before.record)) throw new KnowledgeNodeActivationHeldError('stale');
+      return undefined;
+    });
+    if (!before?.raw || !before.generation || typeof before.raw.metadata !== 'string' || typeof before.raw.gv_revision !== 'string') throw new KnowledgeNodeActivationHeldError('stale');
+    const snapshot = before, raw = before.raw;
+    const home = original.metadata.homeAssistant;
+    if (!home || typeof home !== 'object' || Array.isArray(home)) throw new KnowledgeNodeActivationHeldError('malformed');
+    const oldGroups = (home as Record<string, unknown>).snapshotGroups;
+    if (oldGroups !== undefined && (!Array.isArray(oldGroups) || oldGroups.some(group => group !== 'entities' && group !== 'helpers')
+      || new Set(oldGroups).size !== oldGroups.length)) throw new KnowledgeNodeActivationHeldError('malformed');
+    const assertOriginal = () => this.assertRecordSnapshotFrame(() => {
+      assertKnowledgeWriteCurrent(assertMembershipCurrent); assertOwner();
+      const actual = this.getRecordSnapshot('node', original.id);
+      if (this.closed || this.nodes.get(original.id) !== original || actual.generation !== snapshot.generation
+        || !sameKnowledgeRecord(original, actual.record)) throw new KnowledgeNodeActivationHeldError('stale');
+      return undefined;
+    });
+    assertOriginal();
+    if (Array.isArray(oldGroups) && oldGroups.length === selectedGroups.length && oldGroups.every((group, index) => group === selectedGroups[index])) return original;
+    let candidate: KnowledgeNodeRecord | undefined, publication: KnowledgeRecordSnapshot | undefined;
+    let acknowledgment: ReturnType<typeof prepareHomeGraphSnapshotGroupAcknowledgment> | undefined;
+    const check = () => { assertOriginal(); acknowledgment?.assertCurrent(); };
+    let publish: () => void = () => { throw new KnowledgeNodeActivationHeldError('stale'); };
+    await this.sqlite.publishPrepared(db => {
+      // JSON1 updates only this administrative field. A JS parse/stringify of
+      // all metadata could round unrelated native JSON integers or decimals.
+      db.run("UPDATE knowledge_nodes SET metadata = json_set(metadata, '$.homeAssistant.snapshotGroups', json(?)) WHERE id = ? AND gv_revision = ?",
+        [JSON.stringify(selectedGroups), original.id, raw.gv_revision as string]);
+      const rows = db.exec('SELECT * FROM knowledge_nodes WHERE id = ? LIMIT 1', [original.id]);
+      publication = knowledgeRecordSnapshotFromRows('node', rows);
+      const row = rows[0], values = row?.values[0];
+      if (!row || !values || !publication.generation || publication.generation === snapshot.generation) throw new KnowledgeNodeActivationHeldError('stale');
+      const mapped = mapNodeRow(row.columns, values);
+      const retained = copyKnowledgeRepresentation(mapped, snapshotNodeInput(mapped));
+      const preparedAcknowledgment = prepareHomeGraphSnapshotGroupAcknowledgment(original, retained);
+      preparedAcknowledgment.assertCurrent();
+      candidate = retained; acknowledgment = preparedAcknowledgment;
+      publish = () => {
+        this.nodes.set(retained.id, retained);
+        preparedAcknowledgment.publish();
+      };
+    }, check, () => publish());
+    assertKnowledgeWriteCurrent(assertMembershipCurrent); assertOwner();
+    const committed = candidate;
+    if (!committed) throw new KnowledgeNodeActivationHeldError('stale');
+    this.assertRecordSnapshotFrame(() => {
+      const current = this.getRecordSnapshot('node', committed.id);
+      if (this.closed || this.nodes.get(committed.id) !== committed || current.generation !== publication?.generation
+        || !sameKnowledgeRecord(committed, current.record)) throw new KnowledgeNodeActivationHeldError('stale');
+      return undefined;
+    });
+    return committed;
   }
 
   /** Cleanup reads every configured native reference family under its original
@@ -565,6 +651,52 @@ export class KnowledgeStore {
         const record = snapshot.record ? this.nodes.get(snapshot.record.id) : undefined;
         if (!record || !snapshot.record || snapshot.generation === null || !sameKnowledgeRecord(record, snapshot.record)) throw new SemanticIdentityHeldError('stale');
         candidates.push(record);
+      }
+      return undefined;
+    });
+    return Object.freeze(candidates);
+  }
+
+  getSemanticNodeCandidates(selector: SemanticNodeSelector): readonly KnowledgeNodeRecord[] {
+    const candidates: KnowledgeNodeRecord[] = [];
+    this.assertRecordSnapshotFrame(() => {
+      const result = this.sqlite.readPersistedSemanticNodeCandidates(selector)[0];
+      for (const values of result?.values ?? []) {
+        if (!result) throw new SemanticIdentityHeldError('stale');
+        const snapshot = knowledgeRecordSnapshotFromRows('node', [{ columns: result.columns, values: [values] }]);
+        const record = snapshot.record ? this.nodes.get(snapshot.record.id) : undefined;
+        if (!record || !snapshot.record || snapshot.generation === null || !sameKnowledgeRecord(record, snapshot.record)) throw new SemanticIdentityHeldError('stale');
+        candidates.push(record);
+      }
+      return undefined;
+    });
+    return Object.freeze(candidates);
+  }
+
+  getSemanticIssueCandidates(selector: SemanticIssueSelector): readonly KnowledgeIssueRecord[] {
+    const candidates: KnowledgeIssueRecord[] = [];
+    this.assertRecordSnapshotFrame(() => {
+      const result = this.sqlite.readPersistedSemanticIssueCandidates(selector)[0];
+      for (const values of result?.values ?? []) {
+        if (!result) throw new SemanticIdentityHeldError('stale');
+        const saved = mapIssueRow(result.columns, values), original = this.issues.get(saved.id);
+        if (!original || !sameKnowledgeRecord(original, saved)) throw new SemanticIdentityHeldError('stale');
+        if (getKnowledgeSpaceId(original) === selector.spaceId && original.metadata.namespace === selector.namespace) candidates.push(original);
+      }
+      return undefined;
+    });
+    return Object.freeze(candidates);
+  }
+
+  getSemanticRefinementTaskCandidates(spaceId: string, gapId: string): readonly KnowledgeRefinementTaskRecord[] {
+    const candidates: KnowledgeRefinementTaskRecord[] = [];
+    this.assertRecordSnapshotFrame(() => {
+      const result = this.sqlite.readPersistedSemanticRefinementTaskCandidates(spaceId, gapId)[0];
+      for (const values of result?.values ?? []) {
+        if (!result) throw new SemanticIdentityHeldError('stale');
+        const saved = mapRefinementTaskRow(result.columns, values), original = this.refinementTasks.get(saved.id);
+        if (!original || !sameKnowledgeRecord(original, saved)) throw new SemanticIdentityHeldError('stale');
+        candidates.push(original);
       }
       return undefined;
     });
@@ -1513,6 +1645,11 @@ export class KnowledgeStore {
           createGeneratedProjectionIdentityIndex(db);
           createArtifactReferenceIndexes(db);
           createSemanticFactIdentityIndex(db);
+          validateKnowledgeSchemaV14(db);
+        } },
+        { toVersion: 15, migrate: db => {
+          validateKnowledgeSchemaV14(db);
+          createSemanticNodeIdentityIndex(db);
           validateCurrentKnowledgeSchema(db);
         } },
       ],
@@ -1602,4 +1739,15 @@ export function captureKnowledgeArtifactReferenceOwner(store: KnowledgeStore): K
       current(); return result;
     },
   });
+}
+
+
+/** Internal native collector seam; deliberately absent from public knowledge
+ * exports and operator methods. Caller-built store objects cannot issue it. */
+export function updateHomeGraphSnapshotGroups(store: KnowledgeStore, original: KnowledgeNodeRecord,
+  groups: readonly string[], assertCurrent: () => void): Promise<KnowledgeNodeRecord> {
+  const write: ((record: KnowledgeNodeRecord, groups: readonly string[], assertCurrent: () => void) => Promise<KnowledgeNodeRecord>) | undefined =
+    nativePublicationApply(nativePublicationGet, homeGraphSnapshotGroupWriters, [store]);
+  if (!write) throw new KnowledgeNodeActivationHeldError('stale');
+  return write(original, groups, assertCurrent);
 }

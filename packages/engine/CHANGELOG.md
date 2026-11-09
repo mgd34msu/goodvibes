@@ -4,9 +4,21 @@
 
 ### Fixed
 
+- Sync Home Assistant helpers alongside entities, preserve omitted snapshot
+  groups and their original source evidence, and refuse unidentified input before
+  writing a partial snapshot. Membership-only updates preserve saved device
+  fields, native JSON values and review decisions.
+
 - Reuse durable contract filename digests for original immutable keys instead
   of repeatedly hashing the same four references. Preserve existing receipt and
   lease filenames, and reject changed or accessor-backed key captures.
+
+- Reuse semantic entities, source gaps, wiki pages, intrinsic subject gaps,
+  their issues and refinement tasks by exact saved role and scope. New labels
+  use full opaque IDs without hashing titles or related IDs. Preserve unrelated
+  historical labels, operator decisions and terminal task lifecycles; hold
+  ambiguous saved matches. A versioned source/subject index bounds lookups and
+  preserves original v14 data during the v15 migration.
 
 - Keep exact Unicode, punctuation, case, qualifiers and subject sets when reusing
   semantic facts. New facts use full opaque IDs; existing facts keep their saved

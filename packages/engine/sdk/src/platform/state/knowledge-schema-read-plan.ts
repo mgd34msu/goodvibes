@@ -1,3 +1,4 @@
+import { validateSemanticNodeIdentityIndex } from '../knowledge/store-semantic-node-selector.js';
 import { validateSemanticFactIdentityIndex } from '../knowledge/store-semantic-fact-selector.js';
 import { validateKnowledgeRowRevisions } from '../knowledge/store-row-revisions.js';
 import { validateKnowledgeNodeContentRevisions } from '../knowledge/store-node-content-revisions.js';
@@ -60,6 +61,7 @@ export function validateNativeKnowledgeReadSchema(db: Pick<SqlDatabase, 'exec'>)
     validateGeneratedProjectionIdentityIndex(db);
     validateArtifactReferenceIndexes(db);
     validateSemanticFactIdentityIndex(db);
+    validateSemanticNodeIdentityIndex(db);
   } catch { return false; }
   const layoutResults = db.exec(layouts.map(([table]) => `PRAGMA table_info(${table})`).join(';'));
   // sql.js omits empty statement results. Never attribute a shifted result to

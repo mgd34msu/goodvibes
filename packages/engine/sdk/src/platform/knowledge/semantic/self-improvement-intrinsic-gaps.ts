@@ -1,4 +1,7 @@
+import { observeKnowledgeValue } from '../local-value-observation.js';
 import { knowledgeRawRepresentation } from '../store-record-representation.js';
+import { createSemanticNodeIdentityPlanner, type SemanticNodeIdentityPlanner } from './node-identity-plan.js';
+import { prepareSemanticIssueIdentity } from './auxiliary-identities.js';
 import { prepareGeneratedKnowledgeNodeIdentity } from '../source-structural-references.js';
 import { createSemanticWriteGuard } from './primary-source-plan.js';
 import { KnowledgeRepairFactUsefulnessHeldError } from './repair-usefulness/types.js';
@@ -25,7 +28,6 @@ import {
 } from './self-improvement-graph.js';
 import {
   readString,
-  semanticHash,
   semanticMetadata,
   semanticSlug,
 } from './utils.js';
@@ -48,6 +50,7 @@ export async function discoverIntrinsicGaps(
     .map((source) => [source.id, source]));
   const nodesById = graph.nodesById;
   const createdIds = new Set<string>();
+  const identities = createSemanticNodeIdentityPlanner(store);
   let created = 0;
   let sourceIndex = 0;
 
@@ -63,7 +66,7 @@ export async function discoverIntrinsicGaps(
       const quality = await prepareQuality(store, spaceId, subject, facts, signal, shouldStop, selection.assertCurrent);
       const coverage = await intrinsicCoverage(store, spaceId, subject, quality, [source], objectProfiles, signal, shouldStop);
       if (coverage.sufficient) continue;
-      if (await upsertIntrinsicFeatureGap(store, spaceId, subject, [source], createdIds, coverage.assertCurrent)) created += 1;
+      if (await upsertIntrinsicFeatureGap(store, spaceId, subject, [source], createdIds, identities, coverage.assertCurrent)) created += 1;
     }
   }
 
@@ -83,7 +86,7 @@ export async function discoverIntrinsicGaps(
       const quality = await prepareQuality(store, spaceId, subject, facts, signal, shouldStop, selection.assertCurrent);
       const coverage = await intrinsicCoverage(store, spaceId, subject, quality, sourceList, objectProfiles, signal, shouldStop);
       if (coverage.sufficient) continue;
-      if (await upsertIntrinsicFeatureGap(store, spaceId, subject, sourceList, createdIds, coverage.assertCurrent)) created += 1;
+      if (await upsertIntrinsicFeatureGap(store, spaceId, subject, sourceList, createdIds, identities, coverage.assertCurrent)) created += 1;
     }
   }
 
@@ -96,10 +99,11 @@ async function upsertIntrinsicFeatureGap(
   subject: KnowledgeNodeRecord,
   sources: readonly KnowledgeSourceRecord[],
   createdIds: Set<string>,
+  identities: SemanticNodeIdentityPlanner,
   assertCurrent: () => void,
 ): Promise<boolean> {
   assertCurrent();
-  const identity = prepareGeneratedKnowledgeNodeIdentity(store, 'sem-intrinsic-gap', [spaceId, subject.id, 'features-specifications']);
+  const identity = prepareGeneratedKnowledgeNodeIdentity(store, { role: 'intrinsic-gap', spaceId, subjectId: subject.id }, identities);
   const id = identity.id;
   if (createdIds.has(id)) return false;
   createdIds.add(id);
@@ -125,7 +129,7 @@ async function upsertIntrinsicFeatureGap(
         sourceIds: sources.map((source) => source.id),
         linkedObjectIds: [subject.id],
         repairStatus: readString(existing?.metadata.repairStatus) ?? 'open',
-        createdBy: 'semantic-self-improvement',
+        createdBy: 'semantic-self-improvement', ...identity.metadata,
       }),
     }, 'research-task', subject, () => { assertCurrent(); return store.getNode(subject.id); });
   const edges: import('../types.js').KnowledgeEdgeUpsertInput[] = sources.map((source) => ({
@@ -144,8 +148,9 @@ async function upsertIntrinsicFeatureGap(
       relation: 'has_gap',
       metadata: semanticMetadata(spaceId, { intrinsic: true }),
     });
+  const issueIdentity = prepareSemanticIssueIdentity(store, { spaceId, nodeId: id, code: 'knowledge.intrinsic_gap', namespace: `knowledge:${spaceId}:semantic` });
   const issue = {
-      id: `sem-intrinsic-gap-issue-${semanticHash(spaceId, subject.id, 'features-specifications')}`,
+      id: issueIdentity.id,
       severity: 'info' as const,
       code: 'knowledge.intrinsic_gap',
       message: title,
@@ -158,11 +163,11 @@ async function upsertIntrinsicFeatureGap(
         gapKind: 'intrinsic_features',
       }),
     };
-  const existingVersion = JSON.stringify(existing);
+  const existingVersion = observeKnowledgeValue(existing);
   const published = await store.applyPreparedIngest({ sources: [], extractions: [], nodes: [], edges: [], issues: [] }, async () => ({
     nodes: [gapInput], edges, issues: [issue], assertCurrent: () => {
-      assertCurrent();
-      if (store.getNode(id) !== existing || JSON.stringify(store.getNode(id)) !== existingVersion) throw new KnowledgeRepairFactUsefulnessHeldError('stale');
+      assertCurrent(); identity.assertCurrent(); issueIdentity.assertCurrent();
+      if (store.getNode(id) !== existing || !existingVersion.matches(store.getNode(id))) throw new KnowledgeRepairFactUsefulnessHeldError('stale');
     },
   }));
   const node = published.nodes.find(node => node.id === id);

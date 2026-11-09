@@ -132,7 +132,7 @@ describe('native generated projection scope and saved identity', () => {
     expect(refreshed.listSources().filter(source => source.connectorId === 'knowledge-projection')).toHaveLength(1);
   });
 
-  test('an actual schema13 store installs the new index through schema14 without rewriting existing rows', async () => {
+  test('an actual schema13 store installs the new index through schema15 without rewriting existing rows', async () => {
     const item = fixture();
     const source = await item.store.upsertSource({ id: 'existing-source', connectorId: 'manual', sourceType: 'document', title: 'Existing source', status: 'indexed' });
     const generation = item.store.getSourceGeneration(source.id);
@@ -143,6 +143,7 @@ describe('native generated projection scope and saved identity', () => {
     database.run('DROP INDEX idx_knowledge_extractions_artifact_reference');
     database.run('DROP INDEX idx_knowledge_edges_artifact_target_reference');
     database.run('DROP INDEX idx_knowledge_nodes_semantic_fact_identity');
+    database.run('DROP INDEX idx_knowledge_nodes_semantic_role_scope');
     database.run('PRAGMA user_version=13'); database.close();
     const migrated = item.open(); await migrated.init();
     expect(migrated.getSourceGeneration(source.id)).toBe(generation);
@@ -152,7 +153,7 @@ describe('native generated projection scope and saved identity', () => {
     await migrated.close();
     const check = new Database(item.dbPath, { readonly: true });
     try {
-      expect(check.query('PRAGMA user_version').get()).toEqual({ user_version: 14 });
+      expect(check.query('PRAGMA user_version').get()).toEqual({ user_version: 15 });
       expect(check.query("SELECT name FROM sqlite_schema WHERE name='idx_knowledge_sources_generated_projection_identity'").get()).not.toBeNull();
     } finally { check.close(); }
   });

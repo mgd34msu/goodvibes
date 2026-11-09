@@ -2,15 +2,16 @@ import { guardKnowledgeEdgeInput } from '../store-edge-writes.js';
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeNodeRecord, KnowledgeNodeUpsertInput, KnowledgeSourceRecord } from '../types.js';
 import type { KnowledgeSemanticExtraction, KnowledgeSemanticFactInput } from './types.js';
-import { semanticHash, semanticMetadata, semanticSlug } from './utils.js';
+import { semanticMetadata, semanticSlug } from './utils.js';
 
 export function prepareWikiPageNodeInput(
   source: KnowledgeSourceRecord, semantic: KnowledgeSemanticExtraction, spaceId: string,
+  identity: { readonly id: string; readonly metadata: Readonly<Record<string, unknown>> },
 ): KnowledgeNodeUpsertInput | undefined {
   const markdown = semantic.wikiPage?.markdown ?? renderDeterministicWikiPage(source, semantic.facts);
   if (!markdown.trim()) return undefined;
   return {
-    id: `sem-page-${semanticHash(spaceId, source.id)}`,
+    id: identity.id,
     kind: 'wiki_page',
     slug: semanticSlug(`${spaceId}-${source.title ?? source.id}-page`),
     title: semantic.wikiPage?.title ?? `${source.title ?? source.id} knowledge page`,
@@ -23,7 +24,7 @@ export function prepareWikiPageNodeInput(
       markdown,
       sourceId: source.id,
       extractor: semantic.extractor,
-      textHash: undefined,
+      textHash: undefined, ...identity.metadata,
     }),
   };
 }

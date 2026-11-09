@@ -1,3 +1,4 @@
+import { prepareSemanticRefinementTaskIdentity } from './auxiliary-identities.js';
 import { guardKnowledgeRefinementTaskInput } from '../store-refinement.js';
 import type {
   KnowledgeNodeRecord,
@@ -7,7 +8,7 @@ import type {
 } from '../types.js';
 import type { KnowledgeStore } from '../store.js';
 import { isTerminalRefinementState } from '../store-lifecycle-authority.js';
-import { readString, readStringArray, semanticHash, semanticMetadata, uniqueStrings } from './utils.js';
+import { readString, readStringArray, semanticMetadata, uniqueStrings } from './utils.js';
 
 export interface RefinementTaskGapContext {
   readonly gap: KnowledgeNodeRecord;
@@ -27,8 +28,8 @@ export async function upsertRefinementTaskForGap(
 ): Promise<KnowledgeRefinementTaskRecord> {
   assertCurrent();
   const subject = context.linkedObjects[0]!;
-  const id = `kref-${semanticHash(spaceId, context.gap.id)}`;
-  const existing = store.getRefinementTask(id);
+  const identity = prepareSemanticRefinementTaskIdentity(store, spaceId, context.gap.id);
+  const id = identity.id, existing = identity.original;
   if (existing && isTerminalRefinementState(existing.state)) return existing;
   const attemptCount = existing?.attemptCount ?? 0;
   return store.upsertRefinementTask(guardKnowledgeRefinementTaskInput({
@@ -58,7 +59,7 @@ export async function upsertRefinementTaskForGap(
       linkedObjectIds: context.linkedObjects.map((node) => node.id),
       policyVersion: 'knowledge-refinement-v2',
     }),
-  }, assertCurrent));
+  }, () => { assertCurrent(); identity.assertCurrent(); }));
 }
 
 export async function updateRefinementTask(

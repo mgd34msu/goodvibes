@@ -1,3 +1,4 @@
+import { semanticNodeCandidateSql, semanticNodeCandidateParams, semanticIssueCandidateSql, semanticIssueCandidateParams, semanticRefinementTaskCandidateSql, semanticRefinementTaskCandidateParams, type SemanticNodeSelector, type SemanticIssueSelector } from '../knowledge/store-semantic-node-selector.js';
 import { semanticFactCandidateSql, semanticFactCandidateParams, type SemanticFactSelector } from '../knowledge/store-semantic-fact-selector.js';
 import { acquireArtifactReferenceLock } from './artifact-reference-lock.js';
 import { inspectPersistedArtifactReferences } from '../knowledge/store-artifact-references.js';
@@ -1359,6 +1360,21 @@ export class SQLiteStore {
   /** Closed planning tuple selector; never a caller callback or mutable cache. */
   readPersistedPlanningSource(identity: PlanningSourceIdentity): ReturnType<SqlDatabase['exec']> {
     try { return this.readPrivatePersistedRows(planningSourceIdentitySql, planningSourceIdentityParams(identity)); }
+    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
+  readPersistedSemanticNodeCandidates(selector: SemanticNodeSelector): ReturnType<SqlDatabase['exec']> {
+    try { return this.readPrivatePersistedRows(semanticNodeCandidateSql, semanticNodeCandidateParams(selector)); }
+    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
+  readPersistedSemanticIssueCandidates(selector: SemanticIssueSelector): ReturnType<SqlDatabase['exec']> {
+    try { return this.readPrivatePersistedRows(semanticIssueCandidateSql, semanticIssueCandidateParams(selector)); }
+    catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
+  }
+
+  readPersistedSemanticRefinementTaskCandidates(spaceId: string, gapId: string): ReturnType<SqlDatabase['exec']> {
+    try { return this.readPrivatePersistedRows(semanticRefinementTaskCandidateSql, semanticRefinementTaskCandidateParams(spaceId, gapId)); }
     catch (error) { if (this.persistedReadFrame) this.persistedReadFrame.poisoned = true; throw error; }
   }
 

@@ -121,6 +121,9 @@ export interface HomeGraphResetInput extends HomeGraphSpaceInput {
   readonly preserveArtifacts?: boolean | undefined;
 }
 
+/** At runtime an object must supply a recognizable identifier or a declared
+ * name/title (including supported Home Assistant aliases). Payload bytes never
+ * supply an anonymous identity. Snapshot sync validates every item before writes. */
 export interface HomeGraphObjectInput {
   readonly id?: string | undefined;
   readonly name?: string | undefined;
@@ -184,6 +187,7 @@ export interface HomeGraphSnapshotInput extends HomeGraphSpaceInput {
   readonly scenes?: readonly HomeGraphObjectInputSource[] | undefined;
   readonly labels?: readonly HomeGraphObjectInputSource[] | undefined;
   readonly integrations?: readonly HomeGraphObjectInputSource[] | undefined;
+  /** Helper entities share identity with entities but retain independent supplied-group membership. */
   readonly helpers?: readonly HomeGraphObjectInputSource[] | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }
@@ -250,6 +254,7 @@ export interface HomeGraphSyncResult {
   readonly generated: HomeGraphGeneratedPagesSummary;
   readonly counts: {
     readonly entities: number;
+    readonly helpers: number;
     readonly devices: number;
     readonly areas: number;
     readonly automations: number;

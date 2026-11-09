@@ -1,3 +1,4 @@
+import { createSemanticNodeIdentityIndex, semanticNodeIdentityIndexSql } from './store-semantic-node-selector.js';
 import { createSemanticFactIdentityIndex, semanticFactIdentityIndexSql } from './store-semantic-fact-selector.js';
 import { createKnowledgeRowRevisions, knowledgeRowRevisionTriggers } from './store-row-revisions.js';
 import { createKnowledgeNodeContentRevisions, knowledgeNodeContentRevisionTriggers } from './store-node-content-revisions.js';
@@ -289,6 +290,7 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
     createGeneratedProjectionIdentityIndex(native);
     createArtifactReferenceIndexes(native);
     createSemanticFactIdentityIndex(native);
+    createSemanticNodeIdentityIndex(native);
   }
   else {
     // Schema documentation collects DDL without constructing a database.
@@ -300,6 +302,7 @@ export function createSchema(db: Pick<SqlDatabase, 'run'> & Partial<Pick<SqlData
     db.run(generatedProjectionIdentityIndexSql);
     for (const index of artifactReferenceIndexes) db.run(index.sql);
     db.run(semanticFactIdentityIndexSql);
+    db.run(semanticNodeIdentityIndexSql);
   }
 
 }

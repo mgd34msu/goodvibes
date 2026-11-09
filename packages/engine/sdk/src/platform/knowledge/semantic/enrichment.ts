@@ -8,6 +8,9 @@ import { guardKnowledgeEdgeInput } from '../store-edge-writes.js';
 import { captureKnowledgeSourceReferences, knowledgeSourceJudgmentUris, projectKnowledgeSourceReferences, prepareGeneratedKnowledgeNodeIdentity } from '../source-structural-references.js';
 import { retainGeneratedFactRecordReferences } from '../generated-fact-record-references.js';
 import { captureSemanticSourceRevision, semanticSourceIsCurrent, semanticSourceRevisionMetadata } from './source-revisions.js';
+import { createSemanticNodeIdentityPlanner } from './node-identity-plan.js';
+import { prepareSemanticIssueIdentity } from './auxiliary-identities.js';
+import type { SemanticNodeSelector } from '../store-semantic-node-selector.js';
 import { createSemanticNodeSlugPlanner } from './node-slug.js';
 import { prepareObservedKnowledgeNodeInput } from '../store-node-observation.js';
 import { KnowledgeRecordAdmissionHeldError } from '../store-record-snapshot.js';
@@ -41,7 +44,6 @@ import {
   readRecord,
   readString,
   readStringArray,
-  semanticHash,
   semanticMetadata,
   semanticSlug,
   sourceKnowledgeSpace,
@@ -342,13 +344,17 @@ async function persistSemanticExtraction(
 
   const nodeSlug = createSemanticNodeSlugPlanner(store);
   const nodeIdentities = new Map<string, ReturnType<typeof prepareGeneratedKnowledgeNodeIdentity>>();
-  const nativeNodeId = (prefix: Parameters<typeof prepareGeneratedKnowledgeNodeIdentity>[1], ...parts: string[]) => {
-    const identity = prepareGeneratedKnowledgeNodeIdentity(store, prefix, parts);
-    nodeIdentities.set(identity.id, identity);
-    return identity.id;
+  const roleIdentities = createSemanticNodeIdentityPlanner(store);
+  const nativeNodeIdentity = (selector: SemanticNodeSelector) => {
+    const identity = prepareGeneratedKnowledgeNodeIdentity(store, selector, roleIdentities);
+    const previous = nodeIdentities.get(identity.id);
+    if (previous) return previous;
+    nodeIdentities.set(identity.id, identity); return identity;
   };
-  const entityPlans = semantic.entities.map((entity) => ({
-      id: nativeNodeId('sem-entity', spaceId, source.id, entity.title),
+  const entityPlans = [...new Map(semantic.entities.map((entity) => {
+    const identity = nativeNodeIdentity({ role: 'entity', spaceId, sourceId: source.id, title: entity.title });
+    return [identity.id, {
+      id: identity.id,
       kind: 'knowledge_entity' as const,
       slug: semanticSlug(`${spaceId}-${entity.title}`),
       title: entity.title,
@@ -363,14 +369,15 @@ async function persistSemanticExtraction(
         sourceId: source.id,
         extractionId: extraction?.id,
         extractor: semantic.extractor,
-        textHash: undefined,
+        textHash: undefined, ...identity.metadata,
       }),
-  })).map(nodeSlug);
+    }] as const;
+  })).values()].map(nodeSlug);
   const entityIds = new Set(entityPlans.map((entity) => entity.id));
   for (const id of entityIds) guard.node(id);
   guard.watch('source-subject-edges', () => store.listEdges().filter((edge) => edge.fromKind === 'source' && edge.fromId === source.id));
-  // An entity-ID collision overlays semanticKind=entity, which excludes that old
-  // object from canonical subjects just as the former write-then-read order did.
+  // Only exact saved entity roles overlay subjects. An unrelated old hash
+  // label is preserved rather than replaced by a new differently titled entity.
   const subjectSelection = await linkedObjectsForSource(store, source, entityIds, options.signal, options.shouldStop);
   guard.watch('source-subject-selection', () => { subjectSelection.assertCurrent(); return true; });
   const sourceLinkedObjects = subjectSelection.nodes;
@@ -421,12 +428,14 @@ async function persistSemanticExtraction(
     allFacts: semantic.facts, persistedFacts,
     sourceSubjects: sourceLinkedObjects, proposedEntities,
   });
-  const activeIds = new Set([
-    ...entityIds, ...factDrafts.map((fact) => fact.factId),
-    ...semantic.gaps.map((gap) => `sem-gap-${semanticHash(spaceId, source.id, gap.question)}`),
-    ...((semantic.wikiPage?.markdown ?? renderDeterministicWikiPage(source, semantic.facts)).trim()
-      ? [`sem-page-${semanticHash(spaceId, source.id)}`] : []),
-  ]);
+  const gapIdentities = [...new Map(semantic.gaps.map(gap => {
+    const identity = nativeNodeIdentity({ role: 'gap', spaceId, sourceId: source.id, title: gap.question });
+    return [identity.id, { gap, identity }] as const;
+  })).values()];
+  const wikiIdentity = (semantic.wikiPage?.markdown ?? renderDeterministicWikiPage(source, semantic.facts)).trim()
+    ? nativeNodeIdentity({ role: 'wiki', spaceId, sourceId: source.id }) : undefined;
+  const activeIds = new Set([...entityIds, ...factDrafts.map(fact => fact.factId), ...gapIdentities.map(plan => plan.identity.id), ...(wikiIdentity ? [wikiIdentity.id] : [])]);
+  guard.watch('semantic-role-identities', () => { roleIdentities.assertCurrent(); return true; });
   for (const id of activeIds) guard.node(id);
   guard.watch('active-fact-edges', () => store.listEdges().filter((edge) =>
     (edge.toKind === 'node' && activeIds.has(edge.toId)) || (edge.fromKind === 'node' && activeIds.has(edge.fromId))));
@@ -445,16 +454,14 @@ async function persistSemanticExtraction(
   }
   const applySupersession = await resolveSupersession();
   guard.assertCurrent(); assertQualityCurrent();
-  const gapPlans = semantic.gaps.map((gap) => ({ gap, nodeInput: prepareObservedKnowledgeNodeInput(store, nodeSlug(enrichmentGapNodeInput(gap, source,
-    extraction, semantic, spaceId, store.getNode(`sem-gap-${semanticHash(spaceId, source.id, gap.question)}`))), 'research-task', { source, extraction },
+  const gapPlans = gapIdentities.map(({ gap, identity }) => ({ gap, nodeInput: prepareObservedKnowledgeNodeInput(store, nodeSlug(enrichmentGapNodeInput(gap, source,
+    extraction, semantic, spaceId, store.getNode(identity.id), identity)), 'research-task', { source, extraction },
       () => ({ source: store.getSource(source.id), extraction: store.getExtractionBySourceId(source.id) })),
   }));
-  const wikiDraft = prepareWikiPageNodeInput(source, semantic, spaceId);
-  for (const { gap } of gapPlans) nativeNodeId('sem-gap', spaceId, source.id, gap.question);
-  if (wikiDraft) nativeNodeId('sem-page', spaceId, source.id);
+  const wikiDraft = wikiIdentity ? prepareWikiPageNodeInput(source, semantic, spaceId, wikiIdentity) : undefined;
   const wikiInput = wikiDraft ? nodeSlug(wikiDraft) : undefined;
   const activation = await store.prepareNodeWrites([...entityPlans, ...factPlans.map((plan) => plan.nodeInput),
-    ...gapPlans.map((plan) => plan.nodeInput), ...(wikiInput ? [wikiInput] : [])], { signal: options.signal, requireAccepted: true, assertCurrent: assertQualityCurrent });
+    ...gapPlans.map((plan) => plan.nodeInput), ...(wikiInput ? [wikiInput] : [])], { signal: options.signal, requireAccepted: true, assertCurrent() { assertQualityCurrent(); roleIdentities.assertCurrent(); } });
   let activationIndex = 0;
   guard.assertCurrent();
   store.assertPreparedNodeWrites(activation);
@@ -487,15 +494,16 @@ async function persistSemanticExtraction(
     await linkRelation(store, entities, facts, relation, spaceId, semantic.extractor, assertQualityCurrent);
   }
 
-  for (const { gap, nodeInput } of gapPlans) {
+  for (const { gap } of gapPlans) {
     assertSemanticWriteAllowed(options.signal, options.shouldStop);
     assertQualityCurrent();
     const node = await store.upsertPreparedNode(activation, activationIndex++);
     nodeIdentities.get(node.id)!.retain(node);
     gaps.push(node);
     await linkSourceToNode(store, source.id, node.id, 'has_gap', spaceId, semantic.extractor, {}, assertQualityCurrent);
+    const issueIdentity = prepareSemanticIssueIdentity(store, { spaceId, nodeId: node.id, code: 'knowledge.semantic_gap', namespace: `knowledge:${spaceId}:semantic` });
     await store.applyPreparedIngest({ sources: [], extractions: [], nodes: [], edges: [], issues: [] }, async () => ({ nodes: [], edges: [], issues: [{
-      id: `sem-issue-${semanticHash(spaceId, source.id, gap.question)}`,
+      id: issueIdentity.id,
       severity: gap.severity ?? 'info',
       code: 'knowledge.semantic_gap',
       message: gap.question,
@@ -507,7 +515,7 @@ async function persistSemanticExtraction(
         subject: gap.subject,
         namespace: `knowledge:${spaceId}:semantic`,
       }),
-    }], assertCurrent: assertQualityCurrent }));
+    }], assertCurrent() { assertQualityCurrent(); issueIdentity.assertCurrent(); } }));
   }
 
   assertSemanticWriteAllowed(options.signal, options.shouldStop);

@@ -45,7 +45,7 @@ const STOPWORDS = new Set([
   'with',
 ]);
 
-export function semanticHash(...parts: readonly unknown[]): string {
+function historicalSemanticHash(...parts: readonly unknown[]): string {
   const hash = createHash('sha256');
   for (const part of parts) {
     hash.update(String(part ?? ''));
@@ -152,7 +152,7 @@ export function sourceSemanticText(source: KnowledgeSourceRecord, extraction?: K
 /** Only an actual saved unversioned enrichment state compares this historical
  * text commitment. Fresh revision bindings never hash source text. */
 export function historicalSourceSemanticHash(source: KnowledgeSourceRecord, extraction?: KnowledgeExtractionRecord | null): string {
-  return semanticHash(
+  return historicalSemanticHash(
     source.contentHash,
     source.updatedAt,
     extraction?.id,

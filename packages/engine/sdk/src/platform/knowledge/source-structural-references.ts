@@ -6,7 +6,8 @@ import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
 import { knowledgeJudgmentRepresentation, sameKnowledgeRecord } from './store-record-representation.js';
 import { hasKnowledgeNodePublication, knowledgeNodePublicationGeneration } from './store.js';
-import { semanticHash } from './semantic/utils.js';
+import { createSemanticNodeIdentityPlanner, prepareSemanticNodeIdentity, type SemanticNodeIdentityPlanner } from './semantic/node-identity-plan.js';
+import { semanticNodeScopeMatches, type SemanticNodeSelector } from './store-semantic-node-selector.js';
 
 // Native registry lookups cannot be replaced by a later prototype override.
 const weakMapGet = WeakMap.prototype.get, weakMapSet = WeakMap.prototype.set, applyWeakMap = Reflect.apply;
@@ -29,12 +30,13 @@ const nodeIdentities = new WeakMap<KnowledgeNodeRecord, { readonly store: Knowle
 /** Bind an identifier constructed here to its actual SQL publication. This
  * proves its origin only; content and semantic acceptance remain independent. */
 export function prepareGeneratedKnowledgeNodeIdentity(store: KnowledgeStore,
-  prefix: 'sem-entity' | 'sem-gap' | 'sem-page' | 'sem-intrinsic-gap', parts: readonly string[]) {
-  const id = `${prefix}-${semanticHash(...parts)}`;
+  selector: SemanticNodeSelector, planner: SemanticNodeIdentityPlanner = createSemanticNodeIdentityPlanner(store)) {
+  const identity = prepareSemanticNodeIdentity(planner, store, selector), id = identity.id;
   const previous = store.getNode(id) ?? undefined;
-  const kind = prefix === 'sem-entity' ? 'knowledge_entity' : prefix === 'sem-page' ? 'wiki_page' : 'knowledge_gap';
-  return Object.freeze({ id, retain(record: KnowledgeNodeRecord): void {
-    if (record.id !== id || record.kind !== kind || store.getNode(id) !== record
+  return Object.freeze({ id, metadata: Object.freeze({ semanticIdentityVersion: 1 }), assertCurrent: identity.assertCurrent,
+    retain(record: KnowledgeNodeRecord): void {
+    identity.assertCurrent();
+    if (record.id !== id || !semanticNodeScopeMatches(record, identity.selector) || store.getNode(id) !== record
       || !hasKnowledgeNodePublication(store, record, previous)) throw new KnowledgeGeneratedFactSupportHeldError('stale');
     const generation = knowledgeNodePublicationGeneration(store, record, previous);
     if (generation === null) throw new KnowledgeGeneratedFactSupportHeldError('stale');

@@ -1,3 +1,4 @@
+import { SemanticIdentityHeldError } from '../sdk/src/platform/knowledge/store-semantic-fact-selector.js';
 import { extractionValueFixtureFor, extractionValueFixtureReading, type ExtractionValueFixtures } from './_helpers/knowledge-extraction-value-readings.js';
 import { SQLiteStore } from '../sdk/src/platform/state/sqlite-store.js';
 import { createSchema, KNOWLEDGE_SCHEMA_VERSION } from '../sdk/src/platform/knowledge/store-schema.js';
@@ -11,7 +12,6 @@ import { installJudgmentPort } from '@goodvibes-jev/engine/errors';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
 import { choiceAnswer, fakePort, scoreAnswer, noulAnswer } from '@goodvibes-jev/judgment/testing';
 import { createKnowledgeNodeOperatorMutation, KnowledgeNodeMutationHeldError } from '../sdk/src/platform/knowledge/store-node-authority.js';
-import { semanticHash } from '../sdk/src/platform/knowledge/semantic/utils.js';
 import { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import { enrichKnowledgeSource } from '../sdk/src/platform/knowledge/semantic/enrichment.js';
 import { prepareSourceLinkedRepairProfileFacts, type SourceLinkedRepairProfileFactInput } from '../sdk/src/platform/knowledge/semantic/self-improvement-promotion.js';
@@ -251,8 +251,8 @@ describe('generated fact support persistence boundaries', () => {
 
   test('a reviewed wiki conflict holds new entities and facts before any enrichment write', async () => {
     const { store, source } = await fixture(); readings();
-    const wiki = await store.upsertNode({ id: `sem-page-${semanticHash(spaceId, source.id)}`, kind: 'wiki_page', slug: 'reviewed-page',
-      title: 'Operator reference', summary: 'Operator correction', sourceId: source.id, metadata: { knowledgeSpaceId: spaceId } });
+    const wiki = await store.upsertNode({ id: 'sem-page-historical-reviewed', kind: 'wiki_page', slug: 'reviewed-page',
+      title: 'Operator reference', summary: 'Operator correction', sourceId: source.id, metadata: { knowledgeSpaceId: spaceId, semanticKind: 'wiki_page' } });
     await store.upsertNode({ ...wiki, status: 'active' }, createKnowledgeNodeOperatorMutation(wiki, { action: 'accept' }));
     const before = snapshot(store);
     await expect(enrichKnowledgeSource({ store, llm: llm(extractionResult()) }, source, { force: true })).rejects.toBeInstanceOf(KnowledgeNodeMutationHeldError);
@@ -267,6 +267,15 @@ describe('generated fact support persistence boundaries', () => {
     const before = snapshot(store);
     await expect(enrichKnowledgeSource({ store, llm: llm(extractionResult()) }, source, { force: true })).rejects.toBeInstanceOf(KnowledgeNodeMutationHeldError);
     expect(snapshot(store)).toBe(before);
+  });
+
+  test('a future historical role cannot be retired through enrichment supersession', async () => {
+    const { store, source } = await fixture(); readings();
+    await store.upsertNode({ id: 'future-semantic-role', kind: 'knowledge_entity', slug: 'future-semantic-role', title: 'Old future title',
+      status: 'draft', sourceId: source.id, metadata: { knowledgeSpaceId: spaceId, semanticKind: 'entity', extractor: 'llm', semanticIdentityVersion: 71 } });
+    const before = snapshot(store);
+    await expect(enrichKnowledgeSource({ store, llm: llm(extractionResult()) }, source, { force: true })).rejects.toBeInstanceOf(SemanticIdentityHeldError);
+    expect(snapshot(store)).toBe(before); expect(store.getNode('future-semantic-role')?.status).toBe('draft');
   });
 
   test('a prepared profile rechecks a later operator decision at write time', async () => {

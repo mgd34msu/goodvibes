@@ -1,3 +1,4 @@
+import { validateSemanticNodeIdentityIndex } from './store-semantic-node-selector.js';
 import { validateSemanticFactIdentityIndex } from './store-semantic-fact-selector.js';
 import { validateKnowledgeRowRevisions } from './store-row-revisions.js';
 import { validateKnowledgeNodeContentRevisions } from './store-node-content-revisions.js';
@@ -30,10 +31,17 @@ export function validateKnowledgeSchemaV13(db: Pick<SqlDatabase, 'exec'>): void 
   validateKnowledgeNodeActivationCache(db);
 }
 
-/** Complete current schema checks, shared with the closed native read plan. */
-export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): void {
+/** Original v14 projection, artifact and exact fact lookup invariants. */
+export function validateKnowledgeSchemaV14(db: Pick<SqlDatabase, 'exec'>): void {
   validateKnowledgeSchemaV13(db);
   validateGeneratedProjectionIdentityIndex(db);
   validateArtifactReferenceIndexes(db);
   validateSemanticFactIdentityIndex(db);
+}
+
+
+/** Complete current schema checks, shared with the closed native read plan. */
+export function validateCurrentKnowledgeSchema(db: Pick<SqlDatabase, 'exec'>): void {
+  validateKnowledgeSchemaV14(db);
+  validateSemanticNodeIdentityIndex(db);
 }

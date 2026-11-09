@@ -1,3 +1,4 @@
+import { SemanticIdentityHeldError, readExactSemanticIds, readExactSemanticId } from '../store-semantic-fact-selector.js';
 import { knowledgeRawRepresentation, knowledgeClockIso } from '../store-record-representation.js';
 import { guardKnowledgeEdgeInput } from '../store-edge-writes.js';
 import { exactKnowledgeIds, generatedFactSupportMetadata, type GeneratedFactWritePlanner } from './fact-support-write-plan.js';
@@ -5,7 +6,7 @@ import type { KnowledgeStore } from '../store.js';
 import { getKnowledgeSpaceId } from '../spaces.js';
 import type { KnowledgeEdgeRecord, KnowledgeNodeRecord, KnowledgeNodeUpsertInput } from '../types.js';
 import { isActiveKnowledgeEdge } from '../projection-utils.js';
-import { readString, readStringArray, semanticMetadata, uniqueStrings } from './utils.js';
+import { readString, readStringArray, semanticMetadata } from './utils.js';
 import type { SemanticPrimarySourcePlanner, SemanticWriteGuard } from './primary-source-plan.js';
 
 /** Capture supersession from the original graph, before any entity/fact writes. */
@@ -23,10 +24,11 @@ export function prepareSemanticSupersession(
   ));
   const nodes = guard.watch('supersession-nodes', readSuperseded);
   const drafts = nodes.map((node) => {
+    if (node.metadata.semanticIdentityVersion !== undefined && node.metadata.semanticIdentityVersion !== 1) throw new SemanticIdentityHeldError('unsupported-format');
     guard.node(node.id);
     const supportingSourceIds = node.metadata.semanticKind === 'fact'
       ? activeSemanticFactSupportSourceIds(store, node, sourceId, spaceId, guard) : [];
-    const subjectIds = uniqueStrings([...readStringArray(node.metadata.subjectIds), ...readStringArray(node.metadata.linkedObjectIds)]);
+    const subjectIds = exactKnowledgeIds([...readExactSemanticIds(node.metadata.subjectIds), ...readExactSemanticIds(node.metadata.linkedObjectIds)]);
     const subjects = subjectIds.map((id) => guard.node(id)).filter((subject): subject is KnowledgeNodeRecord => Boolean(subject));
     const supportKey = supportingSourceIds.length === 0 ? undefined : support.add(spaceId, {
       id: node.id, kind: readString(node.metadata.factKind) ?? node.kind, title: node.title, summary: node.summary,
@@ -51,7 +53,7 @@ export function prepareSemanticSupersession(
         ? { ...node, sourceId: primarySourceId, metadata: semanticMetadata(spaceId, {
           ...knowledgeRawRepresentation(node.metadata), sourceId: primarySourceId, sourceIds: supportingSourceIds,
           generatedFactSupport: generatedFactSupportMetadata(support.plans(supportKey!), node.metadata.generatedFactSupport),
-          detachedSourceIds: uniqueStrings([...readStringArray(node.metadata.detachedSourceIds), sourceId]), sourceDetachedAt: knowledgeClockIso(supersededAt),
+          detachedSourceIds: exactKnowledgeIds([...readExactSemanticIds(node.metadata.detachedSourceIds), sourceId]), sourceDetachedAt: knowledgeClockIso(supersededAt),
         }) }
         : { ...node, status: 'stale', metadata: { ...knowledgeRawRepresentation(node.metadata), supersededAt: knowledgeClockIso(supersededAt), supersededInSpaceId: spaceId } };
       return { node, primarySourceId, input };
@@ -70,8 +72,8 @@ export function prepareSemanticSupersession(
 
 function semanticNodeReferencesSource(node: KnowledgeNodeRecord, sourceId: string): boolean {
   if (node.sourceId === sourceId) return true;
-  if (readString(node.metadata.sourceId) === sourceId) return true;
-  return node.metadata.semanticKind === 'fact' && readStringArray(node.metadata.sourceIds).includes(sourceId);
+  if (readExactSemanticId(node.metadata.sourceId) === sourceId) return true;
+  return node.metadata.semanticKind === 'fact' && readExactSemanticIds(node.metadata.sourceIds).includes(sourceId);
 }
 
 function activeSemanticFactSupportSourceIds(
@@ -82,8 +84,8 @@ function activeSemanticFactSupportSourceIds(
   guard: SemanticWriteGuard,
 ): string[] {
   return exactKnowledgeIds([
-    ...readStringArray(fact.metadata.sourceIds),
-    readString(fact.metadata.sourceId),
+    ...readExactSemanticIds(fact.metadata.sourceIds),
+    readExactSemanticId(fact.metadata.sourceId),
     fact.sourceId,
     ...store.listEdges()
       .filter((edge) => edgeSupportsFact(edge, fact.id, spaceId))

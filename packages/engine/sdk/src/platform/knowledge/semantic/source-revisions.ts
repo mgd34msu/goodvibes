@@ -12,7 +12,11 @@ export interface SemanticSourceRevision {
   readonly extractionId: string; readonly extractionRevision: string;
 }
 const apply = Reflect.apply, weakGet = WeakMap.prototype.get, weakSet = WeakMap.prototype.set, freeze = Object.freeze;
-const revisions = new WeakMap<SemanticSourceRevision, { readonly store: KnowledgeStore; readonly source: KnowledgeSourceRecord; readonly extraction: KnowledgeExtractionRecord }>();
+const NativeWeakRef = WeakRef, deref = WeakRef.prototype.deref;
+interface RevisionOwner { readonly store: WeakRef<KnowledgeStore>; readonly source: WeakRef<KnowledgeSourceRecord>; readonly extraction: WeakRef<KnowledgeExtractionRecord> }
+// A copied/retained tiny cache binding must not keep the complete source store
+// alive. The actual call arguments independently keep their owners alive.
+const revisions = new WeakMap<SemanticSourceRevision, RevisionOwner>();
 export function captureSemanticSourceRevision(store: KnowledgeStore, source: KnowledgeSourceRecord, extraction: KnowledgeExtractionRecord): SemanticSourceRevision {
   let result: SemanticSourceRevision | undefined;
   store.assertRecordSnapshotFrame(() => {
@@ -22,7 +26,7 @@ export function captureSemanticSourceRevision(store: KnowledgeStore, source: Kno
     result = freeze({ version: 2, sourceId: source.id, sourceRevision: savedSource.generation, extractionId: extraction.id, extractionRevision: savedExtraction.generation });
     return undefined;
   });
-  apply(weakSet, revisions, [result!, { store, source, extraction }]);
+  apply(weakSet, revisions, [result!, freeze({ store: new NativeWeakRef(store), source: new NativeWeakRef(source), extraction: new NativeWeakRef(extraction) })]);
   return result!;
 }
 export function semanticSourceRevisionMetadata(binding: SemanticSourceRevision): Record<string, unknown> {
@@ -36,8 +40,8 @@ export function semanticSourceIsCurrent(store: KnowledgeStore, source: Knowledge
   supplied?: SemanticSourceRevision): boolean {
   const binding = captureSemanticSourceRevision(store, source, extraction);
   if (supplied) {
-    const original = apply(weakGet, revisions, [supplied]) as { readonly store: KnowledgeStore; readonly source: KnowledgeSourceRecord; readonly extraction: KnowledgeExtractionRecord } | undefined;
-    if (!original || original.store !== store || original.source !== source || original.extraction !== extraction) throw new Held('malformed');
+    const original = apply(weakGet, revisions, [supplied]) as RevisionOwner | undefined;
+    if (!original || apply(deref, original.store, []) !== store || apply(deref, original.source, []) !== source || apply(deref, original.extraction, []) !== extraction) throw new Held('malformed');
     if (JSON.stringify(supplied) !== JSON.stringify(binding)) throw new Held('stale');
   }
   const state = store.getSemanticEnrichmentStateSnapshot(source.id); if (!state) return false;

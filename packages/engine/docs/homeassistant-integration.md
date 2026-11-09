@@ -148,6 +148,19 @@ camelCase metadata fields.
 | `unique_id` | The registry's unique id for the object | Folded into id resolution and aliases |
 | `friendly_name` | The display name, including `attributes.friendly_name` | Folded into the node title and aliases |
 
+Each snapshot object needs a recognizable registry identifier, `id`, `slug`,
+name or title, including the aliases above. An object with none is rejected with
+its group and position before any snapshot source or graph record is written.
+Existing saved anonymous records remain available; new input bodies are not
+hashed into invented identities.
+
+Snapshot groups are partial updates: an omitted group retains its existing
+objects and original evidence source. Supplying an empty group retires only that
+group's missing members. `helpers` imports helper entities and reports
+`counts.helpers`; a helper also present in `entities` stays active while either
+group still owns it. A helpers-only update does not retire devices, areas,
+integrations or unrelated entities.
+
 Snapshot sync also refreshes living Home Graph pages by default, but the default
 sync path is intentionally bounded. The SDK prioritizes likely real-world
 devices such as TVs, locks, thermostats, cameras, routers, appliances, phones,

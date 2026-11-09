@@ -1,3 +1,4 @@
+import { HomeGraphObjectIdentityError } from './identity-errors.js';
 import { createHash } from 'node:crypto';
 import type {
   KnowledgeEdgeRecord,
@@ -86,10 +87,6 @@ export function homeGraphNodeId(spaceId: string, kind: string, objectId: string)
   return `hg-node-${stableHash(`${spaceId}:${kind}:${objectId}`)}`;
 }
 
-export function homeGraphEdgeId(spaceId: string, fromId: string, relation: string, toId: string): string {
-  return `hg-edge-${stableHash(`${spaceId}:${fromId}:${relation}:${toId}`)}`;
-}
-
 export function homeGraphIssueId(spaceId: string, code: string, subjectId: string): string {
   return `hg-issue-${stableHash(`${spaceId}:${code}:${subjectId}`)}`;
 }
@@ -162,8 +159,8 @@ export function buildHomeGraphNodeInput(
   };
 }
 
-function homeGraphObjectId(kind: HomeGraphNodeKind, object: HomeGraphObjectInput): string {
-  const fallback = () => `unknown-${stableHash(`${kind}:${stableJson(object)}`, 16)}`;
+export function homeGraphObjectId(kind: HomeGraphNodeKind, object: HomeGraphObjectInput): string {
+  const fallback = () => { const declared = readString(object.title) ?? readString(object.name); if (declared) return declared; throw new HomeGraphObjectIdentityError(objectKindForNodeKind(kind)); };
   switch (kind) {
     case 'ha_entity':
       return object.entityId ?? object.id ?? fallback();
@@ -306,7 +303,7 @@ export function normalizeHomeGraphObjectInput(
     ?? readString(raw.unique_id)
     ?? readString(raw.slug)
     ?? title
-    ?? `unknown-${stableHash(`${nodeKindForHomeGraphObject(kind)}:${stableJson(raw)}`, 16)}`;
+    ?? (() => { throw new HomeGraphObjectIdentityError(objectKindForNodeKind(nodeKindForHomeGraphObject(kind))); })();
   const labels = uniqueStrings([
     ...readStringArray(raw.labels),
     ...readStringArray(raw.labelIds),
@@ -409,16 +406,6 @@ function hasSnakeCaseHomeAssistantFields(raw: Record<string, unknown>): boolean 
     .some((key) => key in raw);
 }
 
-function stableJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, (_key, entry) => {
-      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return entry;
-      return Object.fromEntries(Object.entries(entry).sort(([left], [right]) => left.localeCompare(right)));
-    });
-  } catch {
-    return String(value);
-  }
-}
 
 function buildObjectSummary(object: HomeGraphObjectInput): string | undefined {
   const parts = uniqueStrings([

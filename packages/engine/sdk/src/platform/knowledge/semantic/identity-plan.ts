@@ -36,7 +36,12 @@ export function createSemanticFactIdentityPlanner(store: KnowledgeStore) {
       } });
       apply(mapSet, planned, [key, identity]); return identity;
     },
-    assertCurrent() { for (const identity of apply(mapValues, planned, []) as IterableIterator<PlannedSemanticFactIdentity>) identity.assertCurrent(); },
+    assertCurrent() {
+      store.assertRecordSnapshotFrame(() => {
+        for (const identity of apply(mapValues, planned, []) as IterableIterator<PlannedSemanticFactIdentity>) identity.assertCurrent();
+        return undefined;
+      });
+    },
   });
   apply(weakSet, issuers, [planner, { store, prepare: planner.prepare, assertCurrent: planner.assertCurrent }]); return planner;
 }

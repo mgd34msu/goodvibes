@@ -1,10 +1,11 @@
+import { captureSnapshotGroups, currentSnapshotMembership, storedSnapshotGroups, type CapturedSnapshotGroups } from './snapshot-groups.js';
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
 import { knowledgeClockIso, knowledgeRawRepresentation, retainKnowledgeRepresentation } from '../store-record-representation.js';
 import { captureGeneratedKnowledgeSourceUpdate, registerGeneratedKnowledgeSourceReferences } from '../source-structural-references.js';
 import { upsertObservedKnowledgeNode } from '../store-node-observation.js';
 import { snapshotNodeInput } from '../activation/projection.js';
 import type { ArtifactStore } from '../../artifacts/index.js';
-import type { KnowledgeStore } from '../store.js';
+import { updateHomeGraphSnapshotGroups, type KnowledgeStore } from '../store.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../types.js';
 import { yieldEvery } from '../cooperative.js';
 import { autoLinkHomeGraphSources } from './auto-link.js';
@@ -16,6 +17,8 @@ import {
   buildHomeGraphNodeInput,
   edgeIsActive,
   homeGraphNodeId,
+  homeGraphObjectId,
+  nodeKindForHomeGraphObject,
   homeGraphSourceId,
   isGeneratedPageSource,
   namespacedCanonicalUri,
@@ -52,6 +55,10 @@ export async function runHomeGraphSnapshotSync(input: {
     const { store, artifactStore } = input;
     const snapshot = snapshotNodeInput(input.snapshot);
     const { spaceId, installationId } = resolveHomeGraphSpace(snapshot);
+    const snapshotMembership = captureSnapshotGroups(snapshot);
+    await store.init();
+    // Validate saved membership before any snapshot prefix is mutated.
+    for (const node of store.listNodesInSpace(spaceId)) if (SNAPSHOT_NODE_KINDS.has(node.kind) && readRecord(node.metadata.homeAssistant).installationId === installationId) storedSnapshotGroups(node);
     const captured = await store.batch(async () => {
       const capturedAt = snapshot.capturedAt ?? Date.now();
       const sourceId = homeGraphSourceId(spaceId, 'snapshot', String(capturedAt));
@@ -81,9 +88,9 @@ export async function runHomeGraphSnapshotSync(input: {
       const beforeNodeIds = new Set(beforeState.nodes.map((node) => node.id));
       const beforeEdgeIds = new Set(beforeState.edges.map((edge) => edge.id));
       const activeSnapshotNodeIds = new Set([home.id]);
-      const groups = await upsertSnapshotObjects(store, spaceId, installationId, snapshot, home.id, source.id, activeSnapshotNodeIds);
-      await retireMissingSnapshotRecords(store, spaceId, installationId, source.id, activeSnapshotNodeIds, snapshotRetirementObjectKinds(snapshot));
-      return { source, home, beforeNodeIds, beforeEdgeIds, groups };
+      const counts = await upsertSnapshotObjects(store, spaceId, installationId, snapshotMembership, home.id, source.id, activeSnapshotNodeIds);
+      await retireMissingSnapshotRecords(store, spaceId, installationId, source.id, activeSnapshotNodeIds, snapshotMembership);
+      return { source, home, beforeNodeIds, beforeEdgeIds, groups: counts };
     });
     // batch() is a deferred save, not a rollback transaction. Finish the raw
     // snapshot write phase before semantic readers inspect committed SQL rows.
@@ -179,13 +186,15 @@ async function upsertSnapshotObjects(
   store: KnowledgeStore,
   spaceId: string,
   installationId: string,
-  input: HomeGraphSnapshotInput,
+  captured: CapturedSnapshotGroups,
   homeNodeId: string,
   sourceId: string,
   activeNodeIds: Set<string>,
 ): Promise<HomeGraphSyncResult['counts']> {
+  const input = captured.snapshot;
   const counts = {
     entities: 0,
+    helpers: 0,
     devices: 0,
     areas: 0,
     automations: 0,
@@ -199,7 +208,12 @@ async function upsertSnapshotObjects(
     for (const [index, rawObject] of (objects ?? []).entries()) {
       await yieldEvery(index, 16);
       const object = normalizeHomeGraphObjectInput(kind, rawObject);
-      const nodeInput = buildHomeGraphNodeInput(spaceId, installationId, kind, object);
+      const baseInput = buildHomeGraphNodeInput(spaceId, installationId, kind, object);
+      const previous = store.getNode(baseInput.id);
+      const membership = previous ? currentSnapshotMembership(captured, previous)
+        : [...(captured.members.get(nodeKindForHomeGraphObject(kind))?.get(homeGraphObjectId(nodeKindForHomeGraphObject(kind), object)) ?? [])];
+      const nodeInput = { ...baseInput, metadata: buildHomeGraphMetadata(spaceId, installationId, { ...baseInput.metadata,
+        homeAssistant: { ...readRecord(baseInput.metadata.homeAssistant), snapshotGroups: membership } }) };
       const node = await upsertObservedKnowledgeNode(store, { ...nodeInput, sourceId, status: 'active', confidence: 90 },
         'home-assistant-snapshot', store.getSource(sourceId), () => store.getSource(sourceId));
       activeNodeIds.add(node.id);
@@ -224,6 +238,7 @@ async function upsertSnapshotObjects(
   counts.integrations = await upsertGroup('integration', input.integrations);
   counts.devices = await upsertGroup('device', input.devices);
   counts.entities = await upsertGroup('entity', input.entities);
+  counts.helpers = await upsertGroup('entity', input.helpers);
   counts.automations = await upsertGroup('automation', input.automations);
   counts.scripts = await upsertGroup('script', input.scripts);
   counts.scenes = await upsertGroup('scene', input.scenes);
@@ -237,20 +252,35 @@ async function retireMissingSnapshotRecords(
   installationId: string,
   currentSnapshotSourceId: string,
   activeNodeIds: ReadonlySet<string>,
-  retirableObjectKinds: ReadonlySet<string>,
+  captured: CapturedSnapshotGroups,
 ): Promise<void> {
   const staleAt = Date.now();
   const retiredNodeIds = new Set<string>();
   for (const node of store.listNodesInSpace(spaceId)) {
-    if (!isSnapshotOwnedNode(node, installationId, retirableObjectKinds)) continue;
+    if (!isSnapshotOwnedNode(node, installationId)) continue;
     if (activeNodeIds.has(node.id)) continue;
     if (node.status === 'stale') continue;
+    const membership = currentSnapshotMembership(captured, node);
+    if (membership.length) {
+      const before = storedSnapshotGroups(node);
+      if (before.length !== membership.length || before.some((group, index) => group !== membership[index])) await updateHomeGraphSnapshotGroups(store, node, membership, () => {
+        if (currentSnapshotMembership(captured, node).join(',') !== membership.join(',')) throw new Error('Home Graph snapshot membership changed before publication.');
+      });
+      continue;
+    }
+    // Unattributed saved bodies cannot be matched to a new declared identity.
+    // Keep their records until an explicit owner action identifies/removes them.
+    if (/^unknown-[0-9a-f]{16}$/.test(String(readRecord(node.metadata.homeAssistant).objectId ?? ''))) continue;
     retiredNodeIds.add(node.id);
     await markNodeStale(store, spaceId, installationId, node, 'missing-from-latest-home-assistant-snapshot', staleAt);
   }
 
+  // A partial snapshot does not replace omitted groups' original evidence.
+  // Retained nodes keep their original source; do not stale it merely because
+  // another group's new snapshot source was captured.
+  const retainedSourceIds = new Set(store.listNodesInSpace(spaceId).filter(node => node.status !== 'stale').flatMap(node => node.sourceId ? [node.sourceId] : []));
   for (const source of store.listSourcesInSpace(spaceId)) {
-    if (!isPreviousSnapshotSource(source, currentSnapshotSourceId, installationId)) continue;
+    if (!isPreviousSnapshotSource(source, currentSnapshotSourceId, installationId) || retainedSourceIds.has(source.id)) continue;
     if (source.status === 'stale') continue;
     await markSourceStale(store, spaceId, installationId, source, 'superseded-by-newer-home-assistant-snapshot', staleAt);
   }
@@ -369,29 +399,14 @@ async function markSourceStale(
   retainReferences?.(updated);
 }
 
-function snapshotRetirementObjectKinds(input: HomeGraphSnapshotInput): ReadonlySet<string> {
-  const kinds = new Set<string>();
-  if (input.entities) kinds.add('entity');
-  if (input.devices) kinds.add('device');
-  if (input.areas) kinds.add('area');
-  if (input.automations) kinds.add('automation');
-  if (input.scripts) kinds.add('script');
-  if (input.scenes) kinds.add('scene');
-  if (input.labels) kinds.add('label');
-  if (input.integrations) kinds.add('integration');
-  return kinds;
-}
 
 function isSnapshotOwnedNode(
   node: KnowledgeNodeRecord,
   installationId: string,
-  retirableObjectKinds: ReadonlySet<string>,
 ): boolean {
   if (!SNAPSHOT_NODE_KINDS.has(node.kind)) return false;
   const homeAssistant = readRecord(node.metadata.homeAssistant);
-  const objectKind = typeof homeAssistant.objectKind === 'string' ? homeAssistant.objectKind : undefined;
-  return homeAssistant.installationId === installationId
-    && Boolean(objectKind && retirableObjectKinds.has(objectKind));
+  return homeAssistant.installationId === installationId && storedSnapshotGroups(node).length > 0;
 }
 
 function isPreviousSnapshotSource(

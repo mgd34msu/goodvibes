@@ -16,7 +16,6 @@ import { KnowledgeSourceQualityHeldError } from '../sdk/src/platform/knowledge/s
 import type { KnowledgeStore } from '../sdk/src/platform/knowledge/store.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from '../sdk/src/platform/knowledge/types.js';
 import { historicalSemanticFactId } from './_helpers/historical-semantic-identity.js';
-import { semanticHash } from '../sdk/src/platform/knowledge/semantic/utils.js';
 import type { KnowledgeSemanticFactInput, KnowledgeSemanticLlm } from '../sdk/src/platform/knowledge/semantic/types.js';
 import { createStores } from './_helpers/knowledge-semantic-fixtures.js';
 import { repairUsefulFixtureReading } from './_helpers/repair-profile-fixture-readings.js';
@@ -205,17 +204,19 @@ describe('primary source persistence preplanning', () => {
     }
   });
 
-  test('entity-ID collision uses the post-entity subject overlay before fact ID planning', async () => {
+  test('a new differently titled entity preserves the original historical-label subject', async () => {
     readings();
     const { store, source } = await fixture();
-    const entityId = `sem-entity-${semanticHash(spaceId, source.id, 'Collision')}`;
+    const entityId = 'sem-entity-historical-collision';
     await store.upsertNode({ id: entityId, kind: 'knowledge_entity', slug: 'collision', title: 'Old TV-987', status: 'active', metadata: { knowledgeSpaceId: spaceId, entityKind: 'device' } });
     await store.upsertSource({ ...source, metadata: { ...source.metadata, sourceDiscovery: { linkedObjectIds: [entityId] } } });
     const current = store.getSource(source.id)!; const fact = claim('Collision claim');
-    await enrich(store, current, [fact], [{ title: 'Collision', confidence: 90 }]);
-    const id = historicalSemanticFactId({ spaceId, kind: fact.kind, title: fact.title, summary: fact.summary, subjectIds: [], fallbackScope: source.id });
-    expect(store.getNode(id)?.metadata.subjectIds).toBeUndefined();
-    expect(store.getNode(entityId)?.metadata.semanticKind).toBe('entity');
+    const result = await enrich(store, current, [fact], [{ title: 'Collision', confidence: 90 }]);
+    expect(result.facts[0]?.metadata.subjectIds).toEqual([entityId]);
+    expect(store.getNode(entityId)?.title).toBe('Old TV-987');
+    expect(store.getNode(entityId)?.metadata.semanticKind).toBeUndefined();
+    expect(result.entities[0]?.id).not.toBe(entityId);
+    expect(result.entities[0]?.metadata.semanticKind).toBe('entity');
   });
 
   test('prepared duplicate canonical facts preserve source union, per-source supports and last-writer fields', async () => {

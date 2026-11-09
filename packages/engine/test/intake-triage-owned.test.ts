@@ -12,6 +12,8 @@ import { createOwnedInboxSource, registerCompositeInboxSurface, type InboxPollin
 import type { InboxListOutput } from '../sdk/src/platform/intake/aggregator.js';
 import type { InboundChannelItem } from '../sdk/src/platform/intake/provider-adapter.js';
 import { makeProjectTempDir } from './_helpers/project-temp.js';
+import { acquireOwnedTriageIdentity } from '../sdk/src/platform/intake/providers/account-identity.js';
+import { tryAcquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 const row = (id = 'one'): InboundChannelItem => ({ id: `fixture:${id}`, provider: 'fixture', kind: 'dm',
@@ -59,6 +61,24 @@ test('explicit scoring enriches current reads, preserves wire page and never run
   expect(state.items).toEqual([{ id: 'fixture:one', surface: 'fixture', subject: 'Protected subject', snippet: 'Protected body', conversationKind: 'direct', unread: true }]);
   expect(JSON.stringify(state)).not.toContain('0123456789abcdef');
   await f.owned.close(); expect(f.catalog.hasHandler('channels.inbox.list')).toBe(false);
+});
+
+test('default mirror ownership remains held after mirror retirement while triage close is still draining', async () => {
+  const f = await setup(); await f.owned.runInboxTriage();
+  const selected = await acquireOwnedTriageIdentity({ workingDirectory: f.directory, assertCurrent() {} }, 'fixture', 'account-a');
+  const lock = join(f.directory, '.goodvibes', 'tui', 'operator', `${selected.mirrorFileName}.owner.lock`);
+  const entered = deferred(), release = deferred(), originalClose = SqliteTriageStore.prototype.close;
+  const retiring = spyOn(SqliteTriageStore.prototype, 'close').mockImplementation(async function (this: SqliteTriageStore) {
+    entered.resolve(); await release.promise; return originalClose.call(this);
+  });
+  const closing = f.owned.close();
+  try {
+    await entered.promise;
+    const claim = tryAcquireCrossProcessLock(lock);
+    try { expect(claim).toBeNull(); } finally { claim?.(); }
+  } finally { release.resolve(); await closing; retiring.mockRestore(); }
+  const claim = tryAcquireCrossProcessLock(lock);
+  try { expect(claim).not.toBeNull(); } finally { claim?.(); }
 });
 
 test('empty and dry runs never open triage storage; missing authority sends zero judgments', async () => {

@@ -1,5 +1,4 @@
 /** Explicit account-owned scoring and lease-held enrichment; never a polling hook. */
-import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { types } from 'node:util';
 import type { JudgmentPort } from '@goodvibes-jev/judgment';
@@ -13,6 +12,7 @@ import { readTriageMetadataBatch, runInboxTriage } from './pipeline.js';
 import { TRIAGE_MODEL } from './battery.js';
 import { SqliteTriageStore } from './store.js';
 import type { TriageInput, TriageReceipt } from './types.js';
+import { acquireOwnedTriageIdentity } from '../providers/account-identity.js';
 
 /**
  * Constructor-only host grant, never decoded from message/configuration data.
@@ -35,6 +35,8 @@ export interface OwnedTriagedInboxOptions extends Omit<RegisterInboxSurfaceOptio
   readonly storeFileName?: string;
   /** Preserve a native provider's already-owned opaque or historical triage selector. */
   readonly triageStoreFileName?: string;
+  /** Native installation declaration before publishing default opaque selectors. */
+  readonly beforeIdentityWrite?: (() => void) | undefined;
   readonly providerId: string;
   readonly accountScopeId: string;
   readonly acquireReadLease: NonNullable<RegisterInboxSurfaceOptions['acquireReadLease']>;
@@ -102,13 +104,34 @@ async function createTriagedSource(
   let closed = false, closing: Promise<void> | undefined, store: SqliteTriageStore | undefined;
   const active = new Set<Promise<unknown>>();
   let scoreTail: Promise<unknown> = Promise.resolve();
-  // Native providers supply already-owned selectors. The default remains for
-  // callers outside this Discord migration; it is not evaluated for native Discord.
-  const scope = options.storeFileName && options.triageStoreFileName ? undefined
-    : createHash('sha256').update(JSON.stringify(['owned-inbox-triage-v1', providerId, accountScopeId])).digest('hex');
-  const fileName = options.triageStoreFileName ?? `inbox-triage-${scope}.sqlite`;
-  const releaseLock = await acquireCrossProcessLock(join(ctx.workingDirectory, '.goodvibes', 'tui', 'operator', `${fileName}.owner.lock`),
-    { strictOwnership: true, totalTimeoutMs: 100 });
+  // Native providers already own both selectors. Other hosts resolve defaults
+  // once from their actual private account registry, preserving saved hashes.
+  const defaults = options.storeFileName && options.triageStoreFileName ? undefined
+    : await acquireOwnedTriageIdentity({ workingDirectory: ctx.workingDirectory, assertCurrent: () => {
+      if (closed || owner.signal.aborted) throw unavailable();
+    }, beforeWrite: options.beforeIdentityWrite }, providerId, accountScopeId);
+  const fileName = options.triageStoreFileName ?? defaults!.triageFileName;
+  const mirrorFileName = options.storeFileName ?? defaults!.mirrorFileName;
+  // Native roots already own explicit mirror locks. Defaults must acquire the
+  // actual mirror lifetime too, including when they reuse a known native pair.
+  // Preserve the published owned64 triage mutex so old sources/janitors remain
+  // excluded even when this registry selected a separate receipt filename.
+  const legacyOwned = /^inbox-owned-([0-9a-f]{64})\.sqlite$/.exec(mirrorFileName);
+  const lockNames = new Set([
+    ...(options.storeFileName === undefined ? [`${mirrorFileName}.owner.lock`] : []),
+    ...(legacyOwned ? [`inbox-triage-${legacyOwned[1]!}.sqlite.owner.lock`] : []),
+    `${fileName}.owner.lock`,
+  ]);
+  const releases: Array<() => void> = [];
+  const releaseLock = () => {
+    const failures: unknown[] = [];
+    for (const release of releases.splice(0).reverse()) try { release(); } catch (error) { failures.push(error); }
+    if (failures.length) throw new Error('Triaged inbox storage ownership did not retire', { cause: failures[0] });
+  };
+  try {
+    for (const name of lockNames) releases.push(await acquireCrossProcessLock(join(ctx.workingDirectory, '.goodvibes', 'tui', 'operator', name),
+      { strictOwnership: true, totalTimeoutMs: 100 }));
+  } catch (error) { releaseLock(); throw error; }
   const assertAuthority = (): void => {
     if (closed || owner.signal.aborted || !authorizedBinding || !port || authoritySignal?.aborted || !proof) throw unavailable();
     try { synchronous(proof); } catch { throw unavailable(); }
@@ -121,7 +144,7 @@ async function createTriagedSource(
   const getStore = (): SqliteTriageStore => store ??= new SqliteTriageStore(ctx.workingDirectory, fileName);
   let source: OwnedInboxSource;
   try {
-    source = createOwnedInboxSource(ctx, { ...options, adapters: new Map(options.adapters), storeFileName: options.storeFileName ?? `inbox-owned-${scope}.sqlite`,
+    source = createOwnedInboxSource(ctx, { ...options, adapters: new Map(options.adapters), storeFileName: mirrorFileName,
       ...(gatePolling ? { gatePolling: (provider: string, control: Parameters<NonNullable<RegisterInboxSurfaceOptions['gatePolling']>>[1]) => {
         const retire = gatePolling(provider, control);
         if (typeof retire !== 'function') return;

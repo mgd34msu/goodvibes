@@ -27,6 +27,8 @@ import type { HostedInboxScreeningAcquisition, HostedInboxScreeningOperation, Ho
 export interface DaemonInboxControls extends Required<Pick<RegisterInboxSurfaceOptions, 'gatePolling'>> {
   /** Publish the admitted native reader floor before opaque Discord identity data. */
   readonly beforeDiscordIdentityWrite?: (() => void) | undefined;
+  readonly beforeAccountIdentityWrite?: (() => void) | undefined;
+  readonly beforeInboxTriageIdentityWrite?: (() => void) | undefined;
   /** Root-owned capability; only explicit source options request it. */
   readonly createTriageTagging?: (request: DaemonTriageTaggingRequest) => OwnedInboxTagging;
   /** Explicit awaitable election withdrawal for account-verified clustered owners. */
@@ -94,6 +96,8 @@ export async function createDaemonHandlerComposition(
       // Each provider is elected separately; standby nodes still serve storage.
       gatePolling: (providerId, control) => options.clusterCoordinator.register(inboxPollerGate(providerId, control)),
       beforeDiscordIdentityWrite: () => options.nativeDataWriter?.declare('discord-inbox-identities-v1'),
+      beforeAccountIdentityWrite: () => options.nativeDataWriter?.declare('account-inbox-identities-v1'),
+      beforeInboxTriageIdentityWrite: () => options.nativeDataWriter?.declare('inbox-triage-identities-v1'),
       gatePollingOwned: (providerId, control) => options.clusterCoordinator.registerOwned(inboxPollerGate(providerId, control)),
     }, { configManager: options.configManager, secretsManager: options.secretsManager }, options.triagePermissionHost),
     registerDrafts: registerDraftMethods,

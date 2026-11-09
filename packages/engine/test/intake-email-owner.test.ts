@@ -4,6 +4,8 @@ import { createEmailInboxOwner, type EmailInboxOwnerOptions } from '../sdk/src/p
 import type { ImapUidCheckpoint } from '../sdk/src/platform/intake/provider-adapter.js';
 import { SnapshotSocket, snapshotFixture } from './_helpers/mail-inbox-snapshot.js';
 import { deferred, tick } from './_helpers/mail-subject-source.js';
+import { acquireAccountInboxIdentity } from '../sdk/src/platform/intake/providers/account-identity.js';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
@@ -29,7 +31,9 @@ async function fixture(options: { gate?: Promise<void>; sockets?: SnapshotSocket
   let checkpoint: ImapUidCheckpoint | null = null;
   let allowed = true, sourceAllowed = true;
   const authority = new AbortController();
-  const ownerOptions = { account: { host: 'fixture.invalid', port: 993, username: 'synthetic@example.invalid', mailbox: 'INBOX', security: 'tls' },
+  const account = { host: 'fixture.invalid', port: 993, username: 'synthetic@example.invalid', mailbox: 'INBOX', security: 'tls' as const };
+  const identity = await acquireAccountInboxIdentity({ workingDirectory: makeProjectTempDir('email-owner-identity'), assertCurrent() {} }, { provider: 'email', account });
+  const ownerOptions = { identity, account,
     service: f.service, getCheckpoint: () => checkpoint, assertCurrent() { if (!allowed) throw new Error('Scope changed'); },
     screening: { authority: { ownerId: 'fixture-local-services', revision: '1', retention: 'ephemeral-no-log', signal: authority.signal, assertCurrent() { if (!sourceAllowed) throw new Error('Source changed'); } },
       proposal: { endpoint: `http://127.0.0.1:${server.port}`, model: 'fixture-proposer' },

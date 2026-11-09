@@ -8,7 +8,7 @@ import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createSurfaceEmailInboxConfigReader } from '@goodvibes-jev/engine/sdk/platform/email';
 import { acquireCrossProcessLock } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
-import { createEmailInboxOwner, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
+import { createEmailInboxOwner, acquireAccountInboxIdentity, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
   type EmailInboxAccount, type EmailInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority } from '@goodvibes-jev/engine/sdk/platform/intake';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
 import type { DaemonInboxSourceFactory } from './multiowner-inbox-composition.js';
@@ -37,8 +37,10 @@ export interface EmailDaemonInboxSourceFactories extends Omit<EmailDaemonInboxFa
 export function createEmailDaemonInboxSourceFactory(options: EmailDaemonInboxOptions,
   factories: EmailDaemonInboxSourceFactories = {}): DaemonInboxSourceFactory {
   const authority = options.triageAuthority;
-  return createEmailAccountFactory(options, factories, factories.createSource ?? ((context, source, owner) =>
+  return createEmailAccountFactory(options, factories, factories.createSource ?? ((context, source, owner, beforeIdentityWrite) =>
     createOwnedTriagedInboxSource(context, { ...source, providerId: 'email', accountScopeId: owner.scopeId,
+      ...(owner.triageStoreFileName ? { triageStoreFileName: owner.triageStoreFileName } : {}),
+      beforeIdentityWrite,
       acquireReadLease: () => owner.acquireReadLease(), ...(authority ? { authority } : {}),
     })));
 }
@@ -54,7 +56,8 @@ export function createEmailDaemonInboxFactory(options: EmailDaemonInboxOptions,
 
 function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: EmailDaemonInboxOptions,
   factories: Pick<EmailDaemonInboxFactories, 'createOwner' | 'eligibilityClock'>,
-  register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: EmailInboxOwner) => T | Promise<T>,
+  register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: EmailInboxOwner,
+    beforeIdentityWrite: (() => void) | undefined) => T | Promise<T>,
 ): (...args: Parameters<DaemonInboxFactory>) => Promise<T> {
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady }) : undefined;
   if (triageTagging && typeof triageTagging.onReady !== 'function') throw new Error('Triage tagging requires an explicit owner callback');
@@ -86,7 +89,10 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
     const constructed = Promise.withResolvers<T>();
     void constructed.promise.catch(() => {});
     try {
-      owner = (factories.createOwner ?? createEmailInboxOwner)({ account: options.account, service: mail.service,
+      const identity = await acquireAccountInboxIdentity({ workingDirectory, assertCurrent: current,
+        beforeWrite: controls.beforeAccountIdentityWrite }, { provider: 'email', account: options.account });
+      current();
+      owner = (factories.createOwner ?? createEmailInboxOwner)({ identity, account: options.account, service: mail.service,
         screening: options.screening, assertCurrent: current, resolveRouteId,
         getCheckpoint: () => {
           if (!surface?.getImapCheckpoint) throw new Error('Email inbox checkpoint storage is unavailable');
@@ -114,7 +120,7 @@ function createEmailAccountFactory<T extends InboxSurfaceRegistration>(options: 
           });
           return () => eligibility!.close();
         },
-      }, selectedOwner);
+      }, selectedOwner, controls.beforeInboxTriageIdentityWrite);
       constructed.resolve(surface);
     } catch {
       constructed.reject(new Error('Email inbox source construction failed'));

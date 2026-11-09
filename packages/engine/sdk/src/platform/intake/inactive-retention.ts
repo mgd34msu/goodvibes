@@ -44,6 +44,11 @@ function rootStamp(path: string): string {
 function selectedStore(name: string): { provider?: string; lockName: string; historicalNative: boolean } | null {
   const provider = /^inbox-(discord|slack|email)-([0-9a-f]{64}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})\.sqlite$/.exec(name);
   if (provider) return { provider: provider[1]!, lockName: `${name}.owner.lock`, historicalNative: true };
+  // New generic defaults own this exact mirror mutex through both mirror-read
+  // and independent triage drainage; the receipt UUID cannot be inferred here.
+  if (/^inbox-owned-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.sqlite$/.test(name)) {
+    return { lockName: `${name}.owner.lock`, historicalNative: false };
+  }
   const owned = /^inbox-owned-([0-9a-f]{64})\.sqlite$/.exec(name);
   return owned ? { lockName: `inbox-triage-${owned[1]!}.sqlite.owner.lock`, historicalNative: false } : null;
 }

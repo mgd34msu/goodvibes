@@ -7,6 +7,8 @@ export type { IntakeCredentialStore, IntakeCredentialSnapshot, IntakeLogger } fr
 export { createProtectedInboxMapper } from './protected-preview.js';
 export type { ProtectedInboxPreviewInput, ProtectedInboxPreviewFields } from './protected-preview.js';
 export { createEmailInboxOwner } from './providers/email-owner.js';
+export { acquireAccountInboxIdentity, resolveAccountInboxIdentity } from './providers/account-identity.js';
+export type { AccountInboxIdentity, AccountInboxIdentityInput, AccountInboxIdentityOwner, AccountInboxSelectors, AccountInboxBinding } from './providers/account-identity.js';
 export type { EmailInboxAccount, EmailInboxOwnerOptions, EmailInboxOwner, EmailInboxReadLease, VerifiedEmailInboxOwner } from './providers/email-owner.js';
 export { createSlackInboxOwner } from './providers/slack-owner.js';
 export type { SlackInboxAccount, SlackInboxOwnerOptions, SlackInboxOwnerFactories, SlackInboxOwner, VerifiedSlackInboxOwner } from './providers/slack-owner.js';

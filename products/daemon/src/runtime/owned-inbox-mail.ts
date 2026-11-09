@@ -30,7 +30,7 @@ function hasHostedScreeningOwners(input: MailInput): input is MailInput & {
 
 /** Even a factory that throws after construction cannot orphan subscriptions. */
 export async function registerOwnedMailInbox(factory: DaemonInboxFactory, context: HandlerContext,
-  routing: RoutingRegistration, controls: Pick<DaemonInboxControls, 'gatePolling' | 'gatePollingOwned' | 'beforeDiscordIdentityWrite'>,
+  routing: RoutingRegistration, controls: Pick<DaemonInboxControls, 'gatePolling' | 'gatePollingOwned' | 'beforeDiscordIdentityWrite' | 'beforeAccountIdentityWrite' | 'beforeInboxTriageIdentityWrite'>,
   mailInput: MailInput, triageHost?: DaemonTriagePermissionHost): Promise<OwnedHandlerSurface> {
   const mailClosers = new Set<() => void>();
   const taggingOwners: OwnedInboxTagging[] = [];

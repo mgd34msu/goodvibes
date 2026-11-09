@@ -9,9 +9,59 @@ import { createInactiveInboxRetentionOwner, type InactiveInboxRetentionOwner, ty
 import { HandlerSqliteStore } from '../sdk/src/platform/state/daemon-handler-sqlite-store.js';
 import { createOwnedInboxSource } from '../sdk/src/platform/intake/registration.js';
 import { acquireCrossProcessLock } from '../sdk/src/platform/state/durable-file-io.js';
+import { acquireOwnedTriageIdentity } from '../sdk/src/platform/intake/providers/account-identity.js';
+import { fileURLToPath } from 'node:url';
+import { tryAcquireCrossProcessLock } from '../sdk/src/platform/workspace/checkpoint/cross-process-lock.js';
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); });
 const clock = Date.parse('2026-11-08T12:00:00Z');
+
+async function archivedDefault(root: string, historical = false) {
+  const owner = { workingDirectory: root, assertCurrent() {} };
+  // Published owned-inbox-triage-v1 tuple for fixture/default-retention-account.
+  const mirrorFileName = historical ? 'inbox-owned-23c3d67ce110d2b3dd64b99e555cbe3fb1fcd05f1877fe83612b3aaee99296d7.sqlite'
+    : (await acquireOwnedTriageIdentity(owner, 'fixture', 'default-retention-account')).mirrorFileName;
+  const store = new InboxCursorStore(root, mirrorFileName, { now: () => 0, sweepIntervalMs: 0 });
+  await store.init(); store.upsertItems([
+    { id: 'fixture:old', provider: 'fixture', kind: 'dm', fromDigest: 'cafebabedeadbeef', subjectPreview: '', bodyPreview: 'Archived default preview', receivedAt: clock - INBOX_ITEM_TTL_MS - 1, unread: true },
+    { id: 'fixture:recent', provider: 'fixture', kind: 'dm', fromDigest: 'cafebabedeadbeef', subjectPreview: '', bodyPreview: 'Current default preview', receivedAt: clock - 1, unread: true },
+  ]);
+  await store.flush(); await store.close();
+  const selected = await acquireOwnedTriageIdentity(owner, 'fixture', 'default-retention-account');
+  return { ...selected, path: store.dbPath, async count() {
+    const read = new InboxCursorStore(root, selected.mirrorFileName, { now: () => 0, sweepIntervalMs: 0 });
+    await read.init(); try { return read.countItems(); } finally { await read.close(); }
+  } };
+}
+
+test('new opaque generic mirrors expire offline under their stored original retention policy', async () => {
+  const root = makeProjectTempDir('inactive-default-opaque'), row = await archivedDefault(root);
+  expect(row.mirrorFileName).toMatch(/^inbox-owned-[0-9a-f-]{36}\.sqlite$/);
+  const owner = janitor(root); await owner.ready; await owner.close();
+  expect(await row.count()).toBe(1);
+});
+
+test.each([false, true])('a separate actual default source owns the exact mirror/compatibility mutex and excludes cleanup (historical=%s)', async historical => {
+  const root = makeProjectTempDir('inactive-default-cross-process'), row = await archivedDefault(root, historical);
+  const child = Bun.spawn([process.execPath, fileURLToPath(new URL('./_helpers/intake-default-owner-child.ts', import.meta.url)), root],
+    { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' });
+  let ended = false;
+  const finish = async () => { if (!ended) { ended = true; child.stdin.end(); } return child.exited; };
+  cleanups.push(async () => { await finish(); });
+  const reader = child.stdout.getReader();
+  try {
+    const message = await reader.read(); expect(new TextDecoder().decode(message.value)).toContain('ready');
+    if (historical) {
+      const original = tryAcquireCrossProcessLock(join(root, '.goodvibes', 'tui', 'operator', `inbox-triage-${row.scopeId}.sqlite.owner.lock`));
+      try { expect(original).toBeNull(); } finally { original?.(); }
+    }
+    const before = readFileSync(row.path), owner = janitor(root); await owner.ready;
+    expect((await owner.sweep()).busy).toBe(1); expect(readFileSync(row.path)).toEqual(before);
+    expect(await finish()).toBe(0);
+    expect((await owner.sweep()).expired).toBe(1); await owner.close();
+    expect(await row.count()).toBe(1);
+  } finally { reader.releaseLock(); await finish(); }
+});
 async function archived(root: string, provider: 'discord' | 'slack' | 'email', ttl = INBOX_ITEM_TTL_MS, cap = INBOX_ITEM_CAP) {
   const name = `inbox-${provider}-${provider === 'discord' ? randomUUID() : (provider === 'slack' ? 'a' : 'b').repeat(64)}.sqlite`;
   const store = new InboxCursorStore(root, name, { now: () => 0, sweepIntervalMs: 0, itemTtlMs: ttl, itemCap: cap });

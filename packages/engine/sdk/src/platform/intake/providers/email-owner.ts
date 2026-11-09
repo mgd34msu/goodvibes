@@ -1,5 +1,4 @@
 /** Explicit account-owned email intake over canonical mail and source screening. */
-import { createHash } from 'node:crypto';
 import { types } from 'node:util';
 import { ImapOpenError } from '../../email/imap-open.js';
 import { EmailCredentialUnavailableError } from '../../email/email-config.js';
@@ -10,6 +9,7 @@ import type { ProtectedSourceOwnerOptions, ProtectedSource } from '../../securit
 import type { OwnedInboxReadLease } from '../registration.js';
 import { digestSender, normalizeWhitespace, stripMarkup } from '../text-normalization.js';
 import { POLL_CADENCE_MS, type RouteResolver, type ImapUidCheckpoint, type InboundChannelItem, type InboundProviderAdapter, type ProviderPollOptions, type ProviderPollResult } from '../provider-adapter.js';
+import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
 
 export interface EmailInboxAccount {
   readonly host: string;
@@ -19,6 +19,7 @@ export interface EmailInboxAccount {
   readonly security: 'tls';
 }
 export interface EmailInboxOwnerOptions {
+  readonly identity: AccountInboxIdentity;
   readonly account: EmailInboxAccount;
   /** Real canonical service with synchronous account/config/secret lifecycle. */
   readonly service: EmailService;
@@ -37,6 +38,7 @@ export interface EmailInboxReadLease extends OwnedInboxReadLease {
 export interface EmailInboxOwner {
   readonly account: EmailInboxAccount;
   readonly scopeId: string;
+  readonly triageStoreFileName?: string;
   readonly adapter: InboundProviderAdapter;
   /** Authenticated metadata only; independent of committed UID progress. */
   verifyEligibility?(): Promise<{ readonly signal: AbortSignal; assertCurrent(): void }>;
@@ -86,7 +88,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
   const assertAuthority = authority.assertCurrent;
   const getCheckpoint = options.getCheckpoint;
   const resolveRouteId = options.resolveRouteId;
-  const scopeId = createHash('sha256').update(JSON.stringify(['email-inbox', 1, account])).digest('hex');
+  const { scopeId, triageFileName: triageStoreFileName } = resolveAccountInboxIdentity(options.identity, { provider: 'email', account });
   const lifetime = new AbortController();
   const signal = AbortSignal.any([lifetime.signal, options.screening.authority.signal, ...(options.signal ? [options.signal] : [])]);
   const active = new Set<Promise<unknown>>();
@@ -244,7 +246,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): Verified
     return observation;
   };
   return {
-    account, scopeId, adapter,
+    account, scopeId, triageStoreFileName, adapter,
     async verifyEligibility() {
       const epoch = authorityEpoch;
       const observation = await verifyAccount();

@@ -5,6 +5,8 @@ import * as directClient from '../sdk/src/platform/security/source-screening/dir
 import { createSlackInboxOwner } from '../sdk/src/platform/intake/providers/slack-owner.ts';
 import { createSlackInboxHttpOwner } from '../sdk/src/platform/intake/providers/slack-http.ts';
 import type { ProtectedSourceOwnerOptions } from '../sdk/src/platform/security/source-screening/types.ts';
+import { acquireAccountInboxIdentity } from '../sdk/src/platform/intake/providers/account-identity.js';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: Array<() => unknown | Promise<unknown>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -58,9 +60,10 @@ function clientFactory(base: string, onAbort?: () => void, entered?: () => void)
 }
 
 async function owner(base: string, onAbort?: () => void, entered?: () => void, screening?: ProtectedSourceOwnerOptions) {
+  const identity = await acquireAccountInboxIdentity({ workingDirectory: makeProjectTempDir('slack-fenced-identity'), assertCurrent() {} }, { provider: 'slack', account });
   const owned = await createSlackInboxOwner({ logger: { info() {}, warn() {}, error() {} },
     credentials: { resolveRef: async () => null, resolveConfigSecret: async () => 'xoxb-synthetic-fencing' },
-  }, { account, assertCurrent() {}, screening: screening ?? {
+  }, { identity, account, assertCurrent() {}, screening: screening ?? {
     authority: { ownerId: 'synthetic-local-authority', revision: '1', retention: 'ephemeral-no-log',
       signal: new AbortController().signal, assertCurrent() {} },
     // An empty inbox does not submit source content to either service.

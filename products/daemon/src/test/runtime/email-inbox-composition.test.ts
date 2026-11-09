@@ -226,7 +226,7 @@ test('cold owned composition explicitly seeds before content; authenticated HTTP
   expect((await f.host.start()).state).toBe('ready'); expect(f.graphWasCold).toBe(true);
   expect(f.provider.constructors).toBe(1); expect(f.provider.secretReads).toBe(0); expect(f.provider.sockets).toHaveLength(0);
   expect(f.gateId).toBe(`email:${f.owners[0]!.scopeId}`); expect(f.storePath).toEndWith(`inbox-email-${f.owners[0]!.scopeId}.sqlite`);
-  expect(f.owners[0]!.scopeId).toMatch(/^[a-f0-9]{64}$/); expect(f.storePath).not.toContain(account.username); expect(f.storePath).not.toContain(account.host);
+  expect(f.owners[0]!.scopeId).toMatch(/^[a-f0-9-]{36}$/); expect(f.storePath).not.toContain(account.username); expect(f.storePath).not.toContain(account.host);
   expect((await f.wire(false)).status).toBe(401); expect(f.provider.secretReads).toBe(0);
   expect((await f.wire()).status).toBe(503); // No durable generation has been authorized yet.
   await f.control.start();
@@ -249,7 +249,10 @@ test('cold owned composition explicitly seeds before content; authenticated HTTP
   expect(stored(f.storePath)).toMatchObject({ cursor: 0, checkpoint: { uidValidity: 7, lastTerminalUid: 43 }, items: [{ bodyPreview: redacted }, { bodyPreview: redacted }] });
   const bytes = readFileSync(f.storePath).toString('utf8');
   for (const raw of [sensitive, sender, account.username, account.host, 'synthetic-mail-secret', html]) expect(bytes).not.toContain(raw);
-  for (const item of stored(f.storePath).items) expect(item.id).toMatch(/^email:[a-f0-9]{64}:0000000007:000000004[23]$/);
+  for (const item of stored(f.storePath).items) {
+    expect(item.id).toStartWith(`email:${f.owners[0]!.scopeId}:`);
+    expect(item.id).toMatch(/:0000000007:000000004[23]$/);
+  }
   expect(JSON.stringify(inbox)).not.toContain(sender); expect(f.provider.sockets.every(socket => socket.closed)).toBe(true);
 });
 

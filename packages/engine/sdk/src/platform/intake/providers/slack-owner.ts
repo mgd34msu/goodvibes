@@ -1,5 +1,4 @@
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { createHash } from 'node:crypto';
 import { types } from 'node:util';
 import { createProtectedSourceOwner } from '../../security/source-screening/owner.js';
 import type { ProtectedSourceOwnerOptions } from '../../security/source-screening/types.js';
@@ -9,6 +8,7 @@ import { POLL_CADENCE_MS } from '../provider-adapter.js';
 import type { OwnedInboxReadLease } from '../registration.js';
 import { createSlackInboxAdapter, type SlackInboxHttp } from './slack.js';
 import { createSlackInboxHttpOwner } from './slack-http.js';
+import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
 
 const KEY = 'surfaces.slack.botToken';
 const AUTH_URL = 'https://slack.com/api/auth.test';
@@ -19,6 +19,7 @@ export interface SlackInboxAccount {
 }
 
 export interface SlackInboxOwnerOptions {
+  readonly identity: AccountInboxIdentity;
   /** Expected provider identity, established by the trusted composition root. */
   readonly account: SlackInboxAccount;
   /** Actual local-service provenance/retention capability, never a source flag. */
@@ -39,6 +40,7 @@ export interface SlackInboxOwner {
   readonly account: SlackInboxAccount;
   /** Opaque stable account discriminator, independent of credential rotation. */
   readonly scopeId: string;
+  readonly triageStoreFileName?: string;
   readonly adapter: InboundProviderAdapter;
   /** A changed credential must prove the same identity before stored rows leave. */
   assertReadCurrent(): Promise<void>;
@@ -69,7 +71,6 @@ function captureAccount(value: SlackInboxAccount): SlackInboxAccount {
   return Object.freeze({ workspaceId: fields[0]!, userId: fields[1]! });
 }
 
-function digest(value: string): string { return createHash('sha256').update(value).digest('hex'); }
 function unavailable(configured?: boolean): ProviderPollResult {
   return { items: [], state: 'unavailable', error: 'Slack inbox account or source is unavailable', ...(configured === undefined ? {} : { configured }) };
 }
@@ -85,7 +86,7 @@ export async function createSlackInboxOwner(
 ): Promise<VerifiedSlackInboxOwner> {
   const account = captureAccount(options.account);
   const resolveRouteId = context.resolveRouteId;
-  const scopeId = digest(JSON.stringify(['slack-inbox', 1, account.workspaceId, account.userId]));
+  const { scopeId, triageFileName: triageStoreFileName } = resolveAccountInboxIdentity(options.identity, { provider: 'slack', account });
   const lifetime = new AbortController();
   const signal = AbortSignal.any([lifetime.signal, options.screening.authority.signal, ...(options.signal ? [options.signal] : [])]);
   const assertScope = options.assertCurrent;
@@ -237,7 +238,7 @@ export async function createSlackInboxOwner(
     } catch { throw new Error('Slack inbox account scope is unavailable'); }
   });
   return {
-    account, scopeId, adapter,
+    account, scopeId, triageStoreFileName, adapter,
     invalidateCredential: invalidateIdentity,
     async assertReadCurrent() { await verifyIdentity(false); },
     async acquireReadLease() {

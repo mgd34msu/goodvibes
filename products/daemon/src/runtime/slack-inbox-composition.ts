@@ -7,7 +7,7 @@ import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { acquireCrossProcessLock } from '@goodvibes-jev/engine/sdk/platform/state/durable-file-io';
 import {
-  createSlackInboxOwner, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
+  createSlackInboxOwner, acquireAccountInboxIdentity, registerInboxSurface, createOwnedInboxSource, createOwnedTriagedInboxSource,
   type SlackInboxAccount, type SlackInboxOwner, type InboxSurfaceRegistration, type InboxTriageAuthority,
 } from '@goodvibes-jev/engine/sdk/platform/intake';
 import type { ProtectedSourceOwnerOptions } from '@goodvibes-jev/engine/sdk/platform/security';
@@ -43,8 +43,10 @@ export function createSlackDaemonInboxSourceFactory(
   factories: SlackDaemonInboxSourceFactories = {},
 ): DaemonInboxSourceFactory {
   const authority = options.triageAuthority;
-  return createSlackAccountFactory(options, factories, factories.createSource ?? ((context, source, owner) =>
+  return createSlackAccountFactory(options, factories, factories.createSource ?? ((context, source, owner, beforeIdentityWrite) =>
     createOwnedTriagedInboxSource(context, { ...source, providerId: 'slack', accountScopeId: owner.scopeId,
+      ...(owner.triageStoreFileName ? { triageStoreFileName: owner.triageStoreFileName } : {}),
+      beforeIdentityWrite,
       acquireReadLease: () => {
         if (!owner.acquireReadLease) throw new Error('Slack triage requires the native account read lease');
         return owner.acquireReadLease();
@@ -67,7 +69,8 @@ export function createSlackDaemonInboxFactory(
 function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
   options: SlackDaemonInboxOptions,
   factories: Pick<SlackDaemonInboxFactories, 'createOwner' | 'eligibilityClock'>,
-  register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: SlackInboxOwner) => T | Promise<T>,
+  register: (context: Parameters<DaemonInboxFactory>[0], options: Parameters<typeof registerInboxSurface>[1], owner: SlackInboxOwner,
+    beforeIdentityWrite: (() => void) | undefined) => T | Promise<T>,
   requireFinalProof: boolean,
 ): (...args: Parameters<DaemonInboxFactory>) => Promise<T> {
   const triageTagging = options.triageTagging ? Object.freeze({ onReady: options.triageTagging.onReady }) : undefined;
@@ -94,8 +97,11 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
     current();
     const workingDirectory = await realpath(context.workingDirectory);
     current();
+    const identity = await acquireAccountInboxIdentity({ workingDirectory, assertCurrent: current,
+      beforeWrite: controls.beforeAccountIdentityWrite }, { provider: 'slack', account });
+    current();
     const owner = await (factories.createOwner ?? createSlackInboxOwner)({ ...context, resolveRouteId }, {
-      account, screening: options.screening, assertCurrent: current,
+      identity, account, screening: options.screening, assertCurrent: current,
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
     });
     let eligibility: ReturnType<typeof ownInboxEligibility> | undefined;
@@ -137,7 +143,7 @@ function createSlackAccountFactory<T extends InboxSurfaceRegistration>(
           });
           return () => eligibility!.close();
         },
-      }, owner);
+      }, owner, controls.beforeInboxTriageIdentityWrite);
       constructed.resolve(surface);
     } catch {
       constructed.reject(new Error('Slack inbox source construction failed'));

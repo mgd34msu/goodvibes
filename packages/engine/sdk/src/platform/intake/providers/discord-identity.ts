@@ -1,15 +1,12 @@
 /** Private native identity registry. Exact facts stay on owner-only local disk;
  * only opaque IDs cross into inbox rows, selectors, locks and polling elections. */
 import { randomUUID } from 'node:crypto';
-import { lstatSync, mkdirSync, readdirSync, realpathSync, readFileSync } from 'node:fs';
+import { lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod/v4';
-import { drainOwned } from '@goodvibes-jev/judgment/decisions';
-import { writeJsonFileAtomic } from '../../state/durable-file-io.js';
-import { tryAcquireCrossProcessLock } from '../../workspace/checkpoint/cross-process-lock.js';
-import { readFileObservation, fileObservationIdentity } from '../../utils/file-observation.js';
 import type { ProtectedSourceOwnerOptions } from '../../security/source-screening/types.js';
+import { updateInboxIdentityRegistry, captureRegistryOwner, synchronous, type InboxIdentityRegistryFormat } from './identity-registry.js';
 import { findSavedDiscordScope, findSavedDiscordTriage } from './discord-saved-scope.js';
 
 const snowflake = z.string().regex(/^[1-9]\d{0,19}$/).refine(value => BigInt(value) < (1n << 64n));
@@ -62,74 +59,21 @@ export interface DiscordInboxIdentityOwner {
   readonly beforeWrite?: (() => void) | undefined;
 }
 const unavailable = () => new Error('Discord inbox native identity registry is unavailable');
-function captureRegistryOwner(owner: DiscordInboxIdentityOwner): DiscordInboxIdentityOwner {
-  return Object.freeze({ workingDirectory: owner.workingDirectory, assertCurrent: owner.assertCurrent.bind(owner), beforeWrite: owner.beforeWrite?.bind(owner) });
-}
-function synchronous(check: () => void): void { const result: unknown = check(); if (result !== undefined) { drainOwned(result); throw unavailable(); } }
-const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
-function directoryStamp(path: string): string {
-  const stat = lstatSync(path, { bigint: true });
-  if (!stat.isDirectory() || stat.isSymbolicLink() || (process.geteuid && stat.uid !== BigInt(process.geteuid()))) throw unavailable();
-  return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.birthtimeNs].join(':');
-}
-function lockStamp(path: string): string {
-  const stat = lstatSync(path, { bigint: true });
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) throw unavailable();
-  // Heartbeat changes mtime/ctime; retained inode, owner, birth and payload prove this lease.
-  return [stat.dev, stat.ino, stat.mode, stat.uid, stat.gid, stat.nlink, stat.birthtimeNs].join(':');
-}
-async function updateRegistry<T>(owner: DiscordInboxIdentityOwner, change: (registry: Registry, directory: string, assertCurrent: () => void) => { value: T; changed: boolean }): Promise<{ value: T; assertDirectoryCurrent: () => void }> {
-  owner = captureRegistryOwner(owner);
-  synchronous(owner.assertCurrent);
-  const root = realpathSync(owner.workingDirectory), rootStamp = directoryStamp(root);
-  const directory = join(root, '.goodvibes', 'tui', 'operator');
-  const paths = [root, join(root, '.goodvibes'), join(root, '.goodvibes', 'tui'), directory];
-  const parents: Array<{ path: string; stamp: string }> = [];
-  const missingDirectories: string[] = [];
-  // Validate every existing ancestor before creating anything. Recursive mkdir
-  // would otherwise traverse an existing alias before the later fence rejects it.
-  for (const path of paths) {
-    try { parents.push({ path, stamp: directoryStamp(path) }); }
-    catch (error) { if (!missing(error)) throw unavailable(); missingDirectories.push(path); }
-  }
-  const assertParents = () => {
-    synchronous(owner.assertCurrent);
-    if (realpathSync(owner.workingDirectory) !== root || parents.some(parent => directoryStamp(parent.path) !== parent.stamp)) throw unavailable();
-  };
-  for (const path of missingDirectories) {
-    assertParents(); mkdirSync(path, { mode: 0o700 });
-    parents.push({ path, stamp: directoryStamp(path) }); assertParents();
-  }
-  const path = join(directory, 'discord-inbox-identities.json'), lock = `${path}.owner.lock`;
-  const release = tryAcquireCrossProcessLock(lock);
-  if (!release) throw unavailable();
-  try {
-    const held = lockStamp(lock), payload = readFileSync(lock);
-    const current = () => {
-      synchronous(owner.assertCurrent);
-      if (realpathSync(owner.workingDirectory) !== root || directoryStamp(root) !== rootStamp
-        || parents.some(parent => directoryStamp(parent.path) !== parent.stamp)
-        || lockStamp(lock) !== held || !readFileSync(lock).equals(payload)) throw unavailable();
-    };
-    current();
-    let observed: string | null = null, registry: Registry;
-    try {
-      const stat = lstatSync(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1
-        || (stat.mode & 0o777) !== 0o600 || (process.geteuid && stat.uid !== process.geteuid()) || stat.size > 16 * 1024 * 1024) throw unavailable();
-      const source = readFileObservation(path); observed = source.physical;
-      registry = registrySchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(source.bytes)));
-      if (new Set(registry.scopes.map(entry => entry.id)).size !== registry.scopes.length
-        || new Set(registry.scopes.map(entry => JSON.stringify(entry.binding))).size !== registry.scopes.length
-        || new Set(registry.registries.map(entry => entry.revision)).size !== registry.registries.length
-        || new Set(registry.registries.map(entry => JSON.stringify([entry.userId, entry.channelIds]))).size !== registry.registries.length) throw unavailable();
-      for (const ids of [...registry.scopes.map(entry => entry.binding.channelIds), ...registry.registries.map(entry => entry.channelIds)]) {
-        if (new Set(ids).size !== ids.length || !isDeepStrictEqual(ids, [...ids].sort())) throw unavailable();
-      }
-    } catch (error) {
-      if (!missing(error)) throw unavailable();
-      registry = { schema: 1, registries: [], scopes: [] };
+const discordIdentityRegistry: InboxIdentityRegistryFormat<Registry> = {
+  fileName: 'discord-inbox-identities.json',
+  empty: () => ({ schema: 1, registries: [], scopes: [] }),
+  parse(value) {
+    const registry = registrySchema.parse(value);
+    if (new Set(registry.scopes.map(entry => entry.id)).size !== registry.scopes.length
+      || new Set(registry.scopes.map(entry => JSON.stringify(entry.binding))).size !== registry.scopes.length
+      || new Set(registry.registries.map(entry => entry.revision)).size !== registry.registries.length
+      || new Set(registry.registries.map(entry => JSON.stringify([entry.userId, entry.channelIds]))).size !== registry.registries.length) throw unavailable();
+    for (const ids of [...registry.scopes.map(entry => entry.binding.channelIds), ...registry.registries.map(entry => entry.channelIds)]) {
+      if (new Set(ids).size !== ids.length || !isDeepStrictEqual(ids, [...ids].sort())) throw unavailable();
     }
+    return registry;
+  },
+  assertStored(registry, directory) {
     // An opaque mirror cannot be reconstructed from its name. Missing/partial
     // registry recovery must hold, rather than silently opening an empty mirror.
     const knownMirrors = new Set(registry.scopes.map(entry => `inbox-discord-${entry.id}.sqlite`));
@@ -139,28 +83,10 @@ async function updateRegistry<T>(owner: DiscordInboxIdentityOwner, change: (regi
       if ((/^inbox-discord-[0-9a-f-]{36}\.sqlite$/.test(base) && !knownMirrors.has(base))
         || (/^inbox-triage-discord-[0-9a-f-]{36}\.sqlite$/.test(base) && !knownTriage.has(base))) throw unavailable();
     }
-    const selectedCurrent = () => {
-      current();
-      if (observed !== null) { if (fileObservationIdentity(path) !== observed) throw unavailable(); }
-      else { try { lstatSync(path); } catch (error) { if (missing(error)) return; throw unavailable(); } throw unavailable(); }
-    };
-    selectedCurrent();
-    const result = change(registry, directory, selectedCurrent);
-    selectedCurrent();
-    if (owner.beforeWrite) synchronous(owner.beforeWrite);
-    selectedCurrent();
-    if (result.changed) {
-      registrySchema.parse(registry);
-      selectedCurrent();
-      writeJsonFileAtomic(path, registry, { durable: true, mode: 0o600, cleanupStaleTemps: false, assertCurrent: selectedCurrent });
-      observed = fileObservationIdentity(path); current();
-    }
-    if (observed === null) throw unavailable();
-    return { value: result.value, assertDirectoryCurrent: () => {
-      if (realpathSync(owner.workingDirectory) !== root || parents.some(parent => directoryStamp(parent.path) !== parent.stamp)) throw unavailable();
-    } };
-  } catch { throw unavailable(); }
-  finally { release(); }
+  },
+};
+function updateRegistry<T>(owner: DiscordInboxIdentityOwner, change: (registry: Registry, directory: string, assertCurrent: () => void) => { value: T; changed: boolean }) {
+  return updateInboxIdentityRegistry(owner, discordIdentityRegistry, change);
 }
 /** Exact configured DM membership owns a stable revision, rather than a digest. */
 export function acquireDiscordInboxRegistryRevision(owner: DiscordInboxIdentityOwner, account: { readonly userId: string }, ids: readonly string[]): Promise<string> {

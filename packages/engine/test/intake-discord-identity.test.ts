@@ -24,6 +24,21 @@ function fixture() {
   return { root, directory, path: join(directory, 'discord-inbox-identities.json'), owner: { workingDirectory: root, assertCurrent() {} } };
 }
 const oldDigest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+test('first Discord initialization under restrictive umask publishes private directories and preserves actual data/selectors', async () => {
+  const f = fixture(), source = input(); let pending!: ReturnType<typeof acquireDiscordInboxIdentity>;
+  const mask = process.umask(0o777);
+  try { pending = acquireDiscordInboxIdentity(f.owner, source); } finally { process.umask(mask); }
+  const selected = resolveDiscordInboxIdentity(await pending, source);
+  for (const path of [join(f.root, '.goodvibes'), join(f.root, '.goodvibes', 'tui'), f.directory]) expect(statSync(path).mode & 0o777).toBe(0o700);
+  expect(statSync(f.path).mode & 0o777).toBe(0o600);
+  const mirror = new InboxCursorStore(f.root, `inbox-discord-${selected.scopeId}.sqlite`, { sweepIntervalMs: 0 });
+  await mirror.init(); mirror.upsertItems([{ id: 'discord:umask', provider: 'discord', kind: 'dm', fromDigest: 'cafebabedeadbeef',
+    subjectPreview: '', bodyPreview: 'Original protected preview', receivedAt: Date.now(), unread: true }]);
+  await mirror.flush(); await mirror.close();
+  expect(resolveDiscordInboxIdentity(await acquireDiscordInboxIdentity(f.owner, source), source)).toEqual(selected);
+  const read = new InboxCursorStore(f.root, `inbox-discord-${selected.scopeId}.sqlite`, { sweepIntervalMs: 0 });
+  await read.init(); try { expect(read.listItems({ limit: 1 })[0]?.bodyPreview).toBe('Original protected preview'); } finally { await read.close(); }
+});
 function historicalScope(source: DiscordInboxIdentityInput, configured: boolean) {
   const ids = [...source.channels.channelIds].sort();
   const revision = configured ? oldDigest([source.account.userId, ids]) : source.channels.revision;

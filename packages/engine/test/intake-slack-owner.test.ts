@@ -3,6 +3,8 @@ import { afterEach, expect, test } from 'bun:test';
 import { Client } from 'undici/index.js';
 import { createSlackInboxOwner, type SlackInboxAccount, type SlackInboxOwner, type SlackInboxOwnerOptions } from '../sdk/src/platform/intake/providers/slack-owner.ts';
 import { digestSender } from '../sdk/src/platform/intake/text-normalization.ts';
+import { acquireAccountInboxIdentity } from '../sdk/src/platform/intake/providers/account-identity.js';
+import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
 const cleanups: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
@@ -43,7 +45,8 @@ async function fixture(options: { account?: SlackInboxAccount; sourceGate?: Prom
   } });
   cleanups.push(() => local.stop(true), () => slack.stop(true));
   const signal = new AbortController();
-  const ownerOptions = { account, signal: signal.signal, assertCurrent() { if (!current) throw new Error('synthetic-private-scope-marker'); },
+  const identity = await acquireAccountInboxIdentity({ workingDirectory: makeProjectTempDir('slack-owner-identity'), assertCurrent() {} }, { provider: 'slack', account });
+  const ownerOptions = { identity, account, signal: signal.signal, assertCurrent() { if (!current) throw new Error('synthetic-private-scope-marker'); },
     screening: { authority: { ownerId: 'synthetic-local-services', revision: '1', retention: 'ephemeral-no-log', signal: signal.signal, assertCurrent() {} },
       proposal: { endpoint: `http://127.0.0.1:${local.port}`, model: 'synthetic-proposer' },
       judgment: { endpoint: `http://127.0.0.1:${local.port}`, model: 'jev-1.13.0' }, timeoutMs: 1_000 },
@@ -140,7 +143,7 @@ test('account discriminators distinguish users and workspaces without exposing i
   const a = await fixture(), b = await fixture({ account: { workspaceId: 'T-ALPHA', userId: 'U-OTHER' } });
   const c = await fixture({ account: { workspaceId: 'T-OTHER', userId: 'U-OWNER' } });
   expect(new Set([a.owner.scopeId, b.owner.scopeId, c.owner.scopeId]).size).toBe(3);
-  for (const owner of [a.owner, b.owner, c.owner]) expect(owner.scopeId).toMatch(/^[a-f0-9]{64}$/);
+  for (const owner of [a.owner, b.owner, c.owner]) expect(owner.scopeId).toMatch(/^[a-f0-9-]{36}$/);
 });
 
 test('eligibility authenticates metadata only and retains its signal across fresh same-account probes', async () => {

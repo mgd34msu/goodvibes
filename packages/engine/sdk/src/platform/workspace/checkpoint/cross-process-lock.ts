@@ -78,6 +78,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  fchmodSync,
   readdirSync,
   renameSync,
   statSync,
@@ -399,6 +400,10 @@ function tryTakeOverStaleLock(lockPath: string, staleMs: number, token: string, 
 
 /** Write this process's ownership payload into a freshly-opened lock fd. */
 function writeLockPayload(fd: number, token: string): void {
+  // The published lease must be readable by its actual owner even when a
+  // restrictive umask made the new staging entry mode000. Set permissions on
+  // the owned descriptor before writing or linking it into the lock namespace.
+  fchmodSync(fd, 0o600);
   writeSync(fd, JSON.stringify({ pid: process.pid, token, acquiredAt: Date.now() }));
 }
 

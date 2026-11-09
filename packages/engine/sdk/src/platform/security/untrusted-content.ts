@@ -560,6 +560,8 @@ function describeApprovalMismatch(mismatch: ApprovalMismatch): string {
   switch (mismatch) {
     case 'expired':
       return 'The approval you gave has expired; approvals are good for minutes, not for the session.';
+    case 'invalid-window':
+      return 'The approval has an invalid time window and cannot authorize this action.';
     case 'different-action':
       return 'The approval you gave was for a different action.';
     case 'different-content':

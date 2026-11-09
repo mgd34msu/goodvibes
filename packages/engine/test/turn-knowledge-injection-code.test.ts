@@ -239,3 +239,20 @@ describe('code injection: budget competition and dedupe', () => {
     expect(second.block).toBeNull();
   });
 });
+
+
+test('captured code dedupes by its actual file revision and one original generation read, then reinjects a changed generation', async () => {
+  let hit = makeCodeHit('src/auth.ts', .99), generation = 'captured-original', reads = 0;
+  hit = { ...hit, chunk: { ...hit.chunk, fileRevision: 'owned-file-original' } };
+  const code: TurnCodeIndexSource = { ...fakeCodeIndex([]), search: async () => [hit],
+    generation: () => { reads++; return generation; },
+    assertCurrent: async expected => { expect(expected).toBe(generation); } };
+  const first = await buildPerTurnKnowledgeInjection(baseInput({ codeIndex: code, codeInjectionEnabled: true }));
+  expect(reads).toBe(1); expect(first.record.injectedIds).toEqual(['src/auth.ts:10-30:captured-original:owned-file-original']);
+  reads = 0;
+  const same = await buildPerTurnKnowledgeInjection(baseInput({ codeIndex: code, codeInjectionEnabled: true, alreadyInjectedIds: first.record.injectedIds }));
+  expect(reads).toBe(1); expect(same.record.codeCandidatesConsidered).toBe(0); expect(same.record.injectedIds).toEqual([]);
+  generation = 'captured-next'; hit = { ...hit, chunk: { ...hit.chunk, fileRevision: 'owned-file-next' } }; reads = 0;
+  const changed = await buildPerTurnKnowledgeInjection(baseInput({ codeIndex: code, codeInjectionEnabled: true, alreadyInjectedIds: first.record.injectedIds }));
+  expect(reads).toBe(1); expect(changed.record.injectedIds).toEqual(['src/auth.ts:10-30:captured-next:owned-file-next']);
+});

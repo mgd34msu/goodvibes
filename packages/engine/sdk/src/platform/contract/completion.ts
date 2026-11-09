@@ -473,7 +473,9 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
                 return result;
               } };
               const review = await reviewBattery.run(meteredPort(nativeContractPort(contract, context.native, bound, claimSignal), reviewUsage),
-                { ...state, claimScope: { ...scope, text: evidence.output.slice(scope.start, scope.end) } },
+                { ...state, claimScope: { start: scope.start, end: scope.end,
+                  ...(scope.version === 2 ? { version: 2, outputDigest: scope.outputDigest } : { textDigest: scope.textDigest }),
+                  text: evidence.output.slice(scope.start, scope.end) } },
                 { site, signal: claimSignal, only: ['unsupported'] });
               assertOwnedContractSource(contract);
               const reading = review.readings.unsupported;

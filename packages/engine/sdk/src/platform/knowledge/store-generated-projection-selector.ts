@@ -43,7 +43,7 @@ export function savedGeneratedProjectionIdentity(source: KnowledgeSourceRecord):
   const { projectionScopeKind: scopeKind, projectionSpaceId: spaceId, targetKind, targetId } = metadata;
   if ((scopeKind !== 'space' && scopeKind !== 'all') || typeof spaceId !== 'string' || typeof targetKind !== 'string'
     || !targetKinds.has(targetKind) || typeof targetId !== 'string') throw new KnowledgeProjectionIdentityHeldError('malformed');
-  const identity = { scopeKind, spaceId, targetKind: targetKind as KnowledgeProjectionTargetKind, targetId };
+  const identity: GeneratedProjectionIdentity = { scopeKind, spaceId, targetKind: targetKind as KnowledgeProjectionTargetKind, targetId };
   projectionIdentityParams(identity);
   if (metadata.knowledgeSpaceId !== spaceId || metadata.namespace !== spaceId
     || metadata.includeAllSpaces !== (scopeKind === 'all') || metadata.projectionKind !== `knowledge-${targetKind}`) throw new KnowledgeProjectionIdentityHeldError('malformed');

@@ -587,7 +587,7 @@ async function materializeGeneratedMarkdown(input: HomeGraphPageContext & {
   readonly nodes?: readonly KnowledgeNodeRecord[];
 }> {
   const regeneration = readRecord(input.metadata).automation === 'snapshot-sync' ? 'automatic' : 'manual';
-  const metadata = {
+  const metadata: Record<string, unknown> = {
     ...(input.metadata ?? {}),
     homeGraphSourceKind: 'generated-page',
     homeGraphGeneratedPage: true,

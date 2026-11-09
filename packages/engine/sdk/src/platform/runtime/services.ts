@@ -151,6 +151,8 @@ import {
 } from './memory/index.js';
 
 export interface RuntimeServicesOptions {
+  /** Trusted installed-data publisher; otherwise use the configured host writer. */
+  readonly nativeDataWriter?: import('./native-reader-compatibility.js').NativeDataWriteOwner | undefined;
   /** Explicit absolute ordinary-Bun runtime for contained captured evaluation. */
   readonly capturedBunRuntimeExecutable?: string | undefined;
   readonly runtimeBus: RuntimeEventBus;

@@ -40,6 +40,7 @@ import { PurchaseReconciliations } from './purchase-reconciliation.js';
  * call).
  */
 import { checkAddress } from '../address.js';
+import type { GateInput } from '../gates.js';
 import type { AddressStore } from '../address.js';
 import { CheckoutRegistry } from '../checkout-registry.js';
 import { CheckoutRecovery } from '../checkout-recovery.js';
@@ -453,12 +454,13 @@ export class CheckoutServiceHolder {
     return this.serviceFor(seam).beginCheckout(input, { ...owner, purchaseId: id, gates });
   }
 
-  private async checkoutGates(input: BeginCheckoutInput, owner: DetachedCheckoutOwner) {
+  private async checkoutGates(input: BeginCheckoutInput, owner: DetachedCheckoutOwner): Promise<GateInput> {
     const [usableCard, shippingAddress] = await mapLimit([
       () => hasUsableCard(this.deps.cards, input.cardId, owner),
       () => hasShippingAddress(this.deps.checkout.addresses, owner),
     ], 2, read => read());
     owner.assertCurrent();
+    if (typeof usableCard !== 'boolean' || typeof shippingAddress !== 'boolean') throw new CheckoutOwnershipError();
     return {
       enabled: readPaymentsEnabled(this.deps.config), isPaymentsLeader: this.deps.isPaymentsLeader(),
       hasUsableCard: usableCard, hasShippingAddress: shippingAddress, isOwnerDirectRequest: true,

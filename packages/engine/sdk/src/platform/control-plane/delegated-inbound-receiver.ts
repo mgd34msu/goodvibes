@@ -33,7 +33,8 @@ export class DelegatedInboundReviewReceiver {
     return this.loading ??= (async () => {
     const saved = await this.store.load();
     if (saved) for (const value of saved.records) {
-      const record = delegatedReviewRecordSchema.parse(value);
+      const { owner, ...fields } = delegatedReviewRecordSchema.parse(value);
+      const record: DelegatedReviewRecord = { ...fields, ...(owner === undefined ? {} : { owner }) };
       Object.freeze(record.ref); Object.freeze(record.origin); Object.freeze(record.choices);
       if (record.owner) { Object.freeze(record.owner.scopes); Object.freeze(record.owner); }
       Object.freeze(record);

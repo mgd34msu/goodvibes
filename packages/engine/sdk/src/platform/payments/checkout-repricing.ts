@@ -82,7 +82,7 @@ function checkoutTexts(current: object): readonly string[] | null {
     const parts = [body];
     if ('selections' in document.checkout && Array.isArray(document.checkout.selections)) for (const selection of document.checkout.selections) {
       if (!selection || typeof selection !== 'object' || !('options' in selection)) continue;
-      if (!Array.isArray(selection.options) || selection.options.length > 1_000 || selection.options.some(option => typeof option !== 'string')) return null;
+      if (!Array.isArray(selection.options) || selection.options.length > 1_000 || selection.options.some((option: unknown) => typeof option !== 'string')) return null;
       // Collapsed native selects need not render all offered prices in body
       // text. These are the exact option labels from the same document; line
       // separators cannot join two labels into a fabricated numeric amount.
@@ -110,7 +110,7 @@ export async function readRepricedCheckout(input: {
   if (!current || typeof current !== 'object' || Array.isArray(current)) return null;
   const texts = checkoutTexts(current); if (!texts) return null;
   const candidates = checkoutAmountCandidates(texts, previous.currency); if (!candidates) return null;
-  const options = { site: 'payments.reprice', signal };
+  const options = { site: 'payments.reprice', ...(signal === undefined ? {} : { signal }) };
   const original = checkoutTermsView(previous, current);
   const state = { ...original, previous: { ...original.expected, deliveryOptions: reading.shippingOptions.map(option => option.label) } };
   assertJudgmentInput(state);

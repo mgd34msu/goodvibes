@@ -68,7 +68,7 @@ export class NativeConversationStorageError extends Error {
  * their original identifiers. Fresh version-two labels never use this hash. */
 const historicalHash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export function nativeConversationSourceId(projectId: string, principalId: string, inputId: string): string { return historicalHash({ projectId, principalId, inputId }); }
-function immutableSource(value: NativeConversationCapture) {
+function immutableSource(value: Omit<NativeConversationCapture, 'decisions'>) {
   return { version: value.version, projectId: value.projectId, principalId: value.principalId, inputId: value.inputId, requestId: value.requestId,
     text: value.text, ...(value.continuation ? { continuation: value.continuation } : {}), unsupportedSources: value.unsupportedSources,
     sourceId: value.sourceId, sourceRevision: value.sourceRevision, sessionId: value.sessionId, owner: value.owner, ...(value.bindingRefs ? { bindingRefs: value.bindingRefs } : {}) };
@@ -192,7 +192,7 @@ export function parseNativeConversationCapture(value: unknown, original?: Native
     const { classic, ...fields } = schema.parse(rest);
     const parsed = { ...fields, ...(classic ? { classic } : {}) };
     const prior = original && privateGet(validatedCaptures, original);
-    const sameSource = original !== undefined && prior !== undefined && isDeepStrictEqual(immutableSource(parsed as NativeConversationCapture), immutableSource(original));
+    const sameSource = original !== undefined && prior !== undefined && isDeepStrictEqual(immutableSource(parsed), immutableSource(original));
     if (prior !== undefined && !sameSource) throw new Error();
     const refs = 'bindingRefs' in parsed ? parsed.bindingRefs : undefined;
     if (!Array.isArray(decisions) || decisions.length > NATIVE_CONVERSATION_MAX_DECISIONS

@@ -263,7 +263,7 @@ export class BrowserSessionManager {
     const original = Object.freeze({ ...input });
     return ownProvisionLifetime(Object.freeze({ ...original,
       signal: original.signal ? AbortSignal.any([original.signal, this.#retiring.signal]) : this.#retiring.signal,
-      assertCurrent: () => { this.#assertOpen(); assertProvisionCurrent(original); this.#assertOpen(); },
+      assertCurrent: (): void => { this.#assertOpen(); assertProvisionCurrent(original); this.#assertOpen(); },
     }));
   }
 

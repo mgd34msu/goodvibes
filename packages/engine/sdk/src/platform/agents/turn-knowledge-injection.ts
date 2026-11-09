@@ -297,7 +297,7 @@ async function collectCodeInjectionCandidates(
 
   const hits = await codeIndex.search(query, { limit: codeLimit });
   const generation = codeIndex.generation?.();
-  const considered = hits.filter(hit => !alreadyInjectedIdSet.has(generation === undefined ? codeHitId(hit) : `${codeHitId(hit)}:${generation}:${hit.chunk.contentHash}`)).length;
+  const considered = hits.filter(hit => !alreadyInjectedIdSet.has(generation === undefined ? codeHitId(hit) : `${codeHitId(hit)}:${generation}:${hit.chunk.fileRevision}`)).length;
   if (!hits.length) return { candidates: [], considered, skipped: undefined };
   if (!codeIndex.rankForInjection) return { candidates: [], considered, skipped: 'code relevance unavailable' };
   const reading = await codeIndex.rankForInjection(query, hits, authority);
@@ -305,7 +305,7 @@ async function collectCodeInjectionCandidates(
   await codeIndex.assertCurrent?.(generation);
   const candidates: MergedCandidate[] = [];
   for (const { hit, probability } of reading.ranked) {
-    const id = codeIndex.generation ? `${codeHitId(hit)}:${codeIndex.generation()}:${hit.chunk.contentHash}` : codeHitId(hit);
+    const id = generation === undefined ? codeHitId(hit) : `${codeHitId(hit)}:${generation}:${hit.chunk.fileRevision}`;
     if (alreadyInjectedIdSet.has(id)) continue;
     const score = probability * CODE_RELEVANCE_TO_SCORE_SCALE;
     if (score < relevanceFloor) continue;

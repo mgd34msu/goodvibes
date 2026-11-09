@@ -26,10 +26,13 @@ export interface CheckoutWindowResumption {
   readonly prepare: (owner: CheckoutOperationOwnership) => PaymentNoticeWindow & { readonly deadlineMs: Promise<number> };
 }
 
+const object = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
+
 export function captureCheckoutWindowCheckpoint(value: unknown): CheckoutWindowCheckpoint {
   const input = captureOwnedJson(value);
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 2 + (Object.hasOwn(input, 'terms') ? 1 : 0)
     || !('record' in input) || !('reading' in input)) throw new Error('The payment window checkpoint is unavailable');
+  if (!object(input.reading)) throw new Error('The payment window checkpoint is unavailable');
   const record = captureCheckoutRecord(input.record), reading = readCheckoutReadingInput(input.reading);
   if (!record || record.phase !== 'awaiting-window' || !record.draw || !record.reservationId || record.totalMinorUnits === null
     || record.totalMinorUnits !== record.draw.totalMinorUnits || record.shippingTierUsed === null

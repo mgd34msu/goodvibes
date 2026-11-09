@@ -59,12 +59,13 @@ export class RetainedOperatorConnection {
       policy.signal.addEventListener('abort', close, { once: true });
       this.unsubscribers.push(() => policy.signal.removeEventListener('abort', close));
       this.unsubscribers.push(this.owner.onDidInvalidate(close), this.owner.onDidChangeIncarnation(close));
+      const fetchImpl = policy.fetchImpl;
       this.operator = createOperatorSdk({
         baseUrl: selection.baseUrl,
         // The SDK retains this accessor, never a second permanent bearer copy.
         getAuthToken: () => { this.assertCurrent(); return this.selection?.token; },
         retry: { maxAttempts: 1 },
-        fetchImpl: createNativeHostFetch({ current: () => this.current(), fetchImpl: policy.fetchImpl }),
+        fetchImpl: createNativeHostFetch({ current: () => this.current(), ...(fetchImpl === undefined ? {} : { fetchImpl }) }),
       });
       this.assertCurrent();
     } catch {

@@ -519,7 +519,8 @@ export class PaymentReplyInbox implements PaymentReplySource {
       if (waiter.deadlineMs === undefined) await waiter.receptionReady;
       if (!this.current(waiter) || !waiter.armedChannels?.includes(channel)) return { consumed: false, reason: 'no-window' };
       const receipts = waiter.receipts.get(channel) ?? [];
-      let receipt = context ? receipts.find(candidate => matchesReceipt(candidate, context)) : receipts.length === 1 ? receipts[0] : undefined;
+      const originalContext = context;
+      let receipt = originalContext ? receipts.find(candidate => matchesReceipt(candidate, originalContext)) : receipts.length === 1 ? receipts[0] : undefined;
       if (receipts.length && context && !receipt) return { consumed: false, reason: 'no-window' };
       if (context?.verifyAccount) {
         const account = await context.verifyAccount();

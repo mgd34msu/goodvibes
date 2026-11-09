@@ -87,7 +87,7 @@ export function suiteReleaseFixture() {
   const fetchImpl = async (url: string) => {
     const name = url.slice(url.lastIndexOf('/') + 1);
     if (name === 'SHA256SUMS.txt') return new Response([...release].map(([name, bytes]) => `${sha256(bytes)}  ${name}\n`).join(''));
-    const bytes = release.get(name); return new Response(bytes ?? 'missing', { status: bytes ? 200 : 404 });
+    const bytes = release.get(name); return new Response(bytes ? Uint8Array.from(bytes) : 'missing', { status: bytes ? 200 : 404 });
   };
   return { cleanup() { rmSync(root, { recursive: true, force: true }); }, root, webui, driver, programs, release, original, fetchImpl, options: { execPath: join(root, 'goodvibes'), platform: 'darwin' as const, arch: 'x64', version: '3.1.3',
     webuiDirectory: webui, downloadBaseUrl: 'https://fixture.invalid/v3.1.3', fetchImpl } };

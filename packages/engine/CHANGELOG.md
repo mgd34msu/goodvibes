@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Track injected code using its actual captured file revision and index
+  generation. Unchanged code stays deduplicated and changed code can be
+  included again without restoring content hashing.
+
 - Wait for the durable cancellation checkpoint before acknowledging a contract
   cancelled during creation. Preserve the execution lease after a failed save
   while allowing drained executor work to finish joining.

@@ -427,7 +427,7 @@ export class SecretsManager {
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Secret store is unavailable.');
           if (store.secure) {
             if (!('iv' in parsed) || typeof parsed.iv !== 'string' || !('tag' in parsed) || typeof parsed.tag !== 'string' || !('data' in parsed) || typeof parsed.data !== 'string') throw new Error('Secret store is unavailable.');
-            if (parsed.version !== SECRETS_STORE_FORMAT_VERSION || keyObservation.raw === null) throw new Error('Secret store is unavailable.');
+            if (!('version' in parsed) || parsed.version !== SECRETS_STORE_FORMAT_VERSION || keyObservation.raw === null) throw new Error('Secret store is unavailable.');
             const envelope: EncryptedStoreEnvelope = { iv: parsed.iv, tag: parsed.tag, data: parsed.data, version: SECRETS_STORE_FORMAT_VERSION };
             existing = JSON.parse(decrypt(envelope, key));
           } else existing = 'secrets' in parsed ? parsed.secrets : parsed;

@@ -144,8 +144,9 @@ export class BrowserControlIdentityWork {
         await currentPage(); current(); checkAnswers(request.questions, result.answers); return result;
       },
     };
+    const signal = this.currentSignal();
     const result = await this.wait(() => browserCredentialPage.run(port, stateJson, {
-      site: 'browser.page.credential-entry', signal: this.currentSignal(), beforeAttempt: current,
+      site: 'browser.page.credential-entry', ...(signal === undefined ? {} : { signal }), beforeAttempt: current,
     }));
     await currentPage(); current();
     const reading = result.readings.credentialPage;
@@ -178,7 +179,8 @@ export class BrowserControlIdentityWork {
       });
       current(); checkAnswers(request.questions, result.answers); return result;
     } };
-    const result = await this.wait(() => browserControlIdentity.run(port, toJson(input) as EntryType, { signal: this.currentSignal(), beforeAttempt: this.assertCurrent }));
+    const signal = this.currentSignal();
+    const result = await this.wait(() => browserControlIdentity.run(port, toJson(input) as EntryType, { ...(signal === undefined ? {} : { signal }), beforeAttempt: this.assertCurrent }));
     this.assertCurrent();
     const reading = result.readings.sameControl;
     return reading.outcome === 'act' && reading.verdict === 'yes' && Number.isFinite(reading.probability)

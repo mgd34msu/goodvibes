@@ -15,7 +15,7 @@ import { opaqueUuid } from '@goodvibes-jev/judgment/decisions';
 import { realpathSync } from 'node:fs';
 import type { DecisionLog, EntryType, JudgmentPort } from '@goodvibes-jev/judgment';
 import { decideAutonomous } from '../../gate/autonomous-decision.js';
-import { durableKeyIdentity, freezeDurableKey, durablePayloadRevision, sameDurableRequest, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
+import { durableKeyIdentity, freezeDurableKey, durablePayloadRevision, sameDurableRequest, parseDurableAdmission, type DurableContractAdmission, type DurableContractKey, type DurableContractRequest, type DurableStartedContract } from '../../contract/durable-admission.js';
 import { captureNativeContractSource } from '../../contract/native-source.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import type { ContractIntegrationInspection } from '../../contract/integration-inspection-wire.js';
@@ -258,7 +258,7 @@ export function createNativeWorkExecutionHost(deps: {
         const request = requestFor(current, target, expected, expectedScope, prior?.request.input.taskEvidence ?? taskEvidence, prior ? undefined : authority.continuationSourceAction?.(target));
         if (prior && !sameDurableRequest(prior.request, request)) throw new NativeWorkExecutionError('stale');
         const intent = parseNativeWorkExecutionIntent({ version: prior?.version ?? 2, ...(prior ? (prior.owner ? { owner: prior.owner } : {}) : { owner: ownerFacts(expected, expectedScope) }), projectId: deps.projectId, target, authorityScopes: expected.scopes,
-          request, generation: (prior?.generation ?? 0) + 1, state: 'admitting' }, prior);
+          request, generation: (prior?.generation ?? 0) + 1, state: 'admitting' }, prior ?? undefined);
         signal.throwIfAborted(); assertAuthority(); assertScope();
         return { next: null, nextIntent: intent, value: intent };
       }, intent => { delivery.generation = intent.generation; })));
@@ -269,7 +269,7 @@ export function createNativeWorkExecutionHost(deps: {
     const request = intent?.request ?? requestFor(original, target, expected, expectedScope, original.record?.request.input.taskEvidence);
     const source = request.input.nativeSource!; const binding = request.binding; const key = request.key;
     const assertCurrent = () => {
-      assertOpen(); const current = deps.storage.current(key, previous);
+      assertOpen(); const current = deps.storage.current(key, previous ?? undefined);
       if (intent) assertIntent(current, intent);
       else if (current.record?.state === 'cancelled' || current.intent?.state === 'cancelled') throw new NativeWorkExecutionError('stale');
       signal.throwIfAborted(); const latest = paired(authority); const currentScope = scope();
@@ -293,7 +293,7 @@ export function createNativeWorkExecutionHost(deps: {
           return { next: null, nextIntent: { ...intent, state: 'refused' }, value: undefined }; })));
       throw new NativeWorkExecutionError('refused', read.decision);
     }
-    const record = parseNativeWorkExecutionRecord({ version: previous?.version ?? 2, ...(previous?.owner ? { owner: previous.owner } : previous ? {} : { owner: ownerFacts(expected, expectedScope) }), projectId: deps.projectId, target, authorityScopes: expected.scopes, request, decision: read.decision, decisionContext: read.context, receipt: null, state: 'prepared' }, previous);
+    const record = parseNativeWorkExecutionRecord({ version: previous?.version ?? 2, ...(previous?.owner ? { owner: previous.owner } : previous ? {} : { owner: ownerFacts(expected, expectedScope) }), projectId: deps.projectId, target, authorityScopes: expected.scopes, request, decision: read.decision, decisionContext: read.context, receipt: null, state: 'prepared' }, previous ?? undefined);
     await authority.withCurrent(expected, async assertAuthority => deps.scopes.withCurrentScope(expectedScope, async assertScope =>
       deps.storage.transaction(key, current => {
         assertAuthority(); assertScope(); assertCurrent(); workFor(current, target, expected.principalId);
@@ -493,12 +493,14 @@ export function createNativeWorkExecutionHost(deps: {
     const original = active.get(result.admission.key.attemptId)?.record;
     const cancelled = await deps.storage.transaction(result.admission.key, current => {
       const record = current.record;
-      if (!record || durablePayloadRevision(record.request) !== result.admission.payloadRevision || !sameDurableRequest(record.request, result.admission)) throw new NativeWorkExecutionError('conflict');
+      if (!record || durablePayloadRevision(record.request) !== result.admission.payloadRevision) throw new NativeWorkExecutionError('conflict');
+      const admission = parseDurableAdmission({ ...result.admission, input: record.request.input }, record.request);
+      if (!sameDurableRequest(record.request, admission)) throw new NativeWorkExecutionError('conflict');
       if (record.receipt && (record.receipt.contractId !== result.admission.contractId || record.receipt.ownerAgentId !== result.admission.ownerAgentId)) throw new NativeWorkExecutionError('conflict');
       // The engine may remember a launch whose native acknowledgement was lost.
       // Never turn that replay into a fresh prepared operation or permission to resume.
       const state = record.state === 'prepared' && result.state !== 'prepared' ? 'launch-claimed' as const : record.state;
-      const { input: _input, ...receipt } = result.admission;
+      const receipt = result.admission;
       return { next: record.receipt && state === record.state ? null : { ...record, receipt, state }, value: record.state === 'cancelled' };
     }, undefined, original);
     if (cancelled || closed) await cancelAndJoin(result.admission.contractId, 'Native work was cancelled during admission');

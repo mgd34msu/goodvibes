@@ -123,7 +123,7 @@ export async function isCardFieldDescriptor(control: FormControlDescriptor, read
       placeholder: text(control.placeholder),
       ariaLabel: text(control.ariaLabel),
       label: text(control.label),
-    }, { site: CARD_FIELD_SITE, signal, beforeAttempt: current });
+    }, { site: CARD_FIELD_SITE, ...(signal === undefined ? {} : { signal }), beforeAttempt: current });
     current();
     const resultReading = run.readings.card_field;
     const ordinary = resultReading.verdict === 'no' && resultReading.outcome === 'act';

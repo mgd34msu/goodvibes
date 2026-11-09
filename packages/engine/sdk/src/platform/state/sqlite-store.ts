@@ -776,8 +776,8 @@ interface OwnedSqlDatabase {
   revision: bigint;
   inFlight: number;
   probePlans?: NativeProbePlans | undefined;
-  memo?: { readonly revision: bigint; readonly probe: string; readonly digest: string } | undefined;
-  cleanMemo?: { readonly revision: bigint; readonly probe: string; readonly digest: string } | undefined;
+  memo?: { readonly revision: bigint; readonly probe: string; readonly snapshot: string } | undefined;
+  cleanMemo?: { readonly revision: bigint; readonly probe: string; readonly snapshot: string } | undefined;
 }
 let nextDatabaseIdentity = 0n;
 const ownedDatabases = new WeakMap<SqlDatabase, OwnedSqlDatabase>();
@@ -1052,14 +1052,14 @@ function observeDatabase(db: SqlDatabase, mode: 'observation' | 'clean-content' 
       return JSON.stringify([String(state.identity), String(revision), after.signature]);
     }
     const memo = mode === 'observation' ? state.memo : state.cleanMemo;
-    const digest = before.cacheable && memo?.revision === revision && memo.probe === before.signature
-      ? memo.digest : sqliteLocalObservation(state.raw, mode);
+    const snapshot = before.cacheable && memo?.revision === revision && memo.probe === before.signature
+      ? memo.snapshot : sqliteLocalObservation(state.raw, mode);
     const after = databaseProbe(state.raw, ownedProbePlans(state));
     if (state.inFlight || state.revision !== revision || before.signature !== after.signature) throw new SQLiteObservationRetiredError();
     const next = before.cacheable && after.cacheable && after.signature !== null
-      ? { revision, probe: after.signature, digest } : undefined;
+      ? { revision, probe: after.signature, snapshot } : undefined;
     if (mode === 'observation') state.memo = next; else state.cleanMemo = next;
-    return JSON.stringify([String(state.identity), mode === 'observation' ? String(revision) : 'clean-content', after.signature, digest]);
+    return JSON.stringify([String(state.identity), mode === 'observation' ? String(revision) : 'clean-content', after.signature, snapshot]);
   } catch (error) {
     state.memo = undefined; state.cleanMemo = undefined; state.revision++;
     throw error;
@@ -1215,6 +1215,12 @@ export class SQLiteStore {
     this.beforePersist = options.beforePersist?.bind(options);
     this.dbPath = dbPath ?? null;
     this.coordinated = options.coordinated === true;
+    // Full local equality frames contain private SQLite values. Keep them out
+    // of ordinary object serialization; they are never public revision fields.
+    for (const field of ['cleanContent', 'persistedReadFrame'] as const) {
+      const descriptor = nativeGetDescriptor(this, field);
+      if (descriptor) nativeDefineProperty(this, field, { ...descriptor, enumerable: false });
+    }
   }
 
   private beforePersistentWrite(): void {

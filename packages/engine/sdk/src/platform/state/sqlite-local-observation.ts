@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import type { SqlDatabase } from './sqlite-store.js';
 
 interface ObservationTable { readonly label: string; readonly sql: string; readonly columns: string; }
@@ -28,8 +27,10 @@ export function sqliteLocalObservation(db: SqlDatabase, mode: 'observation' | 'c
     return unsupported();
   };
   const rows = (input: unknown[][]): string[] => input.map(row => JSON.stringify(row.map(value))).sort();
-  const hash = createHash('sha256');
-  const include = (label: string, input: unknown[][]): void => { hash.update(JSON.stringify([label, rows(input)])); };
+  // Exact private frames are equality evidence, not a public revision or
+  // authenticity commitment. Their existing JSON framing needs no digest.
+  const frames: string[] = [];
+  const include = (label: string, input: unknown[][]): void => { frames.push(JSON.stringify([label, rows(input)])); };
   const databases = query('PRAGMA database_list');
   include('databases', databases);
   // Inspect every schema before any table metadata/data query: even asking a
@@ -39,7 +40,7 @@ export function sqliteLocalObservation(db: SqlDatabase, mode: 'observation' | 'c
     const name = database[1], schema = quote(name);
     const rawEntries = query(`SELECT CAST(type AS BLOB), CAST(name AS BLOB), CAST(tbl_name AS BLOB), rootpage, CAST(sql AS BLOB) FROM ${schema}.sqlite_schema`);
     const encoded = JSON.stringify([String(name), rows(rawEntries)]);
-    hash.update(encoded);
+    frames.push(encoded);
     for (const pragma of ['schema_version', 'user_version', 'application_id', 'encoding']) {
       include(`${String(name)}:${pragma}`, query(`PRAGMA ${schema}.${pragma}`));
     }
@@ -102,7 +103,7 @@ export function sqliteLocalObservation(db: SqlDatabase, mode: 'observation' | 'c
   const contents = new Map<string, unknown[][]>();
   for (const result of results) contents.set(result.columns[0]!, result.values);
   for (const [index, table] of tables.entries()) {
-    hash.update(JSON.stringify([table.label, table.columns]));
+    frames.push(JSON.stringify([table.label, table.columns]));
     const encoded = (contents.get(`__observation_${index}`) ?? []).map(row => {
       const cells: string[] = [];
       for (let column = 0; column < row.length; column += 2) {
@@ -117,7 +118,7 @@ export function sqliteLocalObservation(db: SqlDatabase, mode: 'observation' | 'c
       }
       return JSON.stringify(cells);
     }).sort();
-    hash.update(JSON.stringify(encoded));
+    frames.push(JSON.stringify(encoded));
   }
-  return hash.digest('hex');
+  return frames.join('\n');
 }

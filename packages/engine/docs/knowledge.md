@@ -13,6 +13,11 @@ existing rows their first native revision. Prepare stale, unsubmitted previews
 again after upgrading. Resume an import whose outcome is unknown with its original
 request ID and command so the durable receipt can resolve it without duplication.
 The store snapshots older schemas before migration and refuses schema downgrades.
+Concurrent saves compare the exact originally accepted database bytes and refuse
+stale writes without discarding pending local work. File replacement with
+identical bytes is accepted; replacement of the store's original containing
+directory requires reopening the store. A reported indeterminate save may already
+be visible: resume the original request instead of restoring an older image.
 
 ## Data model
 

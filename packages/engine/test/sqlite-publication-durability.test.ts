@@ -37,12 +37,12 @@ for (const phase of ['open:dir', 'sync:dir']) {
     const recovered = new SQLiteStorePersistence(file); recovered.confirmDurable(); expect(recovered.read()).toEqual(next);
   });
 }
-test('publication orders file fsync before rename before parent fsync; cleanup cannot undo success', () => {
+test('publication orders file fsync before rename before parent fsync without unlinking a retired temp name', () => {
   const { file, persistence, calls } = setup('unlink'); persistence.writeIfCurrent(next);
   expect(fs.readFileSync(file)).toEqual(next);
   expect(calls.indexOf('sync:temp')).toBeLessThan(calls.indexOf('rename'));
   expect(calls.indexOf('rename')).toBeLessThan(calls.indexOf('sync:dir'));
-  expect(calls.indexOf('sync:dir')).toBeLessThan(calls.indexOf('unlink'));
+  expect(calls).not.toContain('unlink');
 });
 test('directory-close failure after fsync does not masquerade as rollback', () => {
   const { file, persistence } = setup('close:dir'); persistence.writeIfCurrent(next); expect(fs.readFileSync(file)).toEqual(next);

@@ -1,5 +1,6 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
 import { loadSqlJsEngine, type SqlDatabase } from '../sdk/src/platform/state/sqlite-store.js';
+import * as crypto from 'node:crypto';
 import { sqliteLocalObservation } from '../sdk/src/platform/state/sqlite-local-observation.js';
 
 const databases: SqlDatabase[] = [];
@@ -8,7 +9,7 @@ async function database(sql = 'CREATE TABLE evidence (value)') {
   const SQL = await loadSqlJsEngine(), db = new SQL.Database();
   databases.push(db); db.run(sql); return db;
 }
-async function digest(value: string) {
+async function snapshot(value: string) {
   const db = await database(); db.run(`INSERT INTO evidence VALUES (${value})`);
   return sqliteLocalObservation(db);
 }
@@ -38,7 +39,7 @@ test('logical values preserve integer precision, storage class and raw text byte
     ['1', '1.0'], ['NULL', "''"], ["X'610062'", "CAST(X'610062' AS TEXT)"],
     ["CAST(X'80' AS TEXT)", "CAST(X'81' AS TEXT)"], ['9e999', '-9e999'], ['0.0', '9e999'],
   ];
-  for (const [left, right] of pairs) expect(await digest(left)).not.toBe(await digest(right));
+  for (const [left, right] of pairs) expect(await snapshot(left)).not.toBe(await snapshot(right));
 });
 
 test('duplicate multiplicity and hidden row identities are observed', async () => {
@@ -163,4 +164,18 @@ test('full fresh parsed column types detect writable_schema divergence across ex
   db.run('PRAGMA writable_schema = OFF');
   expect(db.exec('PRAGMA table_xinfo(evidence)')[0]!.values[0]![2]).toBe('BLOB');
   expect(sqliteLocalObservation(db)).not.toBe(before);
+});
+
+
+// Regression source intentionally UNRUN during the coding-first pass.
+test('exact private logical comparisons preserve clean rollback without computing a digest', async () => {
+  const db = await database(); db.run("INSERT INTO evidence VALUES ('original private value')");
+  const hash = spyOn(crypto, 'createHash');
+  try {
+    const original = sqliteLocalObservation(db, 'clean-content');
+    db.run('BEGIN'); db.run("UPDATE evidence SET value = 'different private value'");
+    expect(sqliteLocalObservation(db, 'clean-content')).not.toBe(original);
+    db.run('ROLLBACK'); expect(sqliteLocalObservation(db, 'clean-content')).toBe(original);
+    expect(hash).not.toHaveBeenCalled();
+  } finally { hash.mockRestore(); }
 });

@@ -216,3 +216,17 @@ test('clean-content mode excludes only irreversible operation count while defaul
   expect(observations.sqliteLocalObservation(db)).not.toBe(full);
   expect(observations.sqliteLocalObservation(db, 'clean-content')).toBe(clean);
 });
+
+
+// Regression source intentionally UNRUN during the coding-first pass.
+test('full local equality frames remain private during ordinary store serialization', async () => {
+  const { sqlite, handle } = await fixture();
+  const privateValue = 'Do not serialize this private SQLite source';
+  handle.run('UPDATE knowledge_sources SET id = ?', [privateValue]); await sqlite.save();
+  const assertPrivate = () => {
+    const serialized = JSON.stringify(sqlite);
+    expect(serialized).not.toContain(privateValue); expect(serialized).not.toContain(Buffer.from(privateValue).toString('hex'));
+    expect(Object.keys(sqlite)).not.toContain('cleanContent'); expect(Object.keys(sqlite)).not.toContain('persistedReadFrame');
+  };
+  assertPrivate(); sqlite.readPersisted(() => { assertPrivate(); });
+});

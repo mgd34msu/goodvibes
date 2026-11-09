@@ -99,6 +99,13 @@ export interface OwnerApproval {
  * whitespace normalization the taint check uses, so a reflowed line does not
  * invalidate an approval the owner has just given for the same message, but
  * any change to the words does.
+ *
+ * This commitment is retained because DaemonApprovalStore persists it and the
+ * browser forwards it without persisting or exposing the approved message or
+ * checkout fields. A reversible encoding or canonical text would copy that
+ * private payload into approval records. It is an equality commitment, not an
+ * authorization signature or an anonymization guarantee. Local observation
+ * labels cannot compare the original payload after the approval store reopens.
  */
 export function fingerprintOutwardContent(
   fields: Readonly<Record<string, string | undefined>> | undefined,
@@ -132,13 +139,13 @@ export function grantOwnerApproval(input: {
   if (input.surface !== 'owner-direct') return null;
   const at = input.now?.() ?? new Date();
   const ttl = input.ttlMs !== undefined && input.ttlMs > 0 ? input.ttlMs : OWNER_APPROVAL_TTL_MS;
-  return {
+  return Object.freeze({
     action: input.action,
     grantedAt: at.toISOString(),
     expiresAt: new Date(at.getTime() + ttl).toISOString(),
     surface: 'owner-direct',
     contentFingerprint: fingerprintOutwardContent(input.content),
-  };
+  });
 }
 
 /** Why an approval did not clear a refusal, so a message can say which. */
@@ -146,8 +153,16 @@ export type ApprovalMismatch =
   | 'none'
   | 'different-action'
   | 'expired'
+  | 'invalid-window'
   | 'different-content'
   | 'no-content-binding';
+
+function windowMismatch(approval: OwnerApproval, now: number): 'expired' | 'invalid-window' | undefined {
+  const granted = Date.parse(approval.grantedAt), expiry = Date.parse(approval.expiresAt);
+  if (!Number.isFinite(granted) || !Number.isFinite(expiry) || !Number.isFinite(now)
+    || expiry <= granted || now < granted) return 'invalid-window';
+  return expiry <= now ? 'expired' : undefined;
+}
 
 /**
  * Does this approval authorize THIS action with THIS payload?
@@ -169,9 +184,8 @@ export function checkOwnerApproval(input: {
   if (!approval) return { authorized: false, mismatch: 'none' };
   if (approval.action !== input.action) return { authorized: false, mismatch: 'different-action' };
   const now = (input.now?.() ?? new Date()).getTime();
-  if (Number.isFinite(Date.parse(approval.expiresAt)) && Date.parse(approval.expiresAt) <= now) {
-    return { authorized: false, mismatch: 'expired' };
-  }
+  const mismatch = windowMismatch(approval, now);
+  if (mismatch) return { authorized: false, mismatch };
   if (input.clearingContentTaint) {
     // A derivation finding says THIS payload repeats what was read. Only an
     // approval the owner gave while looking at THIS payload answers it, so
@@ -270,8 +284,7 @@ export class OwnerApprovalStore {
     for (let index = this.approvals.length - 1; index >= 0; index -= 1) {
       const entry = this.approvals[index];
       if (entry === undefined) continue;
-      const expiry = Date.parse(entry.expiresAt);
-      if (Number.isFinite(expiry) && expiry <= now) this.approvals.splice(index, 1);
+      if (windowMismatch(entry, now)) this.approvals.splice(index, 1);
     }
   }
 }

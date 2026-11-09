@@ -34,6 +34,7 @@ function approval(value: unknown): value is OwnerApproval {
   return typeof row['action'] === 'string' && row['action'].length > 0 && row['surface'] === 'owner-direct'
     && typeof row['grantedAt'] === 'string' && Number.isFinite(Date.parse(row['grantedAt']))
     && typeof row['expiresAt'] === 'string' && Number.isFinite(Date.parse(row['expiresAt']))
+    && Date.parse(row['expiresAt']) > Date.parse(row['grantedAt'])
     && (row['contentFingerprint'] === null || typeof row['contentFingerprint'] === 'string');
 }
 /** Returned views expose only the existing approval contract, not file extensions. */
@@ -171,6 +172,6 @@ export class DaemonApprovalStore {
 }
 
 function closerMismatch(current: ApprovalMismatch, candidate: ApprovalMismatch): ApprovalMismatch {
-  const rank: Record<ApprovalMismatch, number> = { none: 0, 'different-action': 1, expired: 2, 'no-content-binding': 3, 'different-content': 4 };
+  const rank: Record<ApprovalMismatch, number> = { none: 0, 'different-action': 1, expired: 2, 'invalid-window': 2, 'no-content-binding': 3, 'different-content': 4 };
   return rank[candidate] > rank[current] ? candidate : current;
 }

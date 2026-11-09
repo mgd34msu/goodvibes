@@ -79,6 +79,21 @@ describe('DaemonApprovalStore: persisted, single use, content bound', () => {
 });
 
 describe('DaemonApprovalStore: damaged evidence remains unavailable', () => {
+  test('a finite but reversed saved window preserves its original evidence and refuses all access', () => {
+    const now = () => new Date('2026-01-01T00:00:00.000Z');
+    new DaemonApprovalStore(filePath, now).grant({ action: ACTION, content: CONTENT });
+    const raw = JSON.parse(readFileSync(filePath, 'utf8')) as { approvals: { grantedAt: string; expiresAt: string }[] };
+    const row = raw.approvals[0];
+    if (!row) throw new Error('Missing saved approval');
+    row.expiresAt = row.grantedAt;
+    writeFileSync(filePath, JSON.stringify(raw));
+    const bytes = readFileSync(filePath);
+    const reopened = new DaemonApprovalStore(filePath, now);
+    expect(() => reopened.take({ action: ACTION, content: CONTENT })).toThrow(PaymentApprovalStoreError);
+    expect(() => reopened.grant({ action: ACTION, content: CONTENT })).toThrow(PaymentApprovalStoreError);
+    expect(readFileSync(filePath)).toEqual(bytes);
+  });
+
   test('a file that is not JSON is preserved and cannot be overwritten by a new grant', () => {
     writeFileSync(filePath, '{{{ not json', 'utf-8');
     const store = new DaemonApprovalStore(filePath);

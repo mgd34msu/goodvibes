@@ -378,6 +378,23 @@ describe('checkOwnerApproval: bound to the payload, the window, and spent once',
     expect(result.mismatch).toBe('expired');
   });
 
+  test.each([
+    { grantedAt: '2026-01-01T00:00:00.000Z', expiresAt: 'not-a-date', now: '2026-01-01T00:01:00.000Z' },
+    { grantedAt: 'not-a-date', expiresAt: '2026-01-01T00:05:00.000Z', now: '2026-01-01T00:01:00.000Z' },
+    { grantedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2026-01-01T00:00:00.000Z', now: '2026-01-01T00:00:00.000Z' },
+    { grantedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2025-12-31T23:59:00.000Z', now: '2026-01-01T00:00:00.000Z' },
+    { grantedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2026-01-01T00:05:00.000Z', now: '2025-12-31T23:59:00.000Z' },
+    { grantedAt: '2026-01-01T00:00:00.000Z', expiresAt: '2026-01-01T00:05:00.000Z', now: 'not-a-date' },
+  ])('an invalid or regressed approval window never clears either refusal path: %j', input => {
+    const original = grantOwnerApproval({ action: ACTION, surface: 'owner-direct', content: contentA,
+      now: () => new Date('2026-01-01T00:00:00.000Z') });
+    if (!original) throw new Error('Missing owner approval');
+    const approval = { ...original, grantedAt: input.grantedAt, expiresAt: input.expiresAt };
+    for (const clearingContentTaint of [false, true]) expect(checkOwnerApproval({ approval, action: ACTION,
+      contentInQuestion: contentA, clearingContentTaint, now: () => new Date(input.now) }))
+      .toEqual({ authorized: false, mismatch: 'invalid-window' });
+  });
+
   test('a fingerprint of null (granted without content) clears a coarse refusal but not a content-derivation one', () => {
     const blindApproval = grantOwnerApproval({ action: ACTION, surface: 'owner-direct' });
     expect(blindApproval?.contentFingerprint).toBeNull();
@@ -401,6 +418,18 @@ describe('checkOwnerApproval: bound to the payload, the window, and spent once',
 });
 
 describe('OwnerApprovalStore: single use, enforced by removal', () => {
+  test('a backwards clock retires pending approval instead of extending its spendable lifetime', () => {
+    let now = Date.parse('2026-01-01T00:00:00.000Z');
+    const store = new OwnerApprovalStore(() => new Date(now));
+    const approval = store.grant({ action: ACTION, surface: 'owner-direct', content: { body: 'Approved body' } });
+    expect(approval).not.toBeNull();
+    expect(Object.isFrozen(approval)).toBe(true);
+    now -= 1_000;
+    expect(store.pendingCount()).toBe(0);
+    now += 2_000;
+    expect(store.take({ action: ACTION, content: { body: 'Approved body' } })).toBeNull();
+  });
+
   test('take() removes what it returns; a second take for the same action and content finds nothing', () => {
     const store = new OwnerApprovalStore();
     const content = { to: 'a@example.com', body: 'the exact message that was approved' };

@@ -534,6 +534,10 @@ export function checkoutApprovalContent(input: {
 
 /** How a begin call names the approve verb when it refuses, per mismatch. */
 function approvalRefusalMessage(mismatch: string): string {
+  if (mismatch === 'invalid-window') {
+    return 'The purchase approval time window cannot be verified. Check the host clock, then obtain a new '
+      + 'owner approval with payments.checkout.approve before beginning this purchase.';
+  }
   if (mismatch === 'expired') {
     return 'The owner approval for this purchase has expired. Approvals last five minutes: call '
       + 'payments.checkout.approve again with the same merchantDomain, item and amount, then begin promptly.';

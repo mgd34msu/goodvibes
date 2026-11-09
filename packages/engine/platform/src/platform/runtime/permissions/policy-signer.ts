@@ -160,13 +160,26 @@ export function verifyBundle<T>(
   bundle: SignedPolicyBundle<T>,
   key: Buffer | string,
 ): VerifyResult {
-  if (bundle.signature === undefined || bundle.signature === '') {
+  const signature = bundle.signature;
+  if (signature === undefined || signature === '') {
     return {
       ok: false,
       status: 'missing',
       message: `Bundle "${bundle.bundleId}" carries no signature.`,
     };
   }
+
+  // SHA-256 has exactly 32 bytes. Reject impossible encodings before reading
+  // the payload or computing its MAC; Buffer.from otherwise truncates an odd
+  // trailing hex nibble, admitting aliases of a correctly signed bundle.
+  if (typeof signature !== 'string' || signature.length !== 64 || !/^[0-9a-f]{64}$/i.test(signature)) {
+    return {
+      ok: false,
+      status: 'invalid',
+      message: `Bundle "${bundle.bundleId}": signature must contain exactly 64 hex characters.`,
+    };
+  }
+  const actual = Buffer.from(signature, 'hex');
 
   const composite = {
     bundleId: bundle.bundleId,
@@ -192,33 +205,6 @@ export function verifyBundle<T>(
       ok: false,
       status: 'invalid',
       message: `Bundle "${bundle.bundleId}": key error during signature computation.`,
-    };
-  }
-
-  if (!/^[0-9a-f]+$/i.test(bundle.signature)) {
-    return {
-      ok: false,
-      status: 'invalid',
-      message: `Bundle "${bundle.bundleId}": signature is not valid hex.`,
-    };
-  }
-
-  let actual: Buffer;
-  try {
-    actual = Buffer.from(bundle.signature, 'hex');
-  } catch {
-    return {
-      ok: false,
-      status: 'invalid',
-      message: `Bundle "${bundle.bundleId}": signature is not valid hex.`,
-    };
-  }
-
-  if (expected.length !== actual.length) {
-    return {
-      ok: false,
-      status: 'invalid',
-      message: `Bundle "${bundle.bundleId}": signature length mismatch.`,
     };
   }
 

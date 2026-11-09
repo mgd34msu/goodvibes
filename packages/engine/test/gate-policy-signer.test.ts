@@ -8,7 +8,8 @@
  *   - verifyBundle(): valid, invalid, missing signature cases
  */
 
-import { describe, it, expect } from 'bun:test';
+import { describe, it, expect, spyOn } from 'bun:test';
+import * as crypto from 'node:crypto';
 import {
   canonicalise,
   signBundle,
@@ -204,5 +205,45 @@ describe('verifyBundle', () => {
     const result = verifyBundle(tampered, TEST_KEY);
     expect(result.ok).toBe(false);
     expect(result.status).toBe('invalid');
+  });
+});
+
+
+describe('verifyBundle signature encoding preflight', () => {
+  it('rejects malformed signatures before payload traversal or HMAC', () => {
+    let payloadReads = 0;
+    const bundle = {
+      bundleId: 'invalid-encoding',
+      issuedAt: '2026-11-09T00:00:00.000Z',
+      get payload(): typeof TEST_PAYLOAD { payloadReads++; throw new Error('payload must not be read'); },
+      signature: '',
+    };
+    const mac = spyOn(crypto, 'createHmac');
+    try {
+      for (const signature of ['', 'z'.repeat(64), 'a'.repeat(63), 'a'.repeat(65), 'a'.repeat(66), 'a'.repeat(64) + '\n', null, 123]) {
+        Reflect.set(bundle, 'signature', signature);
+        expect(verifyBundle(bundle, TEST_KEY)).toMatchObject({ ok: false, status: signature === '' ? 'missing' : 'invalid' });
+      }
+      expect(payloadReads).toBe(0);
+      expect(mac).toHaveBeenCalledTimes(0);
+    } finally { mac.mockRestore(); }
+  });
+
+  it('refuses the extra-nibble alias while fully verifying viable signatures', () => {
+    const bundle = signBundle('encoding-binding', TEST_PAYLOAD, TEST_KEY);
+    const signature = bundle.signature!;
+    const mac = spyOn(crypto, 'createHmac');
+    try {
+      expect(verifyBundle({ ...bundle, signature: signature + 'a' }, TEST_KEY).ok).toBe(false);
+      expect(verifyBundle({ ...bundle, signature: signature + '\n' }, TEST_KEY).ok).toBe(false);
+      expect(mac).toHaveBeenCalledTimes(0);
+      expect(verifyBundle(bundle, TEST_KEY).ok).toBe(true);
+      expect(mac).toHaveBeenCalledTimes(1);
+      const changed = (signature[0] === 'a' ? 'b' : 'a') + signature.slice(1);
+      expect(verifyBundle({ ...bundle, signature: changed }, TEST_KEY)).toMatchObject({ ok: false, status: 'invalid' });
+      expect(mac).toHaveBeenCalledTimes(2);
+      expect(verifyBundle({ ...bundle, payload: { ...TEST_PAYLOAD, description: 'changed' } }, TEST_KEY).ok).toBe(false);
+      expect(mac).toHaveBeenCalledTimes(3);
+    } finally { mac.mockRestore(); }
   });
 });

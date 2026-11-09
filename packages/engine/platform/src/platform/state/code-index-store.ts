@@ -758,15 +758,23 @@ export class CodeIndexStore {
     callEpoch: number,
     forceReembed: boolean,
   ): Promise<{ indexed: boolean; mode: CodeChunkMode; chunkCount: number } | null> {
-    if (!this.db) return null;
+    const db = this.db;
+    if (!db || this.epoch !== callEpoch) return null;
+    // Empty files have no chunk row in which to retain a revision. Remove any
+    // previous chunks directly, without hashing or initializing the parser.
+    if (!content.trim()) {
+      if (this.epoch !== callEpoch || this.db !== db) return null;
+      deleteChunksForPath(db, relPath);
+      return { indexed: true, mode: 'empty', chunkCount: 0 };
+    }
     // One persisted cache commitment per file, not per chunk. This recognizes
     // the exact source across restarts without storing a second copy of code
     // merely to avoid repeating every embedding request for an unchanged file.
     const fileRevision = createHash('sha256').update(content).digest('hex');
     if (!forceReembed) {
-      const existingHash = getFileRevision(this.db, relPath);
+      const existingHash = getFileRevision(db, relPath);
       if (existingHash === fileRevision) {
-        return { indexed: true, mode: 'unchanged', chunkCount: countChunksForPath(this.db, relPath) };
+        return { indexed: true, mode: 'unchanged', chunkCount: countChunksForPath(db, relPath) };
       }
     }
 

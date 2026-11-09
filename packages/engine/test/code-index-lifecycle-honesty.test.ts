@@ -20,6 +20,8 @@
  *     reported as chunksUnchanged, not silently folded into chunksIndexed.
  */
 import { beforeEach, describe, expect, test, afterEach, spyOn } from 'bun:test';
+import * as crypto from 'node:crypto';
+import { CodeIntelligence } from '../platform/src/platform/intelligence/facade.js';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -286,4 +288,95 @@ test('automatic reindex rechecks its target after asynchronous ignore discovery'
     expect(await pending).toEqual({ indexed: false, mode: 'empty' });
     expect(calls()).toBe(0); expect(store.stats().indexedChunks).toBe(0);
   } finally { release.resolve(); discovery.mockRestore(); store.close(); }
+});
+
+
+test('empty code files need neither a persisted revision nor parser or embeddings', async () => {
+  const root = makeRoot('gv-code-index-empty-');
+  const path = join(root, 'empty.ts');
+  writeFileSync(path, ' \t\n');
+  const registry = makeRegistry(root);
+  const { provider, calls } = makeProvider('empty-code');
+  registry.register(provider, { makeDefault: true });
+  const store = new CodeIndexStore(root, ':memory:', registry);
+  await store.init();
+  const hashes = spyOn(crypto, 'createHash');
+  const parser = spyOn(CodeIntelligence.prototype, 'initialize');
+  try {
+    expect(await store.reindexFile(path)).toEqual({ indexed: true, mode: 'empty' });
+    expect(await store.reindexFile(path)).toEqual({ indexed: true, mode: 'empty' });
+    expect(hashes).toHaveBeenCalledTimes(0);
+    expect(parser).toHaveBeenCalledTimes(0);
+    expect(calls()).toBe(0);
+    expect(store.stats().indexedChunks).toBe(0);
+  } finally { hashes.mockRestore(); parser.mockRestore(); store.close(); }
+});
+
+test('changing indexed code to whitespace removes its old chunks without hashing the empty source', async () => {
+  const root = makeRoot('gv-code-index-empty-cleanup-');
+  const path = join(root, 'old.ts');
+  writeFileSync(path, 'export const oldSymbol = 1;\n');
+  const registry = makeRegistry(root);
+  const { provider, calls } = makeProvider('empty-cleanup');
+  registry.register(provider, { makeDefault: true });
+  const store = new CodeIndexStore(root, ':memory:', registry);
+  await store.init();
+  try {
+    expect((await store.reindexFile(path)).indexed).toBe(true);
+    expect(store.stats().indexedChunks).toBeGreaterThan(0);
+    const oldCalls = calls();
+    writeFileSync(path, '\n \t');
+    const hashes = spyOn(crypto, 'createHash');
+    try {
+      expect(await store.reindexFile(path)).toEqual({ indexed: true, mode: 'empty' });
+      expect(hashes).toHaveBeenCalledTimes(0);
+      expect(calls()).toBe(oldCalls);
+      expect(store.stats().indexedChunks).toBe(0);
+      expect(store.stats().indexedFiles).toBe(0);
+    } finally { hashes.mockRestore(); }
+  } finally { store.close(); }
+});
+
+
+test('an old empty file read cannot delete same-path chunks after reroot', async () => {
+  const rootA = makeRoot('gv-code-index-empty-reroot-a-');
+  const rootB = makeRoot('gv-code-index-empty-reroot-b-');
+  const pathA = join(rootA, 'same.ts');
+  const pathB = join(rootB, 'same.ts');
+  writeFileSync(pathA, ' \n');
+  writeFileSync(pathB, 'export const newRootOnly = 1;\n');
+  const registry = makeRegistry(rootA);
+  const { provider } = makeProvider('empty-reroot');
+  registry.register(provider, { makeDefault: true });
+  const store = new CodeIndexStore(rootA, ':memory:', registry);
+  await store.init();
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const original = findFiles.readTextFile;
+  const reading = spyOn(findFiles, 'readTextFile').mockImplementation(async (...args) => {
+    const text = await original(...args);
+    if (args[0] === pathA) { started.resolve(); await release.promise; }
+    return text;
+  });
+  let pending: ReturnType<CodeIndexStore['reindexFile']> | undefined;
+  try {
+    pending = store.reindexFile(pathA);
+    await started.promise;
+    await store.reroot(rootB, ':memory:');
+    expect((await store.reindexFile(pathB)).indexed).toBe(true);
+    const chunks = store.stats().indexedChunks;
+    expect(chunks).toBeGreaterThan(0);
+    const hashes = spyOn(crypto, 'createHash');
+    try {
+      release.resolve();
+      expect(await pending).toEqual({ indexed: false, mode: 'empty' });
+      expect(hashes).toHaveBeenCalledTimes(0);
+      expect(store.stats().indexedChunks).toBe(chunks);
+    } finally { hashes.mockRestore(); }
+  } finally {
+    release.resolve();
+    await pending;
+    reading.mockRestore();
+    store.close();
+  }
 });

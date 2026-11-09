@@ -49,6 +49,8 @@ import type { RuntimeServices } from '../../runtime/services.ts';
 export interface DaemonGatewayCatalogOptions {
   /** Override the conversation port; defaults to this process's live registry. */
   readonly conversationRewindPort?: Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['conversationRewindPort'];
+  /** Own resources composed by this fixture catalog, separately from its runtime graph. */
+  readonly disposal?: Parameters<typeof attachWsOnlyGatewayVerbHandlers>[1]['disposal'];
 }
 
 /**
@@ -69,10 +71,12 @@ export function buildDaemonGatewayCatalog(
   // `principals.list` would read an empty registry and the round-trip a suite
   // is asserting would never be observable.
   const existing = cached.get(services);
-  if (existing && options.conversationRewindPort === undefined) return existing;
+  const cacheable = options.conversationRewindPort === undefined && options.disposal === undefined;
+  if (existing && cacheable) return existing;
   const catalog = new GatewayMethodCatalog();
   const view = services.asDaemonGradeView();
   attachWsOnlyGatewayVerbHandlers(catalog, {
+    ...(options.disposal ? { disposal: options.disposal } : {}),
     // Platform runtime 2.0.8: the control-plane store resolver refuses a blank
     // surface segment, so this helper names its surface like any host.
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
@@ -100,6 +104,6 @@ export function buildDaemonGatewayCatalog(
     workingDirectory: services.workingDirectory,
     conversationRewindPort: options.conversationRewindPort ?? createSessionConversationRewindPort(),
   });
-  if (options.conversationRewindPort === undefined) cached.set(services, catalog);
+  if (cacheable) cached.set(services, catalog);
   return catalog;
 }

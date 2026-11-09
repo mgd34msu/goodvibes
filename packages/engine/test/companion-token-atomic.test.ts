@@ -114,7 +114,7 @@ describe('companion token atomic publication', () => {
     const failure = new Error(`Owned synthetic ${phase} failure`);
     const fail = () => { throw failure; };
     const operation = phase === 'fsync' ? spyOn(fs, 'fsyncSync').mockImplementation(fail)
-      : phase === 'chmod' ? spyOn(fs, 'chmodSync').mockImplementation(fail)
+      : phase === 'chmod' ? spyOn(fs, 'fchmodSync').mockImplementation(fail)
         : spyOn(fs, 'renameSync').mockImplementation(fail);
     let error: Error;
     try {

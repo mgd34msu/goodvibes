@@ -103,12 +103,24 @@ async function createRuntimeFixture(prefix: string) {
   runtimeServices.distributedRuntime.waiters.clear();
   runtimeServices.distributedRuntime.loaded = true;
   runtimeServices.remoteRunnerRegistry.clear();
+  let closing: Promise<void> | undefined;
   return {
     tempRoot,
     runtimeBus,
     runtimeServices,
-    dispose(): void {
-      rmSync(tempRoot, { recursive: true, force: true });
+    dispose(stopListener?: () => Promise<void>): Promise<void> {
+      if (closing) return closing;
+      closing = (async () => {
+        const failures: unknown[] = [];
+        // DaemonServer borrows this graph; stopping its listener cannot close
+        // the fixture-owned pollers or their accepted background work.
+        try { await stopListener?.(); } catch (error) { failures.push(error); }
+        try { await runtimeServices.close(); } catch (error) { failures.push(error); }
+        try { await runtimeServices.workspaceCheckpointManager.drain(); } catch (error) { failures.push(error); }
+        if (failures.length) throw new AggregateError(failures, 'Transport fixture teardown failed');
+        rmSync(tempRoot, { recursive: true, force: true });
+      })();
+      return closing;
     },
   };
 }
@@ -160,7 +172,7 @@ async function createDirectHarness(): Promise<TransportHarness> {
       }));
     },
     dispose: async () => {
-      fixture.dispose();
+      await fixture.dispose();
     },
   };
 }
@@ -240,8 +252,7 @@ async function createRemoteHarness(kind: 'http' | 'realtime'): Promise<Transport
       }));
     },
     dispose: async () => {
-      await daemon.stop();
-      fixture.dispose();
+      await fixture.dispose(() => daemon.stop());
     },
   };
 }
@@ -249,10 +260,9 @@ async function createRemoteHarness(kind: 'http' | 'realtime'): Promise<Transport
 const activeDisposers: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
-  while (activeDisposers.length > 0) {
-    const dispose = activeDisposers.pop();
-    if (dispose) await dispose();
-  }
+  const outcomes = await Promise.allSettled(activeDisposers.splice(0).reverse().map(dispose => dispose()));
+  const failures = outcomes.flatMap(outcome => outcome.status === 'rejected' ? [outcome.reason] : []);
+  if (failures.length) throw new AggregateError(failures, 'Transport harness teardown failed');
 });
 
 describe('transport parity gate', () => {

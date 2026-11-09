@@ -179,14 +179,14 @@ describe('required metadata checks and advisory editorial readings', () => {
   test('a missing required document still fails the separate documentation gate', () => {
     const result = run('docs-completeness-check.ts');
     expect(result.exitCode).not.toBe(0);
-    expect(result.output).toContain('Missing required platform doc/example: ../../SECURITY.md');
+    expect(result.output).toContain('Missing required engine doc/example: ../../SECURITY.md');
   });
 
   test('an empty required document still fails the separate documentation gate', () => {
     write('SECURITY.md', ' \n\t');
     const result = run('docs-completeness-check.ts');
     expect(result.exitCode).not.toBe(0);
-    expect(result.output).toContain('Empty required platform doc/example: ../../SECURITY.md');
+    expect(result.output).toContain('Empty required engine doc/example: ../../SECURITY.md');
   });
 
   test('an omitted generated type re-export still fails after README validation', () => {

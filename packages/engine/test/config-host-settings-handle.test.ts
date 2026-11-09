@@ -232,11 +232,17 @@ test('failed privacy refresh does not replace the original write error and revok
   changes.length = 0; events.length = 0;
   const directory = dirname(config.getProjectConfigPath()!);
   const original = new Error('Synthetic original write failure');
-  const writer = spyOn(atomicJson, 'writeJsonFileAtomic').mockImplementation(() => { throw original; });
-  chmodSync(directory, 0);
+  const writer = spyOn(atomicJson, 'writeJsonFileAtomic').mockImplementation(() => {
+    // Admission must read the original settings before the write can fail.
+    // Retire readability at that actual write boundary, so the subsequent
+    // privacy refresh also fails instead of preempting the original error.
+    chmodSync(directory, 0);
+    throw original;
+  });
   let caught: unknown;
   try {
     try { first.setProjectValue(true); } catch (error) { caught = error; }
+    expect(writer).toHaveBeenCalledTimes(1);
     expect(caught).toBe(original);
     expect([first.get(), second.get()]).toEqual([true, true]);
     expect(changes).toEqual([[FIRST, false, true], [SECOND, false, true]]);

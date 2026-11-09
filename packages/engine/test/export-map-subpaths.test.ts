@@ -72,7 +72,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
 
   for (const [subpath, expectedExports] of Object.entries(SUBPATH_SURFACE)) {
     test(`${subpath} is declared in the exports map with its module target`, () => {
-      const entry = manifest.exports[`./sdk${subpath.slice(1)}`];
+      const entry = manifest.exports[`./platform${subpath.slice(1)}`];
       expect(entry).toBeDefined();
       expect(entry).toEqual(conditions(subpath.slice(1)));
     });
@@ -87,7 +87,7 @@ describe('export-map subpath resolution (committed manifest)', () => {
 
   for (const [subpath, expectedExports] of Object.entries(DIR_SUBPATH_SURFACE)) {
     test(`${subpath} is declared in the exports map with an index-shaped module target`, () => {
-      const entry = manifest.exports[`./sdk${subpath.slice(1)}`];
+      const entry = manifest.exports[`./platform${subpath.slice(1)}`];
       expect(entry).toBeDefined();
       expect(entry).toEqual(conditions(`${subpath.slice(1)}/index`));
     });

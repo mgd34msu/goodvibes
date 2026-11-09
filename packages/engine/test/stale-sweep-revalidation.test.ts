@@ -10,15 +10,15 @@ function fixture(prefix = 'observe-proof-scratch-') {
   const path = join(root, `${prefix}candidate`); mkdirSync(path);
   const marker = () => { const identity = lstatSync(path); writeFileSync(join(path, '.goodvibes-test-owner.json'), JSON.stringify({ version: 1, pid: 2147483647, dev: identity.dev, ino: identity.ino })); };
   const age = () => { const old = new Date(Date.now() - 120_000); utimesSync(path, old, old); };
-  if (prefix === 'goodvibes-platform-testrun-' || prefix === 'goodvibes-test-heartbeat-') marker(); age();
+  if (prefix === 'goodvibes-testrun-' || prefix === 'goodvibes-test-heartbeat-') marker(); age();
   return { root, path, prefix, marker, age };
 }
-for (const prefix of ['observe-proof-scratch-', 'goodvibes-platform-testrun-', 'goodvibes-test-heartbeat-']) {
+for (const prefix of ['observe-proof-scratch-', 'goodvibes-testrun-', 'goodvibes-test-heartbeat-']) {
   test(`replacement directory survives preservation inspection (${prefix})`, () => {
     const f = fixture(prefix); const held = join(f.root, 'held-original');
     sweepStaleTmpDirs(f.root, prefix, 60_000, { preserve(path) {
       renameSync(path, held); mkdirSync(path); writeFileSync(join(path, 'foreign'), 'keep');
-      if (prefix === 'goodvibes-platform-testrun-' || prefix === 'goodvibes-test-heartbeat-') f.marker(); f.age(); return false;
+      if (prefix === 'goodvibes-testrun-' || prefix === 'goodvibes-test-heartbeat-') f.marker(); f.age(); return false;
     } });
     expect(readFileSync(join(f.path, 'foreign'), 'utf8')).toBe('keep'); expect(existsSync(held)).toBe(true);
   });
@@ -36,7 +36,7 @@ for (const marker of ['.git', '.retain', '.keep-proof-output', 'custom-proof-mar
   });
 }
 test('a now-live owner is preserved even when the directory identity and old mtime remain', () => {
-  const f = fixture('goodvibes-platform-testrun-');
+  const f = fixture('goodvibes-testrun-');
   sweepStaleTmpDirs(f.root, f.prefix, 60_000, { preserve(path) {
     const identity = lstatSync(path); writeFileSync(join(path, '.goodvibes-test-owner.json'), JSON.stringify({ version: 1, pid: process.pid, dev: identity.dev, ino: identity.ino })); f.age(); return false;
   } });
@@ -53,7 +53,7 @@ test('unchanged stale candidate remains reclaimable after preservation inspectio
   expect(inspected).toBe(1); expect(existsSync(f.path)).toBe(false);
 });
 
-for (const prefix of ['goodvibes-platform-testrun-', 'goodvibes-test-heartbeat-']) {
+for (const prefix of ['goodvibes-testrun-', 'goodvibes-test-heartbeat-']) {
   for (const mutation of ['missing', 'malformed', 'wrong-identity', 'live'] as const) {
     test(`changed ${mutation} ownership survives preservation inspection (${prefix})`, () => {
       const f = fixture(prefix);

@@ -1,7 +1,7 @@
 // Tests for JsonFileStore
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { JsonFileStore } from '@goodvibes-jev/engine/platform/platform/state';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeProjectTempDir } from './_helpers/project-temp.ts';
 
@@ -45,11 +45,12 @@ describe('JsonFileStore', () => {
     expect(data).toEqual({ foo: 'bar' });
   });
 
-  it('load returns null for invalid JSON file', async () => {
+  it('load refuses invalid JSON without replacing the original bytes', async () => {
     const filePath = `${tempDir}/invalid.json`;
     await writeTempFile(tempDir, 'invalid.json', '{ not: valid json }');
     const store = new JsonFileStore<unknown>(filePath);
-    await expect(store.load()).rejects.toThrow('JsonFileStore failed to load');
+    await expect(store.load()).rejects.toMatchObject({ name: 'JsonFileStoreParseError', message: 'JsonFileStore original source is not valid JSON.' });
+    expect(readFileSync(filePath, 'utf8')).toBe('{ not: valid json }');
   });
 
   it('save writes data atomically and creates directory', async () => {

@@ -43,6 +43,7 @@ import { dirname, join } from 'node:path';
 import { makeProjectTempDir } from '../helpers/project-temp.ts';
 import { ConfigManager } from '@goodvibes-jev/engine/platform/platform/config';
 import { RuntimeEventBus } from '@/runtime/index.ts';
+import { createDisposalScope } from '@goodvibes-jev/engine/platform/platform/runtime';
 import { createRuntimeStore } from '../../runtime/store/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 import { createAgentProfileTool, registerAgentProfileTool } from '../../tools/agent-profile-tool.ts';
@@ -63,6 +64,7 @@ goes by: Mike
 `;
 
 const roots: string[] = [];
+const closeFixtures: Array<() => Promise<void>> = [];
 
 interface LiveProfile {
   readonly tool: Tool;
@@ -115,9 +117,14 @@ async function liveProfile(): Promise<LiveProfile> {
     homeDirectory: root,
     getConversationTitle: () => 'profile-live',
   });
+  const catalogScope = createDisposalScope('profile live fixture catalog');
+  closeFixtures.push(async () => {
+    catalogScope.dispose();
+    await services.close();
+  });
 
   const invoke = createProfileGatewayInvoke({
-    gatewayMethods: buildDaemonGatewayCatalog(services), configManager, homeDirectory: root,
+    gatewayMethods: buildDaemonGatewayCatalog(services, { disposal: catalogScope.registry }), configManager, homeDirectory: root,
   });
   const raw = createAgentProfileTool({ invoke });
   const tool: Tool = { definition: raw.definition, async execute(args, options) {
@@ -168,7 +175,10 @@ async function liveProfile(): Promise<LiveProfile> {
   };
 }
 
-afterEach(() => {
+afterEach(async () => {
+  const drained = await Promise.allSettled(closeFixtures.splice(0).map(close => close()));
+  const failures = drained.flatMap(result => result.status === 'rejected' ? [result.reason] : []);
+  if (failures.length) throw new AggregateError(failures, 'Profile fixture cleanup failed');
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 

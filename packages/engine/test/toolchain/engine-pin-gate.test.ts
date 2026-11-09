@@ -99,7 +99,7 @@ describe('engine-pin-gate', () => {
   });
 
   test('escaping into a historical checkout still refuses direct source imports', () => {
-    for (const specifier of ['../../goodvibes/src/index.ts', '../../goodvibes-platform/src/index.ts', '../../shared/goodvibes/src/index.ts']) {
+    for (const specifier of ['../../goodvibes/src/index.ts', '../../goodvibes-sdk/src/index.ts', '../../shared/goodvibes/src/index.ts']) {
       const files = baseFiles('1.10.1');
       files['src/index.ts'] = `import { thing } from '${specifier}';`;
       const gate = runEnginePinGate(fakeFs(files), {}).find(result => result.id === 'npm-specifier-only-imports');

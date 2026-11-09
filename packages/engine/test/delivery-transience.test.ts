@@ -27,6 +27,7 @@ import {
   scheduleAutomationFailureFollowUp,
 } from '../platform/src/platform/automation/manager-runtime-delivery.ts';
 import { AutomationManager } from '../platform/src/platform/automation/manager-runtime.ts';
+import { ownedAutomationJob } from '../platform/src/platform/automation/job-mutations.ts';
 import type { AutomationJob } from '../platform/src/platform/automation/jobs.ts';
 import type { AutomationRun } from '../platform/src/platform/automation/runs.ts';
 import type { AutomationJobStore } from '../platform/src/platform/automation/store/jobs.ts';
@@ -353,7 +354,9 @@ describe('AutomationManager reconcile', () => {
   async function reconcileFailedAgent(agentError: string): Promise<boolean[]> {
     const dir = mkdtempSync(join(tmpdir(), 'gv-transience-'));
     const now = Date.now();
-    const job = makeJob({ execution: { target: { kind: 'background' }, prompt: 'write the digest', maxAttempts: 1 } });
+    // The injected store stands in for load(), which supplies a managed row
+    // with its original writer revision before runtime reconciliation.
+    const job = ownedAutomationJob(makeJob({ execution: { target: { kind: 'background' }, prompt: 'write the digest', maxAttempts: 1 } }), 'delivery-fixture-revision');
     const run = makeRun({ status: 'running', agentId: 'agent-1', startedAt: now - 1_000 });
     const bus = new RuntimeEventBus();
     const retryable: boolean[] = [];

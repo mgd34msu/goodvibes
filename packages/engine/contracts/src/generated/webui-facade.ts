@@ -7233,7 +7233,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "files": [
           "sample"
         ],
-        "nativeRevision": "sample",
+        "nativeRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "unifiedDiff": "sample",
         "stat": "sample"
       }
@@ -7879,7 +7879,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         ],
         "selectedDiffContext": {
           "kind": "session",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "fileIndex": 0,
           "hunkIndex": 0,
           "unifiedDiff": "sample",
@@ -9060,7 +9060,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             ],
             "selectedDiffContext": {
               "kind": "session",
-              "revision": "sample",
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "fileIndex": 0,
               "hunkIndex": 0,
               "unifiedDiff": "sample",
@@ -10258,7 +10258,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           ],
           "selectedDiffContext": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0,
             "unifiedDiff": "sample",
@@ -24872,7 +24872,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "files": [
         "sample"
       ],
-      "nativeRevision": "sample",
+      "nativeRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "unifiedDiff": "sample",
       "stat": "sample"
     }
@@ -28135,10 +28135,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }
@@ -28169,10 +28169,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }
@@ -28189,7 +28189,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sessionId": "sample",
         "selectedDiff": {
           "kind": "session",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "fileIndex": 0,
           "hunkIndex": 0
         }
@@ -28219,10 +28219,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }
@@ -28252,10 +28252,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }
@@ -28286,10 +28286,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }

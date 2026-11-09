@@ -57,6 +57,7 @@ import { registerChannelProfilesGatewayMethods } from '../../platform/src/platfo
 import { registerChannelSyncGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-sync.js';
 import { registerChannelTestGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-test.js';
 import { registerRelayGatewayMethods } from '../../platform/src/platform/control-plane/routes/relay.js';
+import { registerTriggerSupervisorGatewayMethods } from '../../platform/src/platform/control-plane/routes/trigger-supervisor.js';
 import { registerUpdateGatewayMethods } from '../../platform/src/platform/control-plane/routes/update.js';
 import { registerCheckinGatewayMethods } from '../../platform/src/platform/control-plane/routes/checkin.js';
 import { registerCiGatewayMethods } from '../../platform/src/platform/control-plane/routes/ci.js';
@@ -168,6 +169,10 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['skills', (catalog) => registerSkillsGatewayMethods(catalog, stubDeps())],
   ['stepup', (catalog) => registerStepUpGatewayMethods(catalog, stubDeps())],
   ['tailscale', (catalog) => registerTailscaleGatewayMethods(catalog, stubDeps())],
+  ['trigger-supervisor', (catalog) => registerTriggerSupervisorGatewayMethods(catalog, {
+    inspectRecords: () => [], executionOwnership: 'unclaimed',
+    migratePrevious() { throw new Error('The conformance probe must not migrate trigger state.'); },
+  })],
   ['update', (catalog) => registerUpdateGatewayMethods(catalog, stubDeps())],
   ['voice-setup', (catalog) => registerVoiceSetupGatewayMethods(catalog, stubDeps())],
   ['work-ledger', (catalog) => registerWorkLedgerGatewayMethods(catalog, { projectId: 'probe', async readSnapshot() { return { projectId: 'probe', revision: 1, cursor: 1, works: [] }; }, async history() { return []; }, subscribe() { return () => {}; }, dispose() {} })],
@@ -241,6 +246,7 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerSkillsGatewayMethods',
   'registerStepUpGatewayMethods',
   'registerTailscaleGatewayMethods',
+  'registerTriggerSupervisorGatewayMethods',
   'registerUpdateGatewayMethods',
   'registerVoiceSetupGatewayMethods',
   'registerWorkLedgerGatewayMethods',

@@ -4661,7 +4661,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "files": [
           "sample"
         ],
-        "nativeRevision": "sample",
+        "nativeRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "unifiedDiff": "sample",
         "stat": "sample"
       }
@@ -5353,7 +5353,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         ],
         "selectedDiffContext": {
           "kind": "session",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "fileIndex": 0,
           "hunkIndex": 0,
           "unifiedDiff": "sample",
@@ -6536,7 +6536,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ],
             "selectedDiffContext": {
               "kind": "session",
-              "revision": "sample",
+              "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
               "fileIndex": 0,
               "hunkIndex": 0,
               "unifiedDiff": "sample",
@@ -7735,7 +7735,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ],
           "selectedDiffContext": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0,
             "unifiedDiff": "sample",
@@ -22114,7 +22114,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "files": [
         "sample"
       ],
-      "nativeRevision": "sample",
+      "nativeRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "unifiedDiff": "sample",
       "stat": "sample"
     }
@@ -25224,10 +25224,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }
@@ -25260,10 +25260,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }
@@ -25296,10 +25296,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }
@@ -25332,10 +25332,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }
@@ -25368,10 +25368,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "continuation": {
           "version": 2,
           "sessionId": "sample",
-          "revision": "sample",
+          "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "selectedDiff": {
             "kind": "session",
-            "revision": "sample",
+            "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "fileIndex": 0,
             "hunkIndex": 0
           }

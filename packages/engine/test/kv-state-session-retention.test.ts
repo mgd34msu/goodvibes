@@ -19,7 +19,7 @@
  * already-reaped directory is a no-op.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -306,16 +306,20 @@ describe('KVState session-file retention: the reap that now actually runs', () =
 describe('KVState session-file reads: validated by content, not existence', () => {
   test('a torn (truncated) session file is rejected, not served as state', async () => {
     const stateDir = tempDir('torn');
-    writeFileSync(join(stateDir, 'session_1234abcd.json'), '{"id":"1234abcd","star', 'utf-8');
+    const file = join(stateDir, 'session_1234abcd.json'), original = '{"id":"1234abcd","star';
+    writeFileSync(file, original, 'utf-8');
 
-    await expect(kvState({ stateDir, sessionId: '1234abcd' }).load()).rejects.toThrow('JsonFileStore failed to load');
+    await expect(kvState({ stateDir, sessionId: '1234abcd' }).load()).rejects.toMatchObject({ name: 'JsonFileStoreParseError', message: 'JsonFileStore original source is not valid JSON.' });
+    expect(readFileSync(file, 'utf8')).toBe(original);
   });
 
   test('a zero-byte session file is rejected, not served as an empty session', async () => {
     const stateDir = tempDir('zero-byte');
-    writeFileSync(join(stateDir, 'session_1234abcd.json'), '', 'utf-8');
+    const file = join(stateDir, 'session_1234abcd.json');
+    writeFileSync(file, '', 'utf-8');
 
-    await expect(kvState({ stateDir, sessionId: '1234abcd' }).load()).rejects.toThrow('JsonFileStore failed to load');
+    await expect(kvState({ stateDir, sessionId: '1234abcd' }).load()).rejects.toMatchObject({ name: 'JsonFileStoreParseError', message: 'JsonFileStore original source is not valid JSON.' });
+    expect(readFileSync(file, 'utf8')).toBe('');
   });
 
   for (const [label, body] of [

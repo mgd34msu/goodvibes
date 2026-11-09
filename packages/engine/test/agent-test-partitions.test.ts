@@ -478,7 +478,7 @@ test('settled owner diagnostics refuse a replaced native log before replay or ar
     import {join} from 'node:path';
     test(${JSON.stringify(file)},()=>{
       expect(process.env.GITHUB_OUTPUT).toBeUndefined();
-      ${file === catalogs[0] ? `const names=readdirSync(${JSON.stringify(nativeTmpParent)}).filter(name=>name.startsWith('goodvibes-platform-testrun-'+process.ppid+'-')&&existsSync(join(${JSON.stringify(nativeTmpParent)},name,'owner-1.log')));
+      ${file === catalogs[0] ? `const names=readdirSync(${JSON.stringify(nativeTmpParent)}).filter(name=>name.startsWith(${JSON.stringify(RUN_TMP_PREFIX)}+process.ppid+'-')&&existsSync(join(${JSON.stringify(nativeTmpParent)},name,'owner-1.log')));
         expect(names).toHaveLength(1);const path=join(${JSON.stringify(nativeTmpParent)},names[0]!,'owner-1.log');renameSync(path,path+'.original');symlinkSync(${JSON.stringify(peer)},path);` : ''}
     });
   `);
@@ -516,7 +516,7 @@ test('owner-log replay pins original files across awaited headers and closes eve
       const originalWrite=process.stdout.write.bind(process.stdout);let replaced=false;
       process.stdout.write=(...args)=>{
         if(!replaced&&(typeof args[0]==='string'?args[0]:new TextDecoder().decode(args[0])).includes('[test-owner 1/2]')){
-          const names=readdirSync(${JSON.stringify(nativeTmp)}).filter(name=>name.startsWith('goodvibes-platform-testrun-'+process.pid+'-')&&existsSync(join(${JSON.stringify(nativeTmp)},name,'owner-2.log')));
+          const names=readdirSync(${JSON.stringify(nativeTmp)}).filter(name=>name.startsWith(${JSON.stringify(RUN_TMP_PREFIX)}+process.pid+'-')&&existsSync(join(${JSON.stringify(nativeTmp)},name,'owner-2.log')));
           if(names.length!==1)throw new Error('Expected one actual parent-owned log root');
           const path=join(${JSON.stringify(nativeTmp)},names[0],'owner-2.log');
           renameSync(path,path+'.original');

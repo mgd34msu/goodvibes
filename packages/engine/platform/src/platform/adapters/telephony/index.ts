@@ -38,6 +38,7 @@ function twilioSignatureBaseString(url: string, rawBody: string, req: Request, b
   const parsedUrl = new URL(url);
   const bodyHash = parsedUrl.searchParams.get('bodySHA256');
   if (bodyHash) {
+    if (bodyHash.length !== 64 || !/^[a-f0-9]{64}$/i.test(bodyHash)) return null;
     const expectedHash = bodyDigest();
     if (!constantTimeEquals(expectedHash, bodyHash.toLowerCase())) return null;
     return url;
@@ -56,11 +57,14 @@ function verifyTwilioSignature(
   authToken: string,
   signature: string,
 ): boolean {
-  if (!authToken || !signature) return false;
+  // HMAC-SHA1 is exactly 20 bytes in Twilio's canonical base64 encoding.
+  // The final sextet has two zero padding bits; impossible signatures cannot
+  // consume either body SHA256 or URL authentication work.
+  if (!authToken || signature.length !== 28 || !/^[A-Za-z0-9+/]{26}[AEIMQUYcgkosw048]=$/.test(signature)) return false;
   // Twilio's JSON webhook protocol requires the bodySHA256 query commitment in
   // the signed URL. Hash this request body once even when its internal and
-  // configured public URLs both need signature verification. Form bodies do
-  // not use this digest. This is protocol verification, not a local identity.
+  // configured public URLs both need signature verification. Form requests
+  // without bodySHA256 do not hash. This verifies the external protocol.
   let digest: string | undefined;
   const bodyDigest = () => digest ??= createHash('sha256').update(rawBody).digest('hex');
   for (const url of signatureCandidateUrls(req, context)) {

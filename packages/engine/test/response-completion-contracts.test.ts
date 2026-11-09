@@ -267,11 +267,12 @@ test('the exact recorded Jev content review is bound to the saved answer and an 
   expect(completedContractEvidence({ list: () => [contract({ decisions: [{ ...decision, reason: 'invalid JSON' }] })] }, 'session')[0]!.contentReview).toBeNull();
 });
 
-test('original-obligation coverage retains exact source, answer and host call provenance', () => {
+test.each([1, 2] as const)('original-obligation coverage v%s retains exact source, answer and host call provenance', schemaVersion => {
   const source = contract();
-  const receipt = { schemaVersion: 1, passed: true, policy: { name: 'contract.original-obligation-coverage', version: 1 },
+  const receipt = { schemaVersion, passed: true, policy: { name: 'contract.original-obligation-coverage', version: schemaVersion },
     sourceDigest: hashState(originalObligationSource(source)), outputDigest: hashState(source.answer!),
-    evidenceDigest: hashState('actual primary evidence'), stateHash: hashState('actual original coverage request'),
+    ...(schemaVersion === 1 ? { evidenceDigest: hashState('actual primary evidence') } : {}),
+    stateHash: hashState('actual original coverage request'),
     reading: { probability: 0.03, verdict: 'no', outcome: 'act' }, decisionIds: ['actual-original-coverage'] };
   const decision = { id: 'work.d3', targetId: 'work.original-obligations', reason: JSON.stringify(receipt), decisionIds: [...receipt.decisionIds] };
   const content = approvedWork()[0]!.contentReview!.record;
@@ -289,6 +290,13 @@ test('original-obligation coverage retains exact source, answer and host call pr
   const copied = completedContractEvidence({ list: () => [saved] }, 'session', '/project')[0]!;
   expect(isNativeCompletedWorkReceipt(copied, copied)).toBe(true);
   expect(isNativeCompletedWorkReceipt(structuredClone(copied), copied)).toBe(false);
+  for (const invalid of [{ ...receipt, schemaVersion: 3 },
+    ...(schemaVersion === 2 ? [{ ...receipt, evidenceDigest: hashState('removed decorative field') }] : [])]) {
+    const malformed = contract({ ...saved, decisions: [contentDecision, { ...decision, reason: JSON.stringify(invalid) }] });
+    const observation = completedContractEvidence({ list: () => [malformed] }, 'session', '/project')[0]!;
+    expect(observation.originalObligationCoverage!.wellFormed).toBe(false);
+    expect(isNativeCompletedWorkReceipt(observation, observation)).toBe(false);
+  }
   const legacy = { ...approvedWork()[0]!.goalCoverage!.record, literalSourceDigest: hashState(goalObligationSource(saved)) };
   const legacyDecision = { id: 'work.d2', targetId: 'work.goal-obligations', reason: JSON.stringify(legacy) };
   for (const reason of [JSON.stringify({ ...receipt, passed: false, reading: { probability: 0.98, verdict: 'yes', outcome: 'act' } }), 'invalid JSON']) {

@@ -4,6 +4,10 @@
 
 ### Fixed
 
+- Recognize the current original-obligation completion receipt when reporting
+  completed work. Keep earlier receipt checks and refuse mixed or unknown formats
+  instead of falling back to a weaker saved review.
+
 - Hold knowledge extraction when caller or retained restrictions return a
   promise or another value. Observe rejected work without treating it as
   permission, and recheck restrictions after the readability model returns.

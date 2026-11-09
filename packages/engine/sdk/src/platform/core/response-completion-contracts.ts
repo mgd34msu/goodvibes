@@ -43,7 +43,9 @@ function recordedReview(contract: ContractView, target: 'final-answer-review' | 
           && version(policy.fulfillment) && version(policy.content) && ['high', 'critical'].includes(String(policy.stakes))
           && object(record.readings) && reading(record.readings.unfinished) && reading(record.readings.unsupported)
         : target === 'original-obligations'
-          ? record.schemaVersion === 1 && version(policy) && digest(record.sourceDigest) && digest(record.evidenceDigest)
+          ? ((record.schemaVersion === 1 && digest(record.evidenceDigest))
+              || (record.schemaVersion === 2 && !Object.hasOwn(record, 'evidenceDigest')))
+            && version(policy) && digest(record.sourceDigest)
             && object(record.reading) && reading(record.reading) && record.passed === (record.reading.verdict === 'no')
             && ids(decision.decisionIds) && JSON.stringify(record.decisionIds) === JSON.stringify(decision.decisionIds)
             && decision.decisionIds.every(id => contract.checks.at(-1)?.decisionIds.includes(id))

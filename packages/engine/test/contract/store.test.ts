@@ -4,7 +4,7 @@
  * contract without force.
  */
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, linkSync, symlinkSync, readdirSync, readFileSync, renameSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ContractEvent } from '../../sdk/src/events/contract.js';
@@ -42,6 +42,16 @@ afterEach(() => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+function withDeadWriter<T>(operation: () => T): T {
+  const original = process.kill;
+  const probe = spyOn(process, 'kill').mockImplementation((pid, signal) => {
+    if (pid === 999) throw Object.assign(new Error('fixture dead writer'), { code: 'ESRCH' });
+    if (pid === 998) throw Object.assign(new Error('fixture inaccessible writer'), { code: 'EPERM' });
+    return original(pid, signal);
+  });
+  try { return operation(); } finally { probe.mockRestore(); }
+}
 
 function envelope(contract: unknown, schemaVersion = 1, writtenAt = 5): string {
   return JSON.stringify({ schemaVersion, writtenAt, contract });
@@ -146,7 +156,7 @@ describe('checkpoint namespaces', () => {
     const stale = [oldPath, contractPath(root, contract.id)].map(path => `${path}.tmp-999-1-deadbeef`);
     const past = new Date(Date.now() - 2 * 60 * 60 * 1000);
     for (const path of stale) { writeFileSync(path, '{}'); utimesSync(path, past, past); }
-    expect(store.reap().staleTempRemoved).toBe(2);
+    expect(withDeadWriter(() => store.reap()).staleTempRemoved).toBe(2);
     expect(readFileSync(oldPath, 'utf8')).toBe(old);
     expect(storeAt(root).load(contract.id)?.goal).toBe('new');
   });
@@ -190,11 +200,25 @@ describe('atomic write', () => {
     writeFileSync(fresh, '{"partial', 'utf-8');
     const now = Date.now();
     utimesSync(stale, new Date(now - 2 * 60 * 60 * 1000), new Date(now - 2 * 60 * 60 * 1000));
-    const summary = storeAt(root, now).reap();
+    const summary = withDeadWriter(() => storeAt(root, now).reap());
     expect(summary.staleTempRemoved).toBe(1);
     expect(existsSync(stale)).toBe(false);
     expect(existsSync(fresh)).toBe(true);
     expect(existsSync(path)).toBe(true);
+  });
+
+  test('age alone never reaps a live, inaccessible, foreign-named or aliased temporary file', () => {
+    const root = tempRoot(), contract = makeContract(), path = writeRaw(root, contract.id, envelope(contract));
+    const dead = `${path}.tmp-999-1-deadbeef`, live = `${path}.tmp-${process.pid}-1-feedface`, inaccessible = `${path}.tmp-998-1-feedface`;
+    const foreign = `${path}.tmp-999-manual-backup`, unrelated = join(contractCheckpointsDir(root), 'notes.json.tmp-999-1-deadbeef');
+    const hardlink = `${path}.tmp-999-2-deadbeef`, alias = `${path}.tmp-999-3-deadbeef`, original = join(root, 'original-temp-body');
+    for (const file of [dead, live, inaccessible, foreign, unrelated, original]) writeFileSync(file, 'kept');
+    linkSync(original, hardlink); symlinkSync(original, alias);
+    const now = Date.now(), old = new Date(now - 2 * 60 * 60 * 1000);
+    for (const file of [dead, live, inaccessible, foreign, unrelated, hardlink]) utimesSync(file, old, old);
+    const summary = withDeadWriter(() => storeAt(root, now).reap());
+    expect(summary.staleTempRemoved).toBe(1); expect(existsSync(dead)).toBe(false);
+    for (const file of [live, inaccessible, foreign, unrelated, hardlink, alias, original]) expect(readFileSync(file, 'utf8')).toBe('kept');
   });
 
   test('no contract id can name a path outside the contract directory', () => {

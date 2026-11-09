@@ -659,39 +659,55 @@ export function quarantineCorruptFile(filePath: string, options: QuarantineOptio
   });
 }
 
-/** Reclaim only aged native temporary files whose recorded writer is proven
- * dead. Hold the original directory and exact regular-file metadata through
- * unlink; a live, inaccessible, unknown, aliased or replaced source is retained. */
-function cleanupStaleTempFiles(dir: string, filePath: string, assertCurrent: () => void, onEffect: (() => void) | undefined): void {
+/** Reclaim only an aged, recognized native temp whose recorded writer is
+ * proven dead. Return its bytes only after exact physical deletion. */
+function cleanupStaleTempFile(dir: string, filePath: string, name: string, staleBefore: number,
+  assertCurrent: () => void, onEffect: (() => void) | undefined): number | undefined {
   const prefix = `${basename(filePath)}.tmp-`;
+  if (basename(name) !== name || !name.startsWith(prefix)) return undefined;
+  // Current writer PID/sequence/UUID suffix, or the actual earlier PID-only
+  // format. A coincidental '.json.tmp-' substring is not a native receipt.
+  const writer = /^([1-9]\d*)(?:-[0-9a-z]+-[0-9a-f]{8})?$/.exec(name.slice(prefix.length));
+  if (!writer) return undefined;
+  const pid = Number(writer[1]); if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
+  try { process.kill(pid, 0); return undefined; }
+  catch (error) { if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ESRCH') return undefined; }
+  const stalePath = join(dir, name); assertCurrent();
+  let before: BigIntStats;
+  try { before = lstatSync(stalePath, { bigint: true }); } catch { return undefined; }
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || Number(before.mtimeMs) > staleBefore
+    || (process.geteuid && before.uid !== BigInt(process.geteuid()))) return undefined;
+  assertCurrent();
+  try {
+    const after = lstatSync(stalePath, { bigint: true });
+    if (atomicFileStamp(after) !== atomicFileStamp(before)) return undefined;
+    unlinkSync(stalePath);
+  } catch { return undefined; } // Unknown ownership/replacement retains the source.
+  onEffect?.(); // A failed owner notification is never an optional GC miss.
+  logger.warn('[atomic-json-store] removed a stale temp file left by a dead writer', { filePath, stalePath, ageMs: Math.max(0, Date.now() - Number(before.mtimeMs)) });
+  return Number(before.size);
+}
+
+/** Explicit housekeeping uses the same native writer identity policy as an
+ * atomic publication. Inspect one listed candidate, without rescanning the
+ * directory per contract or creating a missing directory. */
+export function reapOwnedAtomicTempFile(filePath: string, temporaryName: string, options: {
+  readonly now?: number;
+  readonly minimumAgeMs?: number;
+} = {}): number | undefined {
+  const now = options.now ?? Date.now(), minimumAge = Math.max(STALE_TEMP_FILE_MIN_AGE_MS, options.minimumAgeMs ?? STALE_TEMP_FILE_MIN_AGE_MS);
+  if (!Number.isFinite(now) || !Number.isFinite(minimumAge)) throw new Error('Invalid atomic temporary-file cleanup clock');
+  const absolute = isAbsolute(filePath) ? filePath : `${process.cwd()}${sep}${filePath}`;
+  const parent = prepareAtomicDirectory(dirname(absolute), () => {}, undefined, false);
+  parent.assertCurrent();
+  return cleanupStaleTempFile(parent.canonical, join(parent.canonical, basename(absolute)), temporaryName, now - minimumAge, () => parent.assertCurrent(), undefined);
+}
+
+/** Opportunistic publication cleanup shares the same closed leaf selector. */
+function cleanupStaleTempFiles(dir: string, filePath: string, assertCurrent: () => void, onEffect: (() => void) | undefined): void {
   let names: string[]; try { names = readdirSync(dir); } catch { return; }
   const staleBefore = Date.now() - STALE_TEMP_FILE_MIN_AGE_MS;
-  for (const name of names) {
-    if (!name.startsWith(prefix)) continue;
-    const writer = /^([1-9]\d*)(?:-|$)/.exec(name.slice(prefix.length));
-    if (!writer) continue;
-    const pid = Number(writer[1]); if (!Number.isSafeInteger(pid) || pid <= 0) continue;
-    try { process.kill(pid, 0); continue; }
-    catch (error) { if (!error || typeof error !== 'object' || !('code' in error) || error.code !== 'ESRCH') continue; }
-    const stalePath = join(dir, name); assertCurrent();
-    let before: BigIntStats;
-    try { before = lstatSync(stalePath, { bigint: true }); } catch { continue; }
-    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || Number(before.mtimeMs) > staleBefore
-      || (process.geteuid && before.uid !== BigInt(process.geteuid()))) continue;
-    // Permission/source failures abort the publication; they are not swallowed
-    // as an optional failure to inspect one stale candidate.
-    assertCurrent();
-    let removed = false;
-    try {
-      const after = lstatSync(stalePath, { bigint: true });
-      if (atomicFileStamp(after) !== atomicFileStamp(before)) continue;
-      unlinkSync(stalePath); removed = true;
-    } catch { /* Unknown ownership or replacement leaves the source untouched. */ }
-    if (removed) {
-      onEffect?.(); // A failed owner notification is never an optional GC miss.
-      logger.warn('[atomic-json-store] removed a stale temp file left by a dead writer', { filePath, stalePath, ageMs: Math.max(0, Date.now() - Number(before.mtimeMs)) });
-    }
-  }
+  for (const name of names) cleanupStaleTempFile(dir, filePath, name, staleBefore, assertCurrent, onEffect);
 }
 
 /**

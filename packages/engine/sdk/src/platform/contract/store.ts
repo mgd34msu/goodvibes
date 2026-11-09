@@ -20,7 +20,7 @@ import type { ContractEvent } from '../../events/contract.js';
 import { CONTRACT_STATUSES } from '../../events/contract.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { writeFileAtomic } from '../utils/atomic-json-store.js';
+import { reapOwnedAtomicTempFile, writeFileAtomic } from '../utils/atomic-json-store.js';
 import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { contractWithStoredReviewObservations, hydrateStoredReviewObservations } from './review-file-observations.js';
@@ -487,16 +487,12 @@ export class ContractStore {
     for (const { dir, entry } of entries) {
       const path = join(dir, entry);
       if (entry.includes(TEMP_MARKER)) {
-        let mtimeMs: number;
+        const target = /^(ctr-[0-9a-f]{8}\.json)\.tmp-/.exec(entry)?.[1];
+        if (target === undefined) continue;
         try {
-          mtimeMs = statSync(path).mtimeMs;
-        } catch {
-          continue;
-        }
-        if (now - mtimeMs > STALE_TEMP_MAX_AGE_MS) {
-          bytesReclaimed += removeFile(path);
-          if (!existsSync(path)) staleTempRemoved += 1;
-        }
+          const removed = reapOwnedAtomicTempFile(join(dir, target), entry, { now, minimumAgeMs: STALE_TEMP_MAX_AGE_MS });
+          if (removed !== undefined) { bytesReclaimed += removed; staleTempRemoved += 1; }
+        } catch { /* No proven original directory/writer ownership: preserve it. */ }
         continue;
       }
       if (entry.endsWith(QUARANTINE_SUFFIX)) {

@@ -1,6 +1,5 @@
 """Actual archive collector output is published only after all targets verify."""
 import contextlib
-import hashlib
 import io
 import json
 import os
@@ -18,10 +17,10 @@ class SuiteCollectionOutputs(unittest.TestCase):
         archives = root / 'archives'
         archives.mkdir()
         for target in ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64']:
-            name, payload = f'original-{target}', b'original admitted asset'
+            name, payload = f'original-{target}', b'abc'
             metadata = json.dumps({'sourceCommit': 'b' * 40 if wrong_last and target == 'darwin-arm64' else source,
                                    'tag': 'v3.1.2', 'target': target,
-                                   'files': {name: {'size': len(payload), 'sha256': hashlib.sha256(payload).hexdigest()}}}).encode()
+                                   'files': {name: {'size': len(payload), 'sha256': 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad'}}}).encode()
             with tarfile.open(archives / f'suite-{target}.tgz', 'w:gz') as archive:
                 for entry, body in [(name, payload), (f'suite-release-source-{target}.json', metadata)]:
                     info = tarfile.TarInfo(entry)

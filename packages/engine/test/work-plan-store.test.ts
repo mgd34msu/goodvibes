@@ -26,6 +26,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Write raw bytes at the store's plan path, simulating whatever a crash left behind. */
 function writeRawPlanFile(store: WorkPlanStore, contents: string): void {
+  store.getActivePlan(); // Explicitly activate the actual assignment before injecting a damaged saved file.
   mkdirSync(dirname(store.filePath), { recursive: true });
   writeFileSync(store.filePath, contents, 'utf8');
 }

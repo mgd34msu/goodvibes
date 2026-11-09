@@ -192,7 +192,7 @@ function listOutput(store: WorkPlanStore): string {
   const lines = [
     'Agent local work plan',
     '  Local todos only. Adding or updating does not execute work; local done is not native verified completion.',
-    `  plan ${plan.id}`,
+    plan.registration === 'unregistered' && !plan.id ? '  plan not saved; adding the first item creates it' : `  plan ${plan.id}`,
     `  project ${plan.projectRoot}`,
     `  items ${plan.items.length}; pending ${counts.get('pending') ?? 0}; active ${counts.get('in_progress') ?? 0}; blocked ${counts.get('blocked') ?? 0}; done ${counts.get('done') ?? 0}`,
   ];

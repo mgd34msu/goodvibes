@@ -31,14 +31,24 @@
 // (rename(2)), and unlink races are treated as already-done.
 // ---------------------------------------------------------------------------
 
+import { drainOwned } from '@goodvibes-jev/judgment/decisions';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, renameSync, unlinkSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '../config/atomic-write.js';
 import { requireSurfaceRoot } from '../runtime/surface-root.js';
+import { captureExistingDirectory } from '../utils/atomic-json-store.js';
+import { fileObservationIdentity, readFileObservation } from '../utils/file-observation.js';
 import { resolveWorkPlanLocation } from './work-plan-location.js';
 
 export type WorkPlanEffectOptions = Pick<AtomicWriteOptions, 'assertCurrent' | 'onEffect'>;
+function retainEffects(effects: WorkPlanEffectOptions | undefined): WorkPlanEffectOptions | undefined {
+  if (!effects) return undefined;
+  const current = effects.assertCurrent?.bind(effects), effect = effects.onEffect?.bind(effects);
+  const check = (value: unknown) => { if (value !== undefined) { drainOwned(value); throw new TypeError('Work plan effect callbacks must be synchronous and return no value.'); } };
+  return Object.freeze({ assertCurrent: () => check(current?.()), onEffect: (published?: boolean) => check(effect?.(published)) });
+}
+
 export interface WorkPlanReadOptions { readonly readOnly?: boolean; }
 
 /**
@@ -126,6 +136,8 @@ export interface WorkPlanHousekeeping {
 }
 
 export interface WorkPlan {
+  /** A readonly uninitialized projection has no saved plan ID. */
+  readonly registration?: 'registered' | 'unregistered';
   readonly id: string;
   readonly projectId: string;
   readonly projectRoot: string;
@@ -322,7 +334,14 @@ export function nextWorkPlanStatus(status: WorkPlanItemStatus): WorkPlanItemStat
 }
 
 export class WorkPlanStore {
-  readonly filePath: string;
+  /** Before the first mutation this is a readonly candidate, not an owned
+   * assignment; concurrent publication may select another slot. */
+  get filePath(): string { return this.selectedPath; }
+  private selectedPath: string;
+  private registered: boolean;
+  private locationCurrent: () => void;
+  private locationParentsCurrent: () => void;
+  private planReadCurrent: () => void = () => {};
 
   /**
    * Unix ms of this instance's last quarantine-directory scan. Zero means the
@@ -332,15 +351,15 @@ export class WorkPlanStore {
 
   readonly homeDirectory: string;
   private readonly options: WorkPlanStoreOptions;
-  private readonly newPlanId: string;
-  private readonly unassignedPlanPaths: readonly string[];
+  private newPlanId: string | null;
+  private unassignedPlanPaths: readonly string[];
 
   constructor(options: WorkPlanStoreOptions) {
     this.options = Object.freeze({ ...options });
     this.homeDirectory = options.homeDirectory;
     const directory = join(options.homeDirectory, '.goodvibes', requireSurfaceRoot(options.surfaceRoot), 'work-plans');
-    const assigned = resolveWorkPlanLocation(directory, this.options);
-    this.filePath = assigned.path;
+    const assigned = resolveWorkPlanLocation(directory, this.options, { readOnly: true });
+    this.selectedPath = assigned.path; this.registered = assigned.registered; this.locationCurrent = assigned.assertCurrent; this.locationParentsCurrent = assigned.assertParentsCurrent;
     this.newPlanId = assigned.planId;
     this.unassignedPlanPaths = Object.freeze([...assigned.unassignedPaths]);
   }
@@ -354,6 +373,7 @@ export class WorkPlanStore {
   }
 
   addItem(title: string, options: AddWorkPlanItemOptions = {}, effects?: WorkPlanEffectOptions): WorkPlanItem {
+    effects = retainEffects(effects);
     const normalizedTitle = title.trim();
     if (!normalizedTitle) throw new Error('Work plan item title is required.');
     const plan = this.readPlan(effects);
@@ -380,6 +400,7 @@ export class WorkPlanStore {
   }
 
   updateItem(idOrPrefix: string, patch: UpdateWorkPlanItemPatch, effects?: WorkPlanEffectOptions): WorkPlanItem {
+    effects = retainEffects(effects);
     const plan = this.readPlan(effects);
     const item = this.resolveItem(plan, idOrPrefix);
     const time = nowMs();
@@ -415,6 +436,7 @@ export class WorkPlanStore {
   }
 
   removeItem(idOrPrefix: string, effects?: WorkPlanEffectOptions): WorkPlanItem {
+    effects = retainEffects(effects);
     const plan = this.readPlan(effects);
     const item = this.resolveItem(plan, idOrPrefix);
     const time = nowMs();
@@ -429,6 +451,7 @@ export class WorkPlanStore {
   }
 
   clearCompleted(effects?: WorkPlanEffectOptions): number {
+    effects = retainEffects(effects);
     const plan = this.readPlan(effects);
     const remaining = plan.items.filter((item) => item.status !== 'done' && item.status !== 'cancelled');
     const removed = plan.items.length - remaining.length;
@@ -494,7 +517,12 @@ export class WorkPlanStore {
    * immediately, so the disclosure survives even if the caller only reads.
    */
   private readPlan(effects?: WorkPlanEffectOptions, readOnly = false): WorkPlan {
+    effects?.assertCurrent?.(); this.locationParentsCurrent(); if (this.registered) this.locationCurrent();
+    const directory = join(this.options.homeDirectory, '.goodvibes', requireSurfaceRoot(this.options.surfaceRoot), 'work-plans');
+    const selected = resolveWorkPlanLocation(directory, this.options, { readOnly, assertCurrent: effects?.assertCurrent, onEffect: effects?.onEffect });
     effects?.assertCurrent?.();
+    this.selectedPath = selected.path; this.newPlanId = selected.planId; this.registered = selected.registered; this.locationCurrent = selected.assertCurrent; this.locationParentsCurrent = selected.assertParentsCurrent; this.locationCurrent();
+    this.unassignedPlanPaths = Object.freeze([...selected.unassignedPaths]);
     const loaded = this.loadFromDisk(effects, readOnly);
     const unassigned = this.unassignedPlanPaths.filter(path => existsSync(path));
     const plan = unassigned.length ? { ...loaded.plan, unassignedPlanPaths: unassigned } : loaded.plan;
@@ -512,12 +540,15 @@ export class WorkPlanStore {
   private loadFromDisk(effects?: WorkPlanEffectOptions, readOnly = false): { plan: WorkPlan; recovery: WorkPlanHousekeeping | null } {
     let raw: string;
     try {
-      raw = readFileSync(this.filePath, 'utf8');
+      const parent = captureExistingDirectory(dirname(this.filePath)), source = readFileObservation(this.filePath);
+      this.planReadCurrent = () => { this.locationCurrent(); parent.assertCurrent(); if (fileObservationIdentity(this.filePath) !== source.physical) throw new Error('Original work plan changed before publication.'); };
+      raw = new TextDecoder('utf8', { fatal: true }).decode(source.bytes); this.planReadCurrent();
     } catch (error) {
       // Only absence means an empty plan. An I/O/permission failure must not
       // turn existing work into an empty plan that the next mutation overwrites.
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      return { plan: this.createEmptyPlan(), recovery: null };
+      this.planReadCurrent = () => { this.locationCurrent(); if (lstatSync(this.filePath, { throwIfNoEntry: false })) throw new Error('An unowned work plan appeared before publication.'); };
+      this.planReadCurrent(); return { plan: this.createEmptyPlan(), recovery: null };
     }
     const parsed = parsePlanDocument(raw);
     if (parsed && (('projectId' in parsed && parsed.projectId !== this.options.projectId)
@@ -550,7 +581,7 @@ export class WorkPlanStore {
     const housekeeping = normalizeHousekeeping(parsed.housekeeping);
     return {
       plan: {
-        id: readString(parsed.id) ?? this.newPlanId,
+        id: readString(parsed.id) ?? this.newPlanId ?? '',
         projectId: readString(parsed.projectId) ?? this.options.projectId,
         projectRoot: readString(parsed.projectRoot) ?? this.options.projectRoot,
         title: readString(parsed.title) ?? 'Work Plan',
@@ -634,15 +665,18 @@ export class WorkPlanStore {
    */
   private quarantineUnreadableFile(effects?: WorkPlanEffectOptions): string | undefined {
     const target = `${this.filePath}${QUARANTINE_SUFFIX}${nowMs()}-${randomUUID().slice(0, 8)}`;
-    effects?.assertCurrent?.();
-    try {
-      renameSync(this.filePath, target);
-    } catch {
-      return undefined;
-    }
-    effects?.onEffect?.(true);
+    this.planReadCurrent(); effects?.assertCurrent?.(); this.planReadCurrent();
+    const parent = captureExistingDirectory(dirname(this.filePath)), original = lstatSync(this.filePath, { bigint: true });
+    if (lstatSync(target, { throwIfNoEntry: false })) throw new Error('Work plan recovery path already exists; existing files were left untouched.');
+    renameSync(this.filePath, target);
+    parent.assertCurrent(); const archived = lstatSync(target, { bigint: true });
+    if (archived.dev !== original.dev || archived.ino !== original.ino || archived.birthtimeNs !== original.birthtimeNs
+      || archived.uid !== original.uid || archived.gid !== original.gid) throw new Error('Original work plan recovery ownership changed.');
+    const physical = fileObservationIdentity(target);
+    effects?.onEffect?.(true); parent.assertCurrent();
+    if (fileObservationIdentity(target) !== physical || lstatSync(this.filePath, { throwIfNoEntry: false })) throw new Error('Work plan recovery changed before confirmation.');
+    this.planReadCurrent = () => { this.locationCurrent(); parent.assertCurrent(); if (lstatSync(this.filePath, { throwIfNoEntry: false })) throw new Error('An unowned work plan appeared before publication.'); };
     return target;
-
   }
 
   /**
@@ -691,7 +725,8 @@ export class WorkPlanStore {
   private createEmptyPlan(): WorkPlan {
     const time = nowMs();
     return {
-      id: this.newPlanId,
+      id: this.newPlanId ?? '',
+      registration: this.registered ? 'registered' : 'unregistered',
       projectId: this.options.projectId,
       projectRoot: this.options.projectRoot,
       title: 'Work Plan',
@@ -703,7 +738,16 @@ export class WorkPlanStore {
   }
 
   private writePlan(plan: WorkPlan, effects?: WorkPlanEffectOptions): void {
-    atomicWriteFileSync(this.filePath, `${JSON.stringify(plan, null, 2)}\n`, { ...effects, mkdirp: true });
+    let published = false;
+    const assertCurrent = () => { effects?.assertCurrent?.(); this.locationCurrent(); if (!published) this.planReadCurrent(); };
+    assertCurrent();
+    atomicWriteFileSync(this.filePath, `${JSON.stringify(plan, null, 2)}\n`, { mkdirp: true, assertCurrent,
+      onEffect: flag => { if (flag) published = true; effects?.onEffect?.(flag); },
+    });
+    // Only a fully confirmed publication becomes our reusable read frame. A
+    // failed fsync/observer retains the old frame and propagates uncertainty.
+    const physical = fileObservationIdentity(this.filePath);
+    this.planReadCurrent = () => { this.locationCurrent(); if (fileObservationIdentity(this.filePath) !== physical) throw new Error('Original work plan changed before publication.'); };
   }
 
   private resolveItem(plan: WorkPlan, idOrPrefix: string): WorkPlanItem {

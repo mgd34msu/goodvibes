@@ -123,7 +123,8 @@ describe('exact work-plan project ownership', () => {
       const deadline = Date.now() + 10000;
       while (!existsSync(start)) { if (Date.now() > deadline) throw new Error('Barrier timed out'); await Bun.sleep(10); }
       const store = new WorkPlanStore(JSON.parse(raw));
-      console.log(JSON.stringify({ path: store.filePath, id: store.getActivePlan().id }));`;
+      const plan = store.getActivePlan();
+      console.log(JSON.stringify({ path: store.filePath, id: plan.id }));`;
     const specs = Array.from({ length: 6 }, (_, index) => ({ ...o, projectRoot: index % 2 ? '/projects/other' : o.projectRoot }));
     const ready = specs.map((_, index) => join(o.homeDirectory, `ready-${index}`));
     const children = specs.map((spec, index) => Bun.spawn([process.execPath, '--eval', script, JSON.stringify(spec), ready[index]!, start],
